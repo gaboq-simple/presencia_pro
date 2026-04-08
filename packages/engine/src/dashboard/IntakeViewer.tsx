@@ -5,7 +5,7 @@
 // Shows field labels in Spanish and their values in a clean list.
 // Designed to be embedded inside an AppointmentCard as a collapsible panel.
 
-import type { IntakeData } from './types.js';
+import type { IntakeData } from './types';
 
 type IntakeViewerProps = {
   readonly intake: IntakeData;

@@ -4,7 +4,7 @@
 // INTAKE_SECRET env var must be ≥ 32 characters.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { IntakeToken } from './types.js';
+import type { IntakeToken } from './types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

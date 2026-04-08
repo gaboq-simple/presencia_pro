@@ -3,8 +3,8 @@
 // All operations include client_id in every query — never mix data between clients.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { verifyIntakeToken } from './tokens.js';
-import type { Intake } from './types.js';
+import { verifyIntakeToken } from './tokens';
+import type { Intake } from './types';
 
 // ─── Row shape (from Supabase) ────────────────────────────────────────────────
 

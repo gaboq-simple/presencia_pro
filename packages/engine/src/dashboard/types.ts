@@ -3,7 +3,7 @@
 // combine data from multiple DB tables into structures ready for rendering.
 // They are NOT persistence types (use scheduling/types.ts for those).
 
-import type { Appointment, AppointmentStatus } from '../scheduling/types.js';
+import type { Appointment, AppointmentStatus } from '../scheduling/types';
 
 // Re-export for consumers who import from this module
 export type { Appointment, AppointmentStatus };

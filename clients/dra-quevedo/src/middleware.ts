@@ -7,6 +7,7 @@
 // here — use request.cookies directly via the @supabase/ssr API.
 
 import { createServerClient } from '@supabase/ssr';
+import type { CookieOptions } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
@@ -22,7 +23,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           // Propagate refreshed cookies to both the incoming request and the response
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });

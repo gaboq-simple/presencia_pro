@@ -2,8 +2,8 @@
 // Decide el siguiente ConversationStep dado el estado actual y el contexto.
 // No produce side effects — función pura.
 
-import type { ClientConfig } from '../types/index.js';
-import type { ConversationContext, ConversationStep } from './types.js';
+import type { ClientConfig } from '../types/index';
+import type { ConversationContext, ConversationStep } from './types';
 
 // ─── Office hours check ───────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ function needsModeSelection(config: ClientConfig, context: ConversationContext):
   // Guard: modes only exist on MedicalService — lifestyle services are always in-local
   if (!('modes' in service)) return false;
 
-  return service.modes.length > 1;
+  return (service as { modes: unknown[] }).modes.length > 1;
 }
 
 // ─── State machine ────────────────────────────────────────────────────────────

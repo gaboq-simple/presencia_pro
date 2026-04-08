@@ -3,10 +3,10 @@
 // El engine nunca contiene datos de cliente — recibe config como parámetro.
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { ClientConfig } from '../types/index.js';
-import { isWithinOfficeHours } from './flow.js';
-import { buildSystemPrompt } from './prompt.js';
-import { createConversation, getConversation, updateConversation } from './state.js';
+import type { ClientConfig } from '../types/index';
+import { isWithinOfficeHours } from './flow';
+import { buildSystemPrompt } from './prompt';
+import { createConversation, getConversation, updateConversation } from './state';
 import type {
   BotAction,
   BotResponse,
@@ -14,7 +14,7 @@ import type {
   ConversationMessage,
   ConversationState,
   IncomingMessage,
-} from './types.js';
+} from './types';
 
 // ─── Claude client ────────────────────────────────────────────────────────────
 

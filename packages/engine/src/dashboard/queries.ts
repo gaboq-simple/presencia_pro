@@ -12,8 +12,8 @@ import type {
   PatientHistoryAppointment,
   IntakeData,
   IntakeField,
-} from './types.js';
-import type { AppointmentStatus } from '../scheduling/types.js';
+} from './types';
+import type { AppointmentStatus } from '../scheduling/types';
 
 // ─── Internal row types ────────────────────────────────────────────────────────
 

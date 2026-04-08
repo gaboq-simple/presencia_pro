@@ -13,7 +13,7 @@ import { clientConfig } from '@/config/client.config';
 
 const BodySchema = z.object({
   token: z.string().min(1),
-  fields: z.record(z.unknown()),
+  fields: z.record(z.string(), z.unknown()),
   signatureDataUrl: z.string().optional(),
 });
 

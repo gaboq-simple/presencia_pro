@@ -33,7 +33,7 @@ function useSignatureCanvas() {
   const isEmpty = useRef(true);
 
   const getPos = useCallback(
-    (e: MouseEvent | Touch): { x: number; y: number } => {
+    (e: { clientX: number; clientY: number }): { x: number; y: number } => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0 };
       const rect = canvas.getBoundingClientRect();

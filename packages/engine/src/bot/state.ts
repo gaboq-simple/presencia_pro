@@ -4,7 +4,7 @@
 // Usa service_role_key — solo ejecutar en servidor.
 
 import { createClient } from '@supabase/supabase-js';
-import type { ConversationContext, ConversationState, ConversationStep } from './types.js';
+import type { ConversationContext, ConversationState, ConversationStep } from './types';
 
 // ─── Supabase client ──────────────────────────────────────────────────────────
 

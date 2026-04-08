@@ -10,8 +10,8 @@
 // Server Actions are injected as props so this component stays framework-agnostic.
 
 import { useState, useTransition } from 'react';
-import { IntakeViewer } from './IntakeViewer.js';
-import type { AppointmentWithPatient, EmergencySlot } from './types.js';
+import { IntakeViewer } from './IntakeViewer';
+import type { AppointmentWithPatient, EmergencySlot } from './types';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 

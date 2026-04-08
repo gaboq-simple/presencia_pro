@@ -2,8 +2,8 @@
 // Construye el system prompt de Claude en runtime desde ClientConfig.
 // Cero strings de negocio hardcodeados aquí — todo viene del config del cliente.
 
-import type { ClientConfig, Tone } from '../types/index.js';
-import { isMedical } from '../types/index.js';
+import type { ClientConfig, Tone } from '../types/index';
+import { isMedical } from '../types/index';
 
 // ─── Tone personality blocks ──────────────────────────────────────────────────
 

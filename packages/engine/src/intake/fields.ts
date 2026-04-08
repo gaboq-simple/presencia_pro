@@ -2,7 +2,7 @@
 // Maps field IDs (from client.config.intake.fields) to their IntakeField definitions.
 // All labels are in Spanish. Sensitive fields are shown with emphasis in the dashboard.
 
-import type { IntakeField } from './types.js';
+import type { IntakeField } from './types';
 
 // ─── Field definitions ────────────────────────────────────────────────────────
 

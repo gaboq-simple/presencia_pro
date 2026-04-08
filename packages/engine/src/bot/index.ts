@@ -2,8 +2,8 @@
 // Solo exporta lo que el resto del sistema necesita ver.
 // Lo que no está aquí no existe para módulos externos.
 
-export { handleIncomingMessage } from './handler.js';
-export { updateConversation, getConversation } from './state.js';
+export { handleIncomingMessage } from './handler';
+export { updateConversation, getConversation } from './state';
 
 export type {
   AppointmentRequest,
@@ -12,4 +12,4 @@ export type {
   ConversationState,
   IncomingMessage,
   TimeSlot,
-} from './types.js';
+} from './types';

@@ -3,9 +3,9 @@
 // All components are Client Components (interactive, receive pre-fetched data).
 // Data fetching happens in the consuming Server Component (dashboard/page.tsx).
 
-export { DayView } from './DayView.js';
-export { IntakeViewer } from './IntakeViewer.js';
-export { getPatientHistory } from './queries.js';
+export { DayView } from './DayView';
+export { IntakeViewer } from './IntakeViewer';
+export { getPatientHistory } from './queries';
 
 export type {
   AppointmentWithPatient,
@@ -17,4 +17,4 @@ export type {
   PatientHistory,
   PatientHistorySummary,
   PatientHistoryAppointment,
-} from './types.js';
+} from './types';
