@@ -1,0 +1,20 @@
+{
+  "name": "@presenciapro/engine",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.54.0",
+    "@supabase/supabase-js": "^2.49.4"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "exports": {
+    "./types": "./src/types/index.ts",
+    "./scheduling": "./src/scheduling/index.ts",
+    "./notifications": "./src/notifications/index.ts",
+    "./bot": "./src/bot/index.ts",
+    "./dashboard": "./src/dashboard/index.ts",
+    "./intake": "./src/intake/index.ts"
+  }
+}

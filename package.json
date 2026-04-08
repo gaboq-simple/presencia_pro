@@ -2,27 +2,17 @@
   "name": "presenciapro",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "clients/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "lucide-react": "^1.7.0",
-    "next": "16.2.2",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "zod": "^4.3.6"
+    "dev": "npm run dev --workspace=clients/dra-quevedo",
+    "build": "npm run build --workspace=clients/dra-quevedo",
+    "new-client": "ts-node --project tsconfig.scripts.json scripts/new-client.ts"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.2",
-    "tailwindcss": "^4",
+    "ts-node": "^10.9.0",
     "typescript": "^5"
   }
 }

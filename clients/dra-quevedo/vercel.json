@@ -1,0 +1,27 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && npx tsc --noEmit && npm run build --workspace=clients/dra-quevedo",
+  "outputDirectory": ".next",
+  "installCommand": "cd ../.. && npm install",
+  "env": {
+    "SUPABASE_SERVICE_ROLE_KEY":      "@supabase-service-role-key",
+    "GOOGLE_CLIENT_ID":               "@google-client-id",
+    "GOOGLE_CLIENT_SECRET":           "@google-client-secret",
+    "GOOGLE_REFRESH_TOKEN":           "@google-refresh-token",
+    "WHATSAPP_ACCESS_TOKEN":          "@whatsapp-access-token",
+    "WHATSAPP_PHONE_NUMBER_ID":       "@whatsapp-phone-number-id",
+    "WHATSAPP_WEBHOOK_VERIFY_TOKEN":  "@whatsapp-webhook-verify-token",
+    "WHATSAPP_APP_SECRET":            "@whatsapp-app-secret",
+    "ANTHROPIC_API_KEY":              "@anthropic-api-key",
+    "RESEND_API_KEY":                 "@resend-api-key",
+    "RESEND_FROM_EMAIL":              "@resend-from-email",
+    "CRON_SECRET":                    "@cron-secret"
+  },
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_SUPABASE_URL":     "@next-public-supabase-url",
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@next-public-supabase-anon-key",
+      "NEXT_PUBLIC_CLIENT_ID":        "dra-quevedo"
+    }
+  }
+}

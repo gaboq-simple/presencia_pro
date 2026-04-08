@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["./clients/dra-quevedo/src/*"],
+      "@presenciapro/engine/*": ["./packages/engine/src/*"]
+    },
+    "baseUrl": "."
+  },
+  "include": [
+    "clients/dra-quevedo/src/lib/doctor-notifications.ts",
+    "clients/dra-quevedo/src/app/api/appointments/complete/route.ts",
+    "clients/dra-quevedo/src/app/api/appointments/no-show/route.ts",
+    "clients/dra-quevedo/src/app/api/notifications/reactivation/route.ts",
+    "clients/dra-quevedo/src/app/api/bot/route.ts",
+    "packages/engine/src/**/*.ts"
+  ]
+}
