@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { sendWhatsApp } from '@presenciapro/engine/notifications';
+import { sendWhatsApp, getEffectiveReactivationDays } from '@presenciapro/engine/notifications';
 import type { WhatsAppCredentials } from '@presenciapro/engine/notifications';
 import { clientConfig } from '@/config/client.config';
 
@@ -23,9 +23,10 @@ function verifyCronSecret(request: Request): boolean {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PatientRow {
-  id:   string;
-  phone: string;
-  name: string | null;
+  id:         string;
+  phone:      string;
+  name:       string | null;
+  last_visit: string;  // ISO 8601
 }
 
 // ─── POST ─────────────────────────────────────────────────────────────────────
@@ -48,20 +49,33 @@ export async function POST(request: Request): Promise<NextResponse> {
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   const whatsappCreds: WhatsAppCredentials = { accountSid, authToken, fromNumber };
 
-  const clientId         = clientConfig.client.id;
-  const reactivationDays = clientConfig.postConsulta.reactivationDays;
-  const reactivationMsg  = clientConfig.postConsulta.reactivationMessage;
+  const clientId        = clientConfig.client.id;
+  const reactivationMsg = clientConfig.postConsulta.reactivationMessage;
 
-  const now         = new Date();
-  const cutoff      = new Date(now.getTime() - reactivationDays * 24 * 60 * 60_000);
-  const idempWindow = new Date(now.getTime() - reactivationDays * 24 * 60 * 60_000);
+  const now = new Date();
 
-  // ── 1. Candidatos: last_visit > reactivationDays días ────────────────────
+  // Cutoff mínimo: el menor followUpDays de todos los servicios (o global si es menor).
+  // Usamos el mínimo para que la query DB sea inclusiva; el filtro por servicio
+  // se aplica por paciente en el paso 4.
+  const globalDays    = clientConfig.postConsulta.reactivationDays;
+  const allDays       = [
+    globalDays,
+    ...clientConfig.services
+      .map((s) => s.followUpDays)
+      .filter((d): d is number => d !== undefined),
+  ];
+  const minDays  = Math.min(...allDays);
+  const dbCutoff = new Date(now.getTime() - minDays * 24 * 60 * 60_000);
+
+  // Ventana de idempotencia: usar el global para no re-enviar demasiado pronto
+  const idempWindow = new Date(now.getTime() - globalDays * 24 * 60 * 60_000);
+
+  // ── 1. Candidatos: last_visit > minDays días ──────────────────────────────
   const { data: candidates, error: candidatesError } = await supabase
     .from('patients')
-    .select('id, phone, name')
+    .select('id, phone, name, last_visit')
     .eq('client_id', clientId)
-    .lt('last_visit', cutoff.toISOString())
+    .lt('last_visit', dbCutoff.toISOString())
     .not('last_visit', 'is', null);
 
   if (candidatesError) {
@@ -99,16 +113,54 @@ export async function POST(request: Request): Promise<NextResponse> {
     ),
   );
 
-  // ── 4. Filtrar elegibles ──────────────────────────────────────────────────
-  const eligible = (candidates as PatientRow[]).filter(
+  // ── 4. Filtrar elegibles (excluir activos y con reactivación reciente) ────
+  const potentiallyEligible = (candidates as PatientRow[]).filter(
     (p) => !activePatientIds.has(p.id) && !recentPhones.has(p.phone),
   );
+
+  if (potentiallyEligible.length === 0) {
+    return NextResponse.json({ sent: 0 });
+  }
+
+  // ── 5. Aplicar followUpDays por servicio de la última cita ────────────────
+  // Para cada candidato, obtener el serviceId de su última cita completada
+  // y calcular el umbral de reactivación efectivo.
+  const patientIds = potentiallyEligible.map((p) => p.id);
+
+  const { data: lastAppointmentRows } = await supabase
+    .from('appointments')
+    .select('patient_id, service_id, starts_at')
+    .eq('client_id', clientId)
+    .eq('status', 'completed')
+    .in('patient_id', patientIds)
+    .order('starts_at', { ascending: false });
+
+  // Índice: patient_id → last service_id
+  const lastServiceByPatient = new Map<string, string>();
+  for (const row of lastAppointmentRows ?? []) {
+    const r = row as { patient_id: string; service_id: string };
+    if (!lastServiceByPatient.has(r.patient_id)) {
+      lastServiceByPatient.set(r.patient_id, r.service_id);
+    }
+  }
+
+  // Filtro final: aplicar días efectivos por servicio
+  // Un paciente es elegible si su last_visit es ANTERIOR al cutoff efectivo.
+  // Ej: botox con followUpDays=120 → solo elegible si last_visit > 120 días atrás.
+  const eligible = potentiallyEligible.filter((p) => {
+    const effectiveDays = getEffectiveReactivationDays(
+      clientConfig,
+      lastServiceByPatient.get(p.id),
+    );
+    const patientCutoff = new Date(now.getTime() - effectiveDays * 24 * 60 * 60_000);
+    return new Date(p.last_visit) < patientCutoff;
+  });
 
   if (eligible.length === 0) {
     return NextResponse.json({ sent: 0 });
   }
 
-  // ── 5. Enviar y registrar ─────────────────────────────────────────────────
+  // ── 6. Enviar y registrar ─────────────────────────────────────────────────
   let sent = 0;
 
   for (const patient of eligible) {

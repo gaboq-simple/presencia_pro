@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   confirmAppointment,
   getAppointment,
+  generateCancelUrl,
 } from '@presenciapro/engine/scheduling';
 import type { GoogleCredentials, AppointmentDeps } from '@presenciapro/engine/scheduling';
 import { scheduleReminder } from '@presenciapro/engine/notifications';
@@ -106,6 +107,27 @@ export async function POST(request: Request): Promise<NextResponse> {
     const scheduledFor = new Date(appointment.startsAt.getTime() - hours * 60 * 60_000);
     // Guard: solo programar si el momento del recordatorio es futuro
     if (scheduledFor > now && patientPhone) {
+      // Recordatorio de 24h incluye link firmado de cancelación
+      let messageBody: string | undefined;
+      if (hours === 24 && appointment.patientId) {
+        const cancelUrl = generateCancelUrl({
+          appointmentId,
+          patientId: appointment.patientId,
+          clientId,
+        });
+        const fecha = new Intl.DateTimeFormat('es-MX', {
+          timeZone: 'America/Mexico_City',
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          hour: '2-digit',
+          minute: '2-digit',
+        }).format(appointment.startsAt);
+        messageBody =
+          `Hola 👋 Te recordamos tu cita mañana *${fecha}*.\n\n` +
+          `Si necesitas cancelar, puedes hacerlo aquí (válido 24h):\n${cancelUrl}`;
+      }
+
       await scheduleReminder(
         {
           clientId,
@@ -115,6 +137,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           type: 'appointment_reminder',
           channel: 'whatsapp',
           scheduledFor,
+          ...(messageBody !== undefined && { messageBody }),
         },
         supabase,
       );

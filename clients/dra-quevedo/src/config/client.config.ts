@@ -72,6 +72,7 @@ export const clientConfig = {
       modes: ['domicilio', 'consultorio'] as const,
       specialistId: 'quevedo',
       postConsultaProducts: ['serum-vitamina-c', 'protector-solar-spf50'],
+      followUpDays: 120,
     },
     {
       id: 'domicilio',
@@ -92,6 +93,7 @@ export const clientConfig = {
       modes: ['consultorio'] as const,
       specialistId: 'quevedo',
       postConsultaProducts: [],
+      followUpDays: 180,
     },
   ],
 

@@ -35,6 +35,8 @@ interface NotificationRow {
   patient_email: string | null;
   type: string;
   channel: 'whatsapp' | 'email';
+  /** Cuerpo pre-construido desde Next.js (links firmados, etc.). Tiene prioridad si está presente. */
+  message_body: string | null;
   // Joined from appointments + patients:
   patient_name: string | null;
   starts_at: string | null;
@@ -173,6 +175,7 @@ Deno.serve(async (_req) => {
       patient_email,
       type,
       channel,
+      message_body,
       appointments (
         starts_at,
         specialist_id,
@@ -199,6 +202,7 @@ Deno.serve(async (_req) => {
     patient_email: string | null;
     type: string;
     channel: 'whatsapp' | 'email';
+    message_body: string | null;
     appointments: {
       starts_at: string;
       specialist_id: string;
@@ -229,7 +233,9 @@ Deno.serve(async (_req) => {
 
     const patientName = row.appointments?.patients?.name ?? null;
     const startsAt    = row.appointments?.starts_at      ?? null;
-    const message     = buildMessage(row.type, patientName, startsAt);
+
+    // message_body pre-construido tiene prioridad sobre el mensaje genérico
+    const message = row.message_body ?? buildMessage(row.type, patientName, startsAt);
 
     try {
       if (row.channel === 'whatsapp' && row.patient_phone) {

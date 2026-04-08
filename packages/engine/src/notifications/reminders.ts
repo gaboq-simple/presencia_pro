@@ -4,6 +4,7 @@
 // Nunca envía directamente — el despacho lo hace dispatchDue() o un cron externo.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ClientConfig } from '../types/index';
 import type {
   ReminderRequest,
   ReminderType,
@@ -12,6 +13,61 @@ import type {
   EmailMessage,
 } from './types';
 import { wrapHtml } from './email';
+
+// ─── shouldScheduleReviewRequest ─────────────────────────────────────────────
+
+/**
+ * Verifica los 4 criterios que deben cumplirse para enviar una solicitud de reseña.
+ * Función pura — sin I/O.
+ *
+ * Criterios:
+ *  1. La cita está en status 'completed'
+ *  2. reviewUrl no está vacío
+ *  3. No fue un no_show (status !== 'no_show')
+ *  4. La cita no fue agendada de última hora (lead < cancellationWindowMs)
+ */
+export function shouldScheduleReviewRequest(params: {
+  readonly reviewUrl: string;
+  readonly status: string;
+  readonly startsAt: Date;
+  readonly createdAt: Date;
+  readonly cancellationWindowMs: number;
+}): boolean {
+  // Criterio 1: solo para citas completadas
+  if (params.status !== 'completed') return false;
+
+  // Criterio 2: debe existir una URL de reseña
+  if (!params.reviewUrl) return false;
+
+  // Criterio 3: no_show implica status diferente a 'completed' — cubierto por criterio 1
+
+  // Criterio 4: no fue agendada de última hora (menos del cancellationWindow de anticipación)
+  const bookingLeadMs = params.startsAt.getTime() - params.createdAt.getTime();
+  if (bookingLeadMs < params.cancellationWindowMs) return false;
+
+  return true;
+}
+
+// ─── getEffectiveReactivationDays ─────────────────────────────────────────────
+
+/**
+ * Retorna los días de espera efectivos antes de enviar la reactivación a un paciente,
+ * usando el `followUpDays` del servicio de su última cita si está configurado,
+ * o el global `postConsulta.reactivationDays` como fallback.
+ *
+ * @param config    - Configuración del cliente
+ * @param serviceId - ID del servicio de la última cita del paciente (opcional)
+ */
+export function getEffectiveReactivationDays(
+  config: ClientConfig,
+  serviceId?: string,
+): number {
+  if (serviceId) {
+    const service = config.services.find((s) => s.id === serviceId);
+    if (service?.followUpDays !== undefined) return service.followUpDays;
+  }
+  return config.postConsulta.reactivationDays;
+}
 
 // ─── scheduleReminder ─────────────────────────────────────────────────────────
 
@@ -35,6 +91,9 @@ export async function scheduleReminder(
       type:           request.type,
       channel:        request.channel,
       scheduled_for:  request.scheduledFor.toISOString(),
+      // message_body: almacena contenido pre-construido (links firmados, etc.)
+      // undefined se omite del insert (Supabase ignora claves undefined)
+      ...(request.messageBody !== undefined && { message_body: request.messageBody }),
     })
     .select('id')
     .single();

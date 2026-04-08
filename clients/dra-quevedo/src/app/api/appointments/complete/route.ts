@@ -12,7 +12,7 @@ import {
   getAppointment,
 } from '@presenciapro/engine/scheduling';
 import type { GoogleCredentials, AppointmentDeps } from '@presenciapro/engine/scheduling';
-import { scheduleReminder, sendWhatsApp } from '@presenciapro/engine/notifications';
+import { scheduleReminder, shouldScheduleReviewRequest, sendWhatsApp } from '@presenciapro/engine/notifications';
 import type { WhatsAppCredentials } from '@presenciapro/engine/notifications';
 import { clientConfig } from '@/config/client.config';
 import { buildCompletedAppointmentNotification } from '@/lib/doctor-notifications';
@@ -140,8 +140,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
-  // ── 4. Programar review_request solo si reviewUrl no está vacío ───────────
-  if (patientPhone && clientConfig.postConsulta.reviewUrl) {
+  // ── 4. Programar review_request solo si todos los criterios se cumplen ─────
+  const reviewEligible = shouldScheduleReviewRequest({
+    reviewUrl:             clientConfig.postConsulta.reviewUrl,
+    status:                appointment.status,  // 'completed' en este punto
+    startsAt:              appointment.startsAt,
+    createdAt:             appointment.createdAt,
+    cancellationWindowMs:  clientConfig.scheduling.cancellationWindowHours * 60 * 60_000,
+  });
+
+  if (patientPhone && reviewEligible) {
     const reviewFor = new Date(
       appointment.endsAt.getTime() +
         clientConfig.postConsulta.reviewRequestDelayHours * 60 * 60_000,

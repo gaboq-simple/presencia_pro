@@ -60,6 +60,13 @@ const BaseServiceSchema = z.object({
   icon: ServiceIconSchema,
   /** Debe coincidir con un Specialist.id de la misma instancia. */
   specialistId: z.string().min(1),
+  /**
+   * Días sin nueva cita de este servicio antes de enviar reactivación.
+   * Si se define, sobreescribe el global postConsulta.reactivationDays para pacientes
+   * cuya última cita fue de este tipo de servicio.
+   * Útil para servicios con ciclos de retorno distintos (ej: botox cada 4 meses).
+   */
+  followUpDays: z.number().int().positive().optional(),
 });
 
 /** Servicio para perfil medical — incluye modalidades y productos post-consulta. */

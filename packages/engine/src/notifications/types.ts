@@ -59,6 +59,13 @@ export interface ReminderRequest {
   readonly type: ReminderType;
   readonly channel: NotificationChannel;
   readonly scheduledFor: Date;
+  /**
+   * Cuerpo del mensaje pre-construido. Cuando está presente, dispatch-notifications
+   * lo usa directamente en lugar del mensaje genérico construido en Deno.
+   * Útil para incluir links firmados (cancelación, intake) que requieren
+   * acceso al ClientConfig del servidor Next.js.
+   */
+  readonly messageBody?: string;
 }
 
 // ─── Notification payload ────────────────────────────────────────────────────

@@ -52,17 +52,18 @@ export type BotAction =
 
 export type ConversationStep =
   | 'GREETING'
-  | 'QUALIFYING_VISIT_TYPE'    // ¿primera vez o seguimiento?
-  | 'QUALIFYING_SERVICE'       // ¿qué servicio te interesa?
-  | 'QUALIFYING_MODE'          // ¿domicilio o consultorio?
-  | 'SHOWING_SLOTS'            // mostrando horarios disponibles
-  | 'CONFIRMING_APPOINTMENT'   // esperando confirmación del slot elegido
-  | 'AWAITING_CONFIRMATION'    // cita en pending_confirmation — esperando SÍ/NO del paciente
-  | 'SENDING_INTAKE'           // enviando link de formulario
-  | 'AWAITING_INTAKE'          // esperando que llene el formulario
-  | 'COMPLETED'                // cita confirmada y formulario enviado
-  | 'AWAY'                     // fuera de horario
-  | 'ESCALATED'                // escalado a humano
+  | 'QUALIFYING_VISIT_TYPE'          // ¿primera vez o seguimiento?
+  | 'QUALIFYING_SERVICE'             // ¿qué servicio te interesa?
+  | 'QUALIFYING_MODE'                // ¿domicilio o consultorio?
+  | 'SHOWING_SLOTS'                  // mostrando horarios disponibles
+  | 'CONFIRMING_APPOINTMENT'         // esperando confirmación del slot elegido
+  | 'AWAITING_CONFIRMATION'          // cita en pending_confirmation — esperando SÍ/NO del paciente
+  | 'AWAITING_CANCEL_CONFIRMATION'   // paciente expresó intención de cancelar — esperando SÍ/NO
+  | 'SENDING_INTAKE'                 // enviando link de formulario
+  | 'AWAITING_INTAKE'                // esperando que llene el formulario
+  | 'COMPLETED'                      // cita confirmada y formulario enviado
+  | 'AWAY'                           // fuera de horario
+  | 'ESCALATED'                      // escalado a humano
 
 // ─── Conversation context ─────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ export type ConversationContext = {
   readonly appointmentId?: string
   readonly followUpScheduled?: boolean
   readonly confirmationRetries?: number   // veces que el paciente respondió algo distinto a SÍ/NO
+  readonly pendingCancelAppointmentId?: string  // appointmentId cuya cancelación está pendiente de confirmación
   readonly messages?: ReadonlyArray<ConversationMessage>  // historial para Claude
 }
 

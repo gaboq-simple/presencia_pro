@@ -3,6 +3,7 @@
 // Lo que no está aquí no existe para módulos externos.
 
 export { handleIncomingMessage } from './handler';
+export type { HandleIncomingMessageOptions } from './handler';
 export { updateConversation, getConversation } from './state';
 
 export type {

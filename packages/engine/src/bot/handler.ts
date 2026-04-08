@@ -4,7 +4,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { ClientConfig } from '../types/index';
-import { isWithinOfficeHours } from './flow';
+import { isWithinOfficeHours, detectCancellationIntent } from './flow';
 import { buildSystemPrompt } from './prompt';
 import { createConversation, getConversation, updateConversation } from './state';
 import type {
@@ -212,6 +212,69 @@ async function handleConfirmationResponse(
   };
 }
 
+// ─── Cancel confirmation response intercept ───────────────────────────────────
+// Cuando el bot detectó intención de cancelar y preguntó para confirmar,
+// se intercede aquí antes de llamar a Claude con lógica determinista SÍ/NO.
+
+/**
+ * Maneja la respuesta del paciente cuando el bot esperaba confirmación de cancelación.
+ * Si confirma → devuelve acción CANCEL_APPOINTMENT.
+ * Si niega → reanuda flujo normal sin cancelar.
+ */
+async function handleCancelConfirmationResponse(
+  message: IncomingMessage,
+  conversation: ConversationState,
+): Promise<BotResponse> {
+  const trimmed = message.body.trim();
+  const appointmentId = conversation.context.pendingCancelAppointmentId;
+
+  // Guard: sin appointmentId no podemos continuar — reanudar flujo normal
+  if (!appointmentId) {
+    if (conversation.id) {
+      try {
+        await updateConversation(conversation.id, { state: 'GREETING' });
+      } catch { /* non-fatal */ }
+    }
+    return { message: 'Entendido, seguimos con el flujo normal. En qué te puedo ayudar?' };
+  }
+
+  // ── Respuesta afirmativa — cancelar ────────────────────────────────────────
+  if (YES_PATTERN.test(trimmed)) {
+    if (conversation.id) {
+      try {
+        await updateConversation(conversation.id, {
+          state: 'COMPLETED',
+          context: { pendingCancelAppointmentId: undefined },
+        });
+      } catch { /* non-fatal */ }
+    }
+    return {
+      message: 'Listo, tu cita ha sido cancelada. Si quieres agendar en otro momento, con gusto te ayudamos. 🌸',
+      action: { type: 'CANCEL_APPOINTMENT', appointmentId, reason: 'patient_intent_via_bot' },
+    };
+  }
+
+  // ── Respuesta negativa — mantener cita ────────────────────────────────────
+  if (NO_PATTERN.test(trimmed)) {
+    if (conversation.id) {
+      try {
+        await updateConversation(conversation.id, {
+          state: 'COMPLETED',
+          context: { pendingCancelAppointmentId: undefined },
+        });
+      } catch { /* non-fatal */ }
+    }
+    return {
+      message: 'Perfecto, tu cita sigue confirmada. ¡Te esperamos! 🌸',
+    };
+  }
+
+  // ── Respuesta ambigua ─────────────────────────────────────────────────────
+  return {
+    message: 'Para confirmar la cancelación responde *Sí*, o *No* si prefieres mantener tu cita.',
+  };
+}
+
 // ─── Away response ────────────────────────────────────────────────────────────
 
 function buildAwayResponse(config: ClientConfig): BotResponse {
@@ -228,15 +291,31 @@ function isEmptyOrEmojiOnly(text: string): boolean {
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
+// ─── Options ──────────────────────────────────────────────────────────────────
+
+export type HandleIncomingMessageOptions = {
+  /**
+   * Cita próxima del paciente (< 24h desde ahora).
+   * Si se proporciona y el paciente expresa intención de cancelar,
+   * el bot pregunta por confirmación antes de proceder.
+   * Lo resuelve el webhook — el engine no hace queries a DB.
+   */
+  readonly upcomingAppointment?: { readonly id: string; readonly startsAt: Date };
+};
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
 /**
  * Procesa un mensaje entrante de WhatsApp y devuelve la respuesta del bot.
  *
  * @param message - Mensaje entrante del paciente
  * @param config  - Configuración del cliente (cargada por el webhook, nunca hardcodeada aquí)
+ * @param opts    - Opciones opcionales: cita próxima para detección de intención de cancelación
  */
 export async function handleIncomingMessage(
   message: IncomingMessage,
   config: ClientConfig,
+  opts: HandleIncomingMessageOptions = {},
 ): Promise<BotResponse> {
   // Guard: fuera de horario — responder inmediatamente sin llamar a Claude
   if (!isWithinOfficeHours(config, message.timestamp)) {
@@ -269,6 +348,39 @@ export async function handleIncomingMessage(
   // ── Interceptar AWAITING_CONFIRMATION antes de llamar a Claude ────────────
   if (conversation.state === 'AWAITING_CONFIRMATION') {
     return handleConfirmationResponse(message, conversation, config);
+  }
+
+  // ── Interceptar AWAITING_CANCEL_CONFIRMATION antes de llamar a Claude ─────
+  if (conversation.state === 'AWAITING_CANCEL_CONFIRMATION') {
+    return handleCancelConfirmationResponse(message, conversation);
+  }
+
+  // ── Detectar intención de cancelación (solo si hay cita próxima < 24h) ────
+  const { upcomingAppointment } = opts;
+  if (upcomingAppointment && detectCancellationIntent(message.body)) {
+    const fecha = new Intl.DateTimeFormat('es-MX', {
+      timeZone: config.client.timezone,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(upcomingAppointment.startsAt);
+
+    if (conversation.id) {
+      try {
+        await updateConversation(conversation.id, {
+          state: 'AWAITING_CANCEL_CONFIRMATION',
+          context: { pendingCancelAppointmentId: upcomingAppointment.id },
+        });
+      } catch { /* non-fatal */ }
+    }
+
+    return {
+      message:
+        `Entendido. Para confirmar: ¿quieres que cancelemos tu cita del *${fecha}*?\n\n` +
+        `Responde *Sí* para cancelar o *No* si prefieres mantenerla.`,
+    };
   }
 
   // ── Build Claude messages ──────────────────────────────────────────────────

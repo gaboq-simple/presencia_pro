@@ -6,8 +6,8 @@
 import { after } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { handleIncomingMessage, updateConversation, getConversation } from '@presenciapro/engine/bot';
-import type { IncomingMessage } from '@presenciapro/engine/bot';
-import { createAppointment } from '@presenciapro/engine/scheduling';
+import type { IncomingMessage, HandleIncomingMessageOptions } from '@presenciapro/engine/bot';
+import { createAppointment, generateCancelUrl } from '@presenciapro/engine/scheduling';
 import type { Appointment, GoogleCredentials } from '@presenciapro/engine/scheduling';
 import { sendWhatsApp, scheduleReminder } from '@presenciapro/engine/notifications';
 import type { WhatsAppCredentials } from '@presenciapro/engine/notifications';
@@ -204,7 +204,42 @@ export async function POST(request: Request): Promise<Response> {
         };
 
         try {
-          const botResponse = await handleIncomingMessage(incoming, clientConfig);
+          // ── Buscar cita próxima (< 24h) para este paciente ────────────────
+          // El engine es puro — no accede a DB. El webhook resuelve y pasa el dato.
+          const preResolvedPatientId = await resolvePatientId(
+            supabase,
+            clientConfig.client.id,
+            msg.from,
+          ).catch(() => null);
+
+          let upcomingAppointmentOpt: HandleIncomingMessageOptions['upcomingAppointment'];
+
+          if (preResolvedPatientId) {
+            const now = new Date();
+            const in24h = new Date(now.getTime() + 24 * 60 * 60_000);
+            const { data: upcomingRow } = await supabase
+              .from('appointments')
+              .select('id, starts_at')
+              .eq('client_id', clientConfig.client.id)
+              .eq('patient_id', preResolvedPatientId)
+              .in('status', ['pending', 'confirmed'])
+              .gt('starts_at', now.toISOString())
+              .lte('starts_at', in24h.toISOString())
+              .order('starts_at', { ascending: true })
+              .limit(1)
+              .maybeSingle();
+
+            if (upcomingRow) {
+              const r = upcomingRow as { id: string; starts_at: string };
+              upcomingAppointmentOpt = { id: r.id, startsAt: new Date(r.starts_at) };
+            }
+          }
+
+          const botResponse = await handleIncomingMessage(
+            incoming,
+            clientConfig,
+            { upcomingAppointment: upcomingAppointmentOpt },
+          );
 
           // ── 1. Enviar respuesta al paciente ──────────────────────────────
           await sendWhatsApp(
@@ -258,6 +293,27 @@ export async function POST(request: Request): Promise<Response> {
                 );
                 // Guard: solo programar si el momento del recordatorio es futuro
                 if (scheduledFor > new Date()) {
+                  // Recordatorio de 24h incluye link firmado de cancelación
+                  let messageBody: string | undefined;
+                  if (hours === 24) {
+                    const cancelUrl = generateCancelUrl({
+                      appointmentId: appointment.id,
+                      patientId,
+                      clientId: clientConfig.client.id,
+                    });
+                    const fecha = new Intl.DateTimeFormat('es-MX', {
+                      timeZone: 'America/Mexico_City',
+                      weekday: 'long',
+                      day: 'numeric',
+                      month: 'long',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }).format(appointment.startsAt);
+                    messageBody =
+                      `Hola 👋 Te recordamos tu cita mañana *${fecha}*.\n\n` +
+                      `Si necesitas cancelar, puedes hacerlo aquí (válido 24h):\n${cancelUrl}`;
+                  }
+
                   await scheduleReminder(
                     {
                       clientId: clientConfig.client.id,
@@ -267,6 +323,7 @@ export async function POST(request: Request): Promise<Response> {
                       type: 'appointment_reminder',
                       channel: 'whatsapp',
                       scheduledFor,
+                      ...(messageBody !== undefined && { messageBody }),
                     },
                     supabase,
                   );

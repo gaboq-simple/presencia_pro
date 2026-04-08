@@ -25,6 +25,8 @@ export { sendEmail, wrapHtml } from './email';
 // Reminders
 export {
   scheduleReminder,
+  shouldScheduleReviewRequest,
+  getEffectiveReactivationDays,
   buildWhatsAppBody,
   buildEmailContent,
   buildWhatsAppMessage,

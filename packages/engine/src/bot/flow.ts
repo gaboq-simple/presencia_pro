@@ -60,6 +60,19 @@ function needsModeSelection(config: ClientConfig, context: ConversationContext):
   return (service as { modes: unknown[] }).modes.length > 1;
 }
 
+// ─── Cancellation intent detection ───────────────────────────────────────────
+
+/**
+ * Detecta si el texto del paciente expresa intención de cancelar su cita.
+ * Función pura, sin I/O — usa coincidencia de palabras clave en español.
+ * Solo se evalúa cuando el webhook detecta una cita próxima (< 24h).
+ */
+export function detectCancellationIntent(text: string): boolean {
+  // Normalizar: minúsculas + quitar tildes para cubrir variaciones ortográficas
+  const n = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /\b(cancel(ar|a|ame|arlo)?|no (puedo|voy|ire|asistire|asistir|podre|podra)|no me (aparezco|presento)|quiero cancelar|necesito cancelar|anular|anulame|voy a faltar|no (ire|voy) a (ir|asistir))\b/.test(n);
+}
+
 // ─── State machine ────────────────────────────────────────────────────────────
 
 /**
@@ -114,6 +127,11 @@ export function getNextStep(
     case 'AWAITING_CONFIRMATION': {
       // El handler intercepta el mensaje del paciente directamente — no hay transición automática
       return 'AWAITING_CONFIRMATION';
+    }
+
+    case 'AWAITING_CANCEL_CONFIRMATION': {
+      // El handler intercepta el mensaje del paciente directamente — no hay transición automática
+      return 'AWAITING_CANCEL_CONFIRMATION';
     }
 
     case 'SENDING_INTAKE': {
