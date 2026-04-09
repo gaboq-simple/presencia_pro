@@ -40,3 +40,10 @@ export type { BlockDayParams, UnblockDayParams } from './blockedDays';
 
 export { generateCancelToken, generateCancelUrl, verifyCancelToken } from './cancelTokens';
 export type { CancelToken } from './cancelTokens';
+
+// ─── Google Auth — utilidad compartida ─────────────────────────────────────────
+// Para uso de módulos externos (bot/, notifications/, etc.) que necesiten
+// obtener access_tokens de Google. El módulo scheduling/ usa internamente
+// getAccessToken() de calendar.ts — ver googleAuth.ts para la relación entre ambos.
+export { getGoogleAccessToken } from './googleAuth';
+export type { GetGoogleAccessTokenParams } from './googleAuth';
