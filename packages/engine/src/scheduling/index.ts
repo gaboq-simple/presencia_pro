@@ -38,5 +38,5 @@ export type { IAppointmentRepository } from './appointmentRepository';
 export { blockDay, unblockDay } from './blockedDays';
 export type { BlockDayParams, UnblockDayParams } from './blockedDays';
 
-export { generateCancelUrl, verifyCancelToken } from './cancelTokens';
+export { generateCancelToken, generateCancelUrl, verifyCancelToken } from './cancelTokens';
 export type { CancelToken } from './cancelTokens';

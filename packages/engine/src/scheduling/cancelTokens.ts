@@ -29,15 +29,16 @@ export interface CancelToken {
   readonly expiresAt: Date;
 }
 
-// ─── generateCancelUrl ────────────────────────────────────────────────────────
+// ─── generateCancelToken ──────────────────────────────────────────────────────
 
 /**
- * Genera una URL de cancelación firmada válida por 24 horas.
- * El JWT es auto-contenido — no requiere escritura en DB.
+ * Genera un JWT de cancelación válido por 24 horas.
+ * Retorna solo el token (sin URL) — úsalo cuando necesitas incluir el token
+ * en una respuesta de API en lugar de generar un link completo.
  *
- * @returns URL completa: `{NEXT_PUBLIC_SITE_URL}/cancel?token={jwt}`
+ * @returns JWT string
  */
-export function generateCancelUrl(params: {
+export function generateCancelToken(params: {
   readonly appointmentId: string;
   readonly patientId: string;
   readonly clientId: string;
@@ -52,7 +53,23 @@ export function generateCancelUrl(params: {
     exp,
   };
 
-  const jwt = signJwt(payload);
+  return signJwt(payload);
+}
+
+// ─── generateCancelUrl ────────────────────────────────────────────────────────
+
+/**
+ * Genera una URL de cancelación firmada válida por 24 horas.
+ * El JWT es auto-contenido — no requiere escritura en DB.
+ *
+ * @returns URL completa: `{NEXT_PUBLIC_SITE_URL}/cancel?token={jwt}`
+ */
+export function generateCancelUrl(params: {
+  readonly appointmentId: string;
+  readonly patientId: string;
+  readonly clientId: string;
+}): string {
+  const jwt = generateCancelToken(params);
   const base = process.env['NEXT_PUBLIC_SITE_URL'] ?? '';
   return `${base}/cancel?token=${jwt}`;
 }

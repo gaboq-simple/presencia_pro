@@ -21,3 +21,5 @@ export {
 } from './client.config.schema';
 
 export type { MonthlyMetrics, ServiceCount } from '../dashboard/types';
+
+export type { PatientPortalToken } from '../utils/patientPortalTokens';
