@@ -17,4 +17,7 @@ export {
   type DesignConfig,
   type PostConsultaConfig,
   type Product,
+  type ContactConfig,
 } from './client.config.schema';
+
+export type { MonthlyMetrics, ServiceCount } from '../dashboard/types';

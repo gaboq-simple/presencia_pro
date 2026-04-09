@@ -680,6 +680,7 @@ Edge Function (Deno, Supabase)
 |---|---|---|---|
 | `dispatch-notifications` | `* * * * *` | Supabase directo | Lee `scheduled_notifications`, envía WhatsApp/email vía fetch, marca `sent_at` |
 | `block-emergency-slots` | `0 13 * * 1-5` (UTC = 07:00 CDMX) | `POST /api/calendar/block-emergency` | Bloquea huecos de emergencia del día en cada cliente activo |
+| `dispatch-monthly-report` | `0 10 1 * *` (UTC = 04:00 CDMX, día 1) | `POST /api/reports/monthly` | Envía reporte mensual (WhatsApp + email HTML) al doctor de cada cliente activo |
 
 ### Idempotencia en `dispatch-notifications`
 El worker reclama cada fila atómicamente:

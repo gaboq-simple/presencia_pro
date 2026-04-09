@@ -12,6 +12,8 @@ import type {
   PatientHistoryAppointment,
   IntakeData,
   IntakeField,
+  MonthlyMetrics,
+  ServiceCount,
 } from './types';
 import type { AppointmentStatus } from '../scheduling/types';
 
@@ -152,4 +154,163 @@ export async function getPatientHistory(params: {
   });
 
   return { patient: summary, appointments };
+}
+
+// ─── getMonthlyMetrics ─────────────────────────────────────────────────────────
+
+// ─── Internal row types ────────────────────────────────────────────────────────
+
+type AppointmentSummaryRow = {
+  id: string;
+  patient_id: string | null;
+  service_id: string;
+  status: string;
+};
+
+type PriorPatientRow = {
+  patient_id: string;
+};
+
+/**
+ * Calcula las métricas del mes `year/month` para el reporte mensual automático.
+ *
+ * Realiza 3 queries:
+ *  1. Todas las citas del mes (excluyendo emergency_blocked)
+ *  2. Citas completadas del mes anterior (para comparativo)
+ *  3. Citas previas al mes para los pacientes únicos del mes actual (nuevo vs recurrente)
+ *
+ * @param serviceNameMap - serviceId → nombre del servicio, construido por el API Route
+ *                         desde clientConfig.services. El engine nunca importa client.config.
+ */
+export async function getMonthlyMetrics(params: {
+  readonly clientId: string;
+  /** Año del reporte (ej: 2026) */
+  readonly year: number;
+  /** Mes del reporte: 1 = enero … 12 = diciembre */
+  readonly month: number;
+  readonly serviceNameMap: ReadonlyMap<string, string>;
+  readonly supabase: SupabaseClient;
+}): Promise<MonthlyMetrics> {
+  const { clientId, year, month, serviceNameMap, supabase } = params;
+
+  // ── Date ranges ──────────────────────────────────────────────────────────────
+  const monthStart    = new Date(Date.UTC(year, month - 1, 1));
+  const monthEnd      = new Date(Date.UTC(year, month, 1));        // exclusive upper bound
+  const prevMonth     = month === 1 ? 12 : month - 1;
+  const prevYear      = month === 1 ? year - 1 : year;
+  const prevMonthStart = new Date(Date.UTC(prevYear, prevMonth - 1, 1));
+  const prevMonthEnd  = monthStart;                                // exclusive upper bound
+
+  const monthStartISO     = monthStart.toISOString();
+  const monthEndISO       = monthEnd.toISOString();
+  const prevMonthStartISO = prevMonthStart.toISOString();
+  const prevMonthEndISO   = prevMonthEnd.toISOString();
+
+  // ── 1. Current month appointments ────────────────────────────────────────────
+  const { data: currentData, error: currentError } = await supabase
+    .from('appointments')
+    .select('id, patient_id, service_id, status')
+    .eq('client_id', clientId)
+    .neq('status', 'emergency_blocked')
+    .gte('starts_at', monthStartISO)
+    .lt('starts_at', monthEndISO);
+
+  if (currentError) {
+    throw new Error(`getMonthlyMetrics: failed to fetch current month — ${currentError.message}`);
+  }
+
+  const currentRows = (currentData ?? []) as AppointmentSummaryRow[];
+  const completedRows = currentRows.filter((r) => r.status === 'completed');
+  const noShowRows    = currentRows.filter((r) => r.status === 'no_show');
+
+  const completed      = completedRows.length;
+  const totalScheduled = currentRows.length;
+  const noShows        = noShowRows.length;
+  const noShowRate     = totalScheduled > 0 ? noShows / totalScheduled : 0;
+
+  // ── 2. Previous month completed (comparativo) ─────────────────────────────────
+  const { data: prevData, error: prevError } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('status', 'completed')
+    .gte('starts_at', prevMonthStartISO)
+    .lt('starts_at', prevMonthEndISO);
+
+  if (prevError) {
+    throw new Error(`getMonthlyMetrics: failed to fetch previous month — ${prevError.message}`);
+  }
+
+  const previousCompleted = (prevData ?? []).length;
+  const completedDelta    = completed - previousCompleted;
+  const completedDeltaPct =
+    previousCompleted > 0 ? Math.round((completedDelta / previousCompleted) * 100) : 0;
+
+  // ── Top services ──────────────────────────────────────────────────────────────
+  const serviceCountMap = new Map<string, number>();
+  for (const row of completedRows) {
+    serviceCountMap.set(row.service_id, (serviceCountMap.get(row.service_id) ?? 0) + 1);
+  }
+
+  const topServices: ServiceCount[] = Array.from(serviceCountMap.entries())
+    .map(([serviceId, count]) => ({
+      serviceId,
+      serviceName: serviceNameMap.get(serviceId) ?? serviceId,
+      count,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  // ── New vs returning patients ──────────────────────────────────────────────────
+  const patientIds = completedRows
+    .map((r) => r.patient_id)
+    .filter((id): id is string => id !== null);
+
+  let newPatients = 0;
+  let returningPatients = 0;
+
+  if (patientIds.length > 0) {
+    const uniquePatientIds = Array.from(new Set(patientIds));
+
+    // Guard: find patients who had any prior appointment before this month
+    const { data: priorData, error: priorError } = await supabase
+      .from('appointments')
+      .select('patient_id')
+      .eq('client_id', clientId)
+      .in('patient_id', uniquePatientIds)
+      .lt('starts_at', monthStartISO)
+      .neq('status', 'emergency_blocked');
+
+    if (priorError) {
+      throw new Error(`getMonthlyMetrics: failed to fetch prior appointments — ${priorError.message}`);
+    }
+
+    const priorPatientSet = new Set(
+      ((priorData ?? []) as PriorPatientRow[]).map((r) => r.patient_id),
+    );
+
+    for (const pid of uniquePatientIds) {
+      if (priorPatientSet.has(pid)) {
+        returningPatients++;
+      } else {
+        newPatients++;
+      }
+    }
+  }
+
+  return {
+    clientId,
+    year,
+    month,
+    completed,
+    totalScheduled,
+    noShows,
+    noShowRate,
+    topServices,
+    newPatients,
+    returningPatients,
+    previousCompleted,
+    completedDelta,
+    completedDeltaPct,
+  };
 }

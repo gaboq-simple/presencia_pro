@@ -5,7 +5,7 @@
 
 export { DayView } from './DayView';
 export { IntakeViewer } from './IntakeViewer';
-export { getPatientHistory } from './queries';
+export { getPatientHistory, getMonthlyMetrics } from './queries';
 
 export type {
   AppointmentWithPatient,
@@ -17,4 +17,6 @@ export type {
   PatientHistory,
   PatientHistorySummary,
   PatientHistoryAppointment,
+  MonthlyMetrics,
+  ServiceCount,
 } from './types';

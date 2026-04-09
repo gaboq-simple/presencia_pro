@@ -94,3 +94,47 @@ export interface PatientHistory {
   readonly patient: PatientHistorySummary;
   readonly appointments: readonly PatientHistoryAppointment[];
 }
+
+// ─── Monthly report metrics ────────────────────────────────────────────────────
+
+/**
+ * Conteo de citas por servicio para el top de servicios más solicitados.
+ * serviceName viene del serviceNameMap inyectado por el API Route — nunca del config directamente.
+ */
+export interface ServiceCount {
+  readonly serviceId: string;
+  readonly serviceName: string;
+  readonly count: number;
+}
+
+/**
+ * Métricas del mes para el reporte mensual automático.
+ * Producido por getMonthlyMetrics() — sin lógica de presentación.
+ * La localización (nombres de mes, formato de porcentaje) es responsabilidad del API Route.
+ */
+export interface MonthlyMetrics {
+  readonly clientId: string;
+  readonly year: number;
+  /** Mes del reporte: 1 = enero … 12 = diciembre */
+  readonly month: number;
+  /** Citas con status = 'completed' en el mes */
+  readonly completed: number;
+  /** Total de citas agendadas (sin emergency_blocked) en el mes */
+  readonly totalScheduled: number;
+  /** Citas con status = 'no_show' en el mes */
+  readonly noShows: number;
+  /** noShows / totalScheduled — 0 si no hubo citas agendadas */
+  readonly noShowRate: number;
+  /** Top 3 servicios por conteo de citas completadas */
+  readonly topServices: readonly ServiceCount[];
+  /** Pacientes únicos cuya primera cita (en cualquier estado) fue en este mes */
+  readonly newPatients: number;
+  /** Pacientes únicos de citas completadas que ya tenían citas antes de este mes */
+  readonly returningPatients: number;
+  /** Citas completadas en el mes anterior (para comparativo) */
+  readonly previousCompleted: number;
+  /** completed − previousCompleted */
+  readonly completedDelta: number;
+  /** Variación porcentual redondeada a entero. 0 si previousCompleted === 0. */
+  readonly completedDeltaPct: number;
+}

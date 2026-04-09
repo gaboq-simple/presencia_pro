@@ -138,6 +138,8 @@ export const clientConfig = {
     bookingUrl: '',
     instagram: '',
     tiktok: '',
+    // Placeholder — el cliente confirmará la dirección definitiva antes del primer envío.
+    reportEmail: 'jaasiel@gmail.com',
   },
 
   // ─── POST-CONSULTA ────────────────────────────────────────────────────────

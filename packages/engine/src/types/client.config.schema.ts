@@ -219,6 +219,11 @@ const ContactSchema = z.object({
   bookingUrl: UrlOrEmptySchema,
   instagram: UrlOrEmptySchema,
   tiktok: UrlOrEmptySchema,
+  /**
+   * Email del doctor al que se envían los reportes mensuales automáticos.
+   * Opcional — si no está definido, el envío de email se omite sin lanzar error.
+   */
+  reportEmail: z.string().email().optional(),
 });
 
 // ─── SeoSchema ────────────────────────────────────────────────────────────────
@@ -344,3 +349,4 @@ export type IntakeConfig = z.infer<typeof IntakeConfigSchema>;
 export type DesignConfig = z.infer<typeof DesignConfigSchema>;
 export type PostConsultaConfig = z.infer<typeof PostConsultaConfigSchema>;
 export type Product = z.infer<typeof ProductSchema>;
+export type ContactConfig = z.infer<typeof ContactSchema>;
