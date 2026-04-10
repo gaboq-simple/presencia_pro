@@ -2,21 +2,34 @@
 
 // ─── DashboardShell ────────────────────────────────────────────────────────────
 // Client Component wrapper for the dashboard page.
-// Manages interactive state (drawer open/close, modals) that cannot live in a
-// Server Component. Receives all pre-fetched data from dashboard/page.tsx.
+// Manages interactive state (drawer open/close, modals, view toggle) that cannot
+// live in a Server Component. Receives all pre-fetched data from dashboard/page.tsx.
 //
 // Renders (medical profile only):
 //   DayView              — today's appointments (+ Modificar/Cancelar via renderExtraActions)
+//   WeekDashboard        — weekly grid with WeekNav + WeekView
 //   BlockedDaysManager   — monthly day-blocking calendar
 //   PatientHistoryDrawer — slide-in patient expedition drawer
+//
+// View toggle persists in localStorage under key: presenciapro-dashboard-view
+// Initialized with useEffect to avoid SSR hydration mismatch.
 
+import type { CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { CalendarDays, List } from 'lucide-react';
 import { DayView } from '@presenciapro/engine/dashboard';
 import type { AppointmentWithPatient, EmergencySlot } from '@presenciapro/engine/dashboard';
 import { BlockedDaysManager } from './BlockedDaysManager';
 import { PatientHistoryDrawer } from './PatientHistoryDrawer';
 import { AppointmentActions } from './AppointmentActions';
+import { WeekDashboard } from './WeekDashboard';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+type DashboardView = 'day' | 'week';
+
+const STORAGE_KEY = 'presenciapro-dashboard-view';
 
 // ─── Props ─────────────────────────────────────────────────────────────────────
 
@@ -53,28 +66,97 @@ export function DashboardShell({
   const router = useRouter();
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
 
+  // ── View toggle — initialized after mount to avoid SSR hydration mismatch ─
+  const [view, setView] = useState<DashboardView>('day');
+  const [viewReady, setViewReady] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'week' || stored === 'day') {
+      setView(stored);
+    }
+    setViewReady(true);
+  }, []);
+
+  function handleSetView(nextView: DashboardView) {
+    setView(nextView);
+    localStorage.setItem(STORAGE_KEY, nextView);
+  }
+
   // Called by AppointmentActions after a successful reschedule or cancel.
   // router.refresh() re-fetches Server Component data without full navigation.
   const handleAppointmentUpdate = useCallback(() => {
     router.refresh();
   }, [router]);
 
+  // ── Toggle button style helper ────────────────────────────────────────────
+  function toggleBtnStyle(isActive: boolean): CSSProperties {
+    return {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '0.375rem 0.625rem',
+      backgroundColor: isActive ? 'var(--color-accent)' : 'transparent',
+      color: isActive ? 'var(--color-accent-fg)' : 'var(--color-ink-muted)',
+      border: isActive ? '1px solid transparent' : '1px solid var(--color-border)',
+      borderRadius: '0.375rem',
+      cursor: 'pointer',
+    };
+  }
+
   return (
     <>
-      {/* ── Today's appointments ──────────────────────────────────────── */}
-      <DayView
-        appointments={appointments}
-        emergencySlot={emergencySlot}
-        date={date}
-        timezone={timezone}
-        onComplete={onComplete}
-        onNoShow={onNoShow}
-        onReleaseEmergency={onReleaseEmergency}
-        onPatientClick={setActivePatientId}
-        renderExtraActions={(apt) => (
-          <AppointmentActions appointment={apt} onUpdate={handleAppointmentUpdate} />
-        )}
-      />
+      {/* ── View toggle ───────────────────────────────────────────────── */}
+      {viewReady && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: '0.375rem',
+            marginBottom: '1rem',
+          }}
+        >
+          <button
+            onClick={() => handleSetView('week')}
+            title="Vista semanal"
+            aria-label="Vista semanal"
+            aria-pressed={view === 'week'}
+            style={toggleBtnStyle(view === 'week')}
+          >
+            <CalendarDays size={18} />
+          </button>
+          <button
+            onClick={() => handleSetView('day')}
+            title="Vista del día"
+            aria-label="Vista del día"
+            aria-pressed={view === 'day'}
+            style={toggleBtnStyle(view === 'day')}
+          >
+            <List size={18} />
+          </button>
+        </div>
+      )}
+
+      {/* ── Week view ─────────────────────────────────────────────────── */}
+      {viewReady && view === 'week' && <WeekDashboard />}
+
+      {/* ── Day view — default + shown while localStorage loads ───────── */}
+      {(!viewReady || view === 'day') && (
+        <DayView
+          appointments={appointments}
+          emergencySlot={emergencySlot}
+          date={date}
+          timezone={timezone}
+          onComplete={onComplete}
+          onNoShow={onNoShow}
+          onReleaseEmergency={onReleaseEmergency}
+          onPatientClick={setActivePatientId}
+          renderExtraActions={(apt) => (
+            <AppointmentActions appointment={apt} onUpdate={handleAppointmentUpdate} />
+          )}
+        />
+      )}
 
       {/* ── Day-blocking calendar ──────────────────────────────────────── */}
       <BlockedDaysManager
