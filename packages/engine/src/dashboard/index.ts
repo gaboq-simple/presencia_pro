@@ -5,7 +5,8 @@
 
 export { DayView } from './DayView';
 export { IntakeViewer } from './IntakeViewer';
-export { getPatientHistory, getMonthlyMetrics } from './queries';
+export { getPatientHistory, getMonthlyMetrics, getAnalyticsMetrics, getAtRiskPatients } from './queries';
+export { generateAlerts } from './alerts';
 
 export type {
   AppointmentWithPatient,
@@ -19,4 +20,7 @@ export type {
   PatientHistoryAppointment,
   MonthlyMetrics,
   ServiceCount,
+  AnalyticsMetrics,
+  AlertData,
+  AtRiskPatient,
 } from './types';

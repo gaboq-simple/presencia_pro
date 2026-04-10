@@ -95,6 +95,66 @@ export interface PatientHistory {
   readonly appointments: readonly PatientHistoryAppointment[];
 }
 
+// ─── Analytics types ───────────────────────────────────────────────────────────
+
+/**
+ * Alerta generada dinámicamente desde los datos de analytics.
+ * Producida por generateAlerts() — no contiene strings hardcodeados de negocio.
+ */
+export interface AlertData {
+  readonly type: 'warn' | 'ok' | 'info';
+  readonly title: string;
+  readonly subtitle: string;
+  readonly chip: string;
+}
+
+/**
+ * Paciente en riesgo de abandono: sin cita en N días.
+ * Producido por getAtRiskPatients().
+ */
+export interface AtRiskPatient {
+  readonly id: string;
+  readonly name: string;
+  readonly phone: string;
+  readonly initials: string;
+  readonly lastVisit: Date | null;
+  readonly daysSinceLastVisit: number;
+}
+
+/**
+ * Métricas de analytics para un rango de fechas arbitrario.
+ * Producido por getAnalyticsMetrics().
+ */
+export interface AnalyticsMetrics {
+  readonly clientId: string;
+  readonly from: Date;
+  readonly to: Date;
+  readonly completed: number;
+  readonly totalScheduled: number;
+  readonly noShows: number;
+  readonly noShowRate: number;
+  readonly topServices: readonly ServiceCount[];
+  readonly newPatients: number;
+  readonly returningPatients: number;
+  readonly previousCompleted: number;
+  readonly completedDelta: number;
+  readonly completedDeltaPct: number;
+  readonly botConversions: {
+    readonly total: number;
+    readonly booked: number;
+  };
+  /** Ingresos estimados en MXN. 0 si los servicios no tienen precio configurado. */
+  readonly revenueEstimated: number;
+  readonly currency: 'MXN';
+  /**
+   * Citas completadas por día para los 7 días naturales que terminan en `to`.
+   * Siempre 7 elementos — índice 0 = día más antiguo, índice 6 = día más reciente.
+   */
+  readonly completedSparkline: readonly number[];
+  /** Número de pacientes sin cita en más de `riskThresholdDays` días */
+  readonly atRiskPatientCount: number;
+}
+
 // ─── Monthly report metrics ────────────────────────────────────────────────────
 
 /**

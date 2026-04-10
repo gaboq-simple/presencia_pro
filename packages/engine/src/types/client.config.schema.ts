@@ -61,6 +61,12 @@ const BaseServiceSchema = z.object({
   /** Debe coincidir con un Specialist.id de la misma instancia. */
   specialistId: z.string().min(1),
   /**
+   * Precio del servicio en la moneda del cliente (MXN por defecto).
+   * Opcional — se usa para calcular ingresos estimados en el dashboard de analytics.
+   * Si no se define, el ingreso se reporta como 0 para este servicio.
+   */
+  price: z.number().nonnegative().optional(),
+  /**
    * Días sin nueva cita de este servicio antes de enviar reactivación.
    * Si se define, sobreescribe el global postConsulta.reactivationDays para pacientes
    * cuya última cita fue de este tipo de servicio.
@@ -152,11 +158,44 @@ const DesignFontsSchema = z.object({
   body: z.string().min(1),
 });
 
+// ─── AnalyticsDesignSchema ────────────────────────────────────────────────────
+// Tokens de color para el dashboard de analytics (paleta papel premium).
+// Opcional — si no se define, los componentes usan defaults de globals.css.
+
+const AnalyticsDesignSchema = z.object({
+  pg:    z.string(),   // fondo página
+  card:  z.string(),   // fondo cards
+  surf:  z.string(),   // superficie secundaria
+  surf2: z.string(),   // superficie terciaria / bordes internos
+  t1:    z.string(),   // texto primario
+  t2:    z.string(),   // texto secundario
+  t3:    z.string(),   // texto terciario / labels
+  br:    z.string(),   // borde default
+  br2:   z.string(),   // borde énfasis
+  ac:    z.string(),   // acento principal (terracota)
+  acL:   z.string(),   // acento claro
+  acD:   z.string(),   // acento oscuro
+  grn:   z.string(),   // verde positivo
+  grnL:  z.string(),
+  grnD:  z.string(),
+  amb:   z.string(),   // ámbar advertencia
+  ambL:  z.string(),
+  ambD:  z.string(),
+  red:   z.string(),   // rojo urgente
+  redL:  z.string(),
+  redD:  z.string(),
+  hmLo:  z.string(),   // heatmap — ocupación baja (<60%)
+  hmMd:  z.string(),   // heatmap — ocupación media (60–80%)
+  hmHi:  z.string(),   // heatmap — ocupación alta (>80%)
+}).optional();
+
 const DesignConfigSchema = z.object({
   colors: DesignColorsSchema,
   fonts: DesignFontsSchema,
   /** Valor CSS de border-radius base. Ej: "0.5rem" */
   borderRadius: z.string().min(1),
+  /** Tokens de color para el dashboard de analytics. Opcional. */
+  analytics: AnalyticsDesignSchema,
 });
 
 // ─── PostConsultaConfig ───────────────────────────────────────────────────────
@@ -347,6 +386,7 @@ export type BotConfig = z.infer<typeof BotConfigSchema>;
 export type SchedulingConfig = z.infer<typeof SchedulingConfigSchema>;
 export type IntakeConfig = z.infer<typeof IntakeConfigSchema>;
 export type DesignConfig = z.infer<typeof DesignConfigSchema>;
+export type AnalyticsDesignConfig = z.infer<typeof AnalyticsDesignSchema>;
 export type PostConsultaConfig = z.infer<typeof PostConsultaConfigSchema>;
 export type Product = z.infer<typeof ProductSchema>;
 export type ContactConfig = z.infer<typeof ContactSchema>;

@@ -14,6 +14,8 @@ import type {
   IntakeField,
   MonthlyMetrics,
   ServiceCount,
+  AnalyticsMetrics,
+  AtRiskPatient,
 } from './types';
 import type { AppointmentStatus } from '../scheduling/types';
 
@@ -313,4 +315,291 @@ export async function getMonthlyMetrics(params: {
     completedDelta,
     completedDeltaPct,
   };
+}
+
+// ─── getAnalyticsMetrics ───────────────────────────────────────────────────────
+
+type BotConversationRow = { patient_phone: string };
+type PatientPhoneRow = { phone: string };
+type DailyAppointmentRow = { starts_at: string; status: string };
+
+/**
+ * Calcula métricas de analytics para un rango de fechas arbitrario.
+ *
+ * Realiza 7 queries:
+ *  1. Citas del período actual
+ *  2. Citas del período anterior (comparativo)
+ *  3. Citas previas al período para clasificar pacientes nuevos vs recurrentes
+ *  4. Conversaciones del bot en el período
+ *  5. Teléfonos de pacientes con cita agendada en el período (para booked via bot)
+ *  6. Citas completadas en los 7 días anteriores a `to` (sparkline)
+ *  7. Conteo de pacientes en riesgo (sin cita en más de `riskThresholdDays` días)
+ *
+ * @param servicePriceMap - serviceId → precio en MXN. Construido por el API Route
+ *                          desde clientConfig.services. 0 si el servicio no tiene precio.
+ */
+export async function getAnalyticsMetrics(params: {
+  readonly clientId: string;
+  readonly from: Date;
+  readonly to: Date;
+  readonly serviceNameMap: ReadonlyMap<string, string>;
+  readonly servicePriceMap: ReadonlyMap<string, number>;
+  readonly riskThresholdDays: number;
+  readonly supabase: SupabaseClient;
+}): Promise<AnalyticsMetrics> {
+  const { clientId, from, to, serviceNameMap, servicePriceMap, riskThresholdDays, supabase } =
+    params;
+
+  const fromISO = from.toISOString();
+  const toISO   = to.toISOString();
+
+  // ── Previous period (same duration) ─────────────────────────────────────────
+  const durationMs  = to.getTime() - from.getTime();
+  const prevFrom    = new Date(from.getTime() - durationMs);
+  const prevFromISO = prevFrom.toISOString();
+
+  // ── 1. Current period appointments ──────────────────────────────────────────
+  const { data: currentData, error: currentError } = await supabase
+    .from('appointments')
+    .select('id, patient_id, service_id, status')
+    .eq('client_id', clientId)
+    .neq('status', 'emergency_blocked')
+    .gte('starts_at', fromISO)
+    .lt('starts_at', toISO);
+
+  if (currentError) {
+    throw new Error(`getAnalyticsMetrics: current period — ${currentError.message}`);
+  }
+
+  const currentRows    = (currentData ?? []) as AppointmentSummaryRow[];
+  const completedRows  = currentRows.filter((r) => r.status === 'completed');
+  const noShowRows     = currentRows.filter((r) => r.status === 'no_show');
+  const completed      = completedRows.length;
+  const totalScheduled = currentRows.length;
+  const noShows        = noShowRows.length;
+  const noShowRate     = totalScheduled > 0 ? noShows / totalScheduled : 0;
+
+  // ── 2. Previous period completed ─────────────────────────────────────────────
+  const { data: prevData, error: prevError } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('status', 'completed')
+    .gte('starts_at', prevFromISO)
+    .lt('starts_at', fromISO);
+
+  if (prevError) {
+    throw new Error(`getAnalyticsMetrics: previous period — ${prevError.message}`);
+  }
+
+  const previousCompleted = (prevData ?? []).length;
+  const completedDelta    = completed - previousCompleted;
+  const completedDeltaPct =
+    previousCompleted > 0 ? Math.round((completedDelta / previousCompleted) * 100) : 0;
+
+  // ── Top services + revenue ────────────────────────────────────────────────────
+  const serviceCountMap = new Map<string, number>();
+  let revenueEstimated  = 0;
+
+  for (const row of completedRows) {
+    serviceCountMap.set(row.service_id, (serviceCountMap.get(row.service_id) ?? 0) + 1);
+    revenueEstimated += servicePriceMap.get(row.service_id) ?? 0;
+  }
+
+  const topServices: ServiceCount[] = Array.from(serviceCountMap.entries())
+    .map(([serviceId, count]) => ({
+      serviceId,
+      serviceName: serviceNameMap.get(serviceId) ?? serviceId,
+      count,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  // ── New vs returning patients ──────────────────────────────────────────────────
+  const patientIds      = completedRows
+    .map((r) => r.patient_id)
+    .filter((id): id is string => id !== null);
+  const uniquePatientIds = Array.from(new Set(patientIds));
+
+  let newPatients       = 0;
+  let returningPatients = 0;
+
+  if (uniquePatientIds.length > 0) {
+    const { data: priorData, error: priorError } = await supabase
+      .from('appointments')
+      .select('patient_id')
+      .eq('client_id', clientId)
+      .in('patient_id', uniquePatientIds)
+      .lt('starts_at', fromISO)
+      .neq('status', 'emergency_blocked');
+
+    if (priorError) {
+      throw new Error(`getAnalyticsMetrics: prior appointments — ${priorError.message}`);
+    }
+
+    const priorSet = new Set(
+      ((priorData ?? []) as PriorPatientRow[]).map((r) => r.patient_id),
+    );
+
+    for (const pid of uniquePatientIds) {
+      if (priorSet.has(pid)) {
+        returningPatients++;
+      } else {
+        newPatients++;
+      }
+    }
+  }
+
+  // ── 4. Bot conversations ──────────────────────────────────────────────────────
+  const { data: botData, error: botError } = await supabase
+    .from('bot_conversations')
+    .select('patient_phone')
+    .eq('client_id', clientId)
+    .gte('last_message', fromISO)
+    .lt('last_message', toISO);
+
+  if (botError) {
+    throw new Error(`getAnalyticsMetrics: bot conversations — ${botError.message}`);
+  }
+
+  const botPhones = new Set(
+    ((botData ?? []) as BotConversationRow[]).map((r) => r.patient_phone),
+  );
+  const botTotal = botPhones.size;
+
+  // ── 5. Patients who booked (have appointment) AND had a bot conversation ─────
+  let botBooked = 0;
+  if (botPhones.size > 0) {
+    const { data: patientPhoneData, error: phoneError } = await supabase
+      .from('patients')
+      .select('phone')
+      .eq('client_id', clientId)
+      .in('id', uniquePatientIds.length > 0 ? uniquePatientIds : ['__none__']);
+
+    if (phoneError) {
+      throw new Error(`getAnalyticsMetrics: patient phones — ${phoneError.message}`);
+    }
+
+    for (const row of (patientPhoneData ?? []) as PatientPhoneRow[]) {
+      if (botPhones.has(row.phone)) botBooked++;
+    }
+  }
+
+  // ── 6. Sparkline — daily completed counts for last 7 days up to `to` ─────────
+  const sparklineEnd   = new Date(to);
+  const sparklineStart = new Date(to.getTime() - 7 * 24 * 60 * 60_000);
+
+  const { data: sparkData, error: sparkError } = await supabase
+    .from('appointments')
+    .select('starts_at, status')
+    .eq('client_id', clientId)
+    .eq('status', 'completed')
+    .gte('starts_at', sparklineStart.toISOString())
+    .lt('starts_at', sparklineEnd.toISOString());
+
+  if (sparkError) {
+    throw new Error(`getAnalyticsMetrics: sparkline — ${sparkError.message}`);
+  }
+
+  // Build a map day-offset → count (UTC day)
+  const sparkMap = new Map<number, number>();
+  for (const row of (sparkData ?? []) as DailyAppointmentRow[]) {
+    const rowDate    = new Date(row.starts_at);
+    const dayOffset  = Math.floor(
+      (rowDate.getTime() - sparklineStart.getTime()) / (24 * 60 * 60_000),
+    );
+    if (dayOffset >= 0 && dayOffset < 7) {
+      sparkMap.set(dayOffset, (sparkMap.get(dayOffset) ?? 0) + 1);
+    }
+  }
+  const completedSparkline: number[] = Array.from({ length: 7 }, (_, i) => sparkMap.get(i) ?? 0);
+
+  // ── 7. At-risk patient count ───────────────────────────────────────────────────
+  const riskCutoff = new Date(Date.now() - riskThresholdDays * 24 * 60 * 60_000);
+
+  const { count: atRiskCount, error: riskError } = await supabase
+    .from('patients')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .not('last_visit', 'is', null)
+    .lt('last_visit', riskCutoff.toISOString());
+
+  if (riskError) {
+    throw new Error(`getAnalyticsMetrics: at-risk count — ${riskError.message}`);
+  }
+
+  return {
+    clientId,
+    from,
+    to,
+    completed,
+    totalScheduled,
+    noShows,
+    noShowRate,
+    topServices,
+    newPatients,
+    returningPatients,
+    previousCompleted,
+    completedDelta,
+    completedDeltaPct,
+    botConversions: { total: botTotal, booked: botBooked },
+    revenueEstimated,
+    currency: 'MXN',
+    completedSparkline,
+    atRiskPatientCount: atRiskCount ?? 0,
+  };
+}
+
+// ─── getAtRiskPatients ─────────────────────────────────────────────────────────
+
+type PatientRow2 = {
+  id: string;
+  name: string;
+  phone: string;
+  last_visit: string | null;
+};
+
+/**
+ * Retorna los pacientes en riesgo de abandono: sin cita en más de `daysSinceLastVisit` días.
+ * Limitado a `limit` registros, ordenados por `last_visit` ascendente (más rezagados primero).
+ */
+export async function getAtRiskPatients(params: {
+  readonly clientId: string;
+  readonly daysSinceLastVisit: number;
+  readonly limit: number;
+  readonly supabase: SupabaseClient;
+}): Promise<readonly AtRiskPatient[]> {
+  const { clientId, daysSinceLastVisit, limit, supabase } = params;
+  const cutoff = new Date(Date.now() - daysSinceLastVisit * 24 * 60 * 60_000);
+
+  const { data, error } = await supabase
+    .from('patients')
+    .select('id, name, phone, last_visit')
+    .eq('client_id', clientId)
+    .not('last_visit', 'is', null)
+    .lt('last_visit', cutoff.toISOString())
+    .order('last_visit', { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`getAtRiskPatients: ${error.message}`);
+  }
+
+  const now = Date.now();
+
+  return ((data ?? []) as PatientRow2[]).map((row) => {
+    const lastVisit = row.last_visit ? new Date(row.last_visit) : null;
+    const daysSince = lastVisit
+      ? Math.floor((now - lastVisit.getTime()) / (24 * 60 * 60_000))
+      : daysSinceLastVisit;
+
+    // Derive initials from name (first two words)
+    const parts    = row.name.trim().split(/\s+/);
+    const initials =
+      parts.length >= 2
+        ? `${parts[0]![0]}${parts[1]![0]}`.toUpperCase()
+        : (parts[0]?.[0] ?? '?').toUpperCase();
+
+    return { id: row.id, name: row.name, phone: row.phone, initials, lastVisit, daysSinceLastVisit: daysSince };
+  });
 }

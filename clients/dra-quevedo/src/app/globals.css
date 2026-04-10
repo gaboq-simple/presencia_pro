@@ -67,6 +67,68 @@
   --spacing-container-x: clamp(1.25rem, 5vw, 2.5rem);
 }
 
+/* ─── Analytics Design Tokens — Paleta Papel Premium ─────────────────────────
+   Tokens exclusivos para el dashboard de analytics de /dashboard/analytics.
+   Prefijo --an- para evitar colisiones con el sistema de diseño base.
+   En modo oscuro se sobreescriben bajo [data-theme="dark"].
+   ──────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --an-pg:    #FAF8F5;   /* fondo página */
+  --an-card:  #FFFFFF;   /* fondo cards */
+  --an-surf:  #F2EEE8;   /* superficie secundaria */
+  --an-surf2: #E8E2DA;   /* superficie terciaria / bordes internos */
+  --an-t1:    #1C1410;   /* texto primario */
+  --an-t2:    #6B5E52;   /* texto secundario */
+  --an-t3:    #9B8E80;   /* texto terciario / labels */
+  --an-br:    #E8E2DA;   /* borde default */
+  --an-br2:   #D8CEC4;   /* borde énfasis */
+  --an-ac:    #C4916A;   /* acento principal (terracota) */
+  --an-acL:   #FDF5EF;   /* acento claro */
+  --an-acD:   #7A4F2E;   /* acento oscuro */
+  --an-grn:   #5A8A3C;   /* verde positivo */
+  --an-grnL:  #EEF5E8;
+  --an-grnD:  #2E5A1A;
+  --an-amb:   #B87A1A;   /* ámbar advertencia */
+  --an-ambL:  #FEF8E8;
+  --an-ambD:  #7A4A08;
+  --an-red:   #A83228;   /* rojo urgente */
+  --an-redL:  #FCF0EE;
+  --an-redD:  #6A1E16;
+  --an-hmLo:  #F5A89A;   /* heatmap — ocupación baja (<60%) */
+  --an-hmMd:  #F5D78A;   /* heatmap — ocupación media (60–80%) */
+  --an-hmHi:  #9ACFB8;   /* heatmap — ocupación alta (>80%) */
+}
+
+/* ─── Dark mode overrides ────────────────────────────────────────────────────
+   Activado con data-theme="dark" en <html>. Toggle guardado en localStorage
+   bajo la key "presenciapro-theme".
+   ──────────────────────────────────────────────────────────────────────────── */
+
+[data-theme="dark"] {
+  --an-pg:    #100D0A;
+  --an-card:  #1A1410;
+  --an-surf:  #221C16;
+  --an-surf2: #2C231B;
+  --an-t1:    #F5F0EB;
+  --an-t2:    #A89880;
+  --an-t3:    #6B5A48;
+  --an-br:    #2C231B;
+  --an-br2:   #3A2E22;
+  --an-ac:    #E8A878;
+  --an-acL:   #2A1A0E;
+  --an-acD:   #F0C4A0;
+  --an-grn:   #7ABF5A;
+  --an-grnL:  #0E1F08;
+  --an-amb:   #E8A030;
+  --an-ambL:  #2A1C04;
+  --an-red:   #E85050;
+  --an-redL:  #2A0808;
+  --an-hmLo:  #5A1A14;
+  --an-hmMd:  #5A3A08;
+  --an-hmHi:  #0E3A28;
+}
+
 /* ─── Base ───────────────────────────────────────────────────────────────────*/
 
 *,

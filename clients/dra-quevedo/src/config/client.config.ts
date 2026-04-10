@@ -73,6 +73,7 @@ export const clientConfig = {
       specialistId: 'quevedo',
       postConsultaProducts: ['serum-vitamina-c', 'protector-solar-spf50'],
       followUpDays: 120,
+      price: 2800,   // MXN — precio base del servicio
     },
     {
       id: 'domicilio',
@@ -83,6 +84,7 @@ export const clientConfig = {
       modes: ['domicilio'] as const,
       specialistId: 'quevedo',
       postConsultaProducts: [],
+      price: 2800,   // MXN — igual al botox-facial (modalidad del mismo servicio)
     },
     {
       id: 'consulta-inicial',
@@ -94,6 +96,7 @@ export const clientConfig = {
       specialistId: 'quevedo',
       postConsultaProducts: [],
       followUpDays: 180,
+      price: 800,    // MXN — consulta inicial
     },
   ],
 
@@ -208,6 +211,35 @@ export const clientConfig = {
       body: 'Inter',
     },
     borderRadius: '0.5rem',
+
+    // ─── Analytics palette — papel premium ───────────────────────────────────
+    // Estos tokens se leen en analytics/layout.tsx para inyectar CSS variables.
+    analytics: {
+      pg:    '#FAF8F5',
+      card:  '#FFFFFF',
+      surf:  '#F2EEE8',
+      surf2: '#E8E2DA',
+      t1:    '#1C1410',
+      t2:    '#6B5E52',
+      t3:    '#9B8E80',
+      br:    '#E8E2DA',
+      br2:   '#D8CEC4',
+      ac:    '#C4916A',
+      acL:   '#FDF5EF',
+      acD:   '#7A4F2E',
+      grn:   '#5A8A3C',
+      grnL:  '#EEF5E8',
+      grnD:  '#2E5A1A',
+      amb:   '#B87A1A',
+      ambL:  '#FEF8E8',
+      ambD:  '#7A4A08',
+      red:   '#A83228',
+      redL:  '#FCF0EE',
+      redD:  '#6A1E16',
+      hmLo:  '#F5A89A',
+      hmMd:  '#F5D78A',
+      hmHi:  '#9ACFB8',
+    },
   },
 
 } satisfies ClientConfig;
