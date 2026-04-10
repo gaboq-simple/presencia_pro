@@ -187,6 +187,8 @@ const AnalyticsDesignSchema = z.object({
   hmLo:  z.string(),   // heatmap — ocupación baja (<60%)
   hmMd:  z.string(),   // heatmap — ocupación media (60–80%)
   hmHi:  z.string(),   // heatmap — ocupación alta (>80%)
+  /** Meta de ingresos mensuales en MXN. Si se omite, RevenueCard oculta la barra de progreso. */
+  monthlyRevenueGoal: z.number().positive().optional(),
 }).optional();
 
 const DesignConfigSchema = z.object({

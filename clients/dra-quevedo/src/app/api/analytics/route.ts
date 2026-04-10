@@ -149,6 +149,13 @@ export async function GET(request: Request): Promise<Response> {
       to:   metrics.to.toISOString(),
       topServices: metrics.topServices.map((s) => ({ ...s })),
       completedSparkline: [...metrics.completedSparkline],
+      sparklines: {
+        completed:   [...metrics.sparklines.completed],
+        newPatients: [...metrics.sparklines.newPatients],
+        noShows:     [...metrics.sparklines.noShows],
+        botChats:    [...metrics.sparklines.botChats],
+      },
+      heatmap: metrics.heatmap.map((c) => ({ ...c })),
     },
     alerts,
     atRiskPatients: atRiskPatients.map((p) => ({

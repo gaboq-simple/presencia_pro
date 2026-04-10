@@ -8,12 +8,12 @@ export type RevenueCardProps = {
   readonly value: string;
   readonly breakdown: string;
   readonly achieved: number;
-  readonly goal: number;
+  readonly goal?: number;
   readonly trend: number[];
 };
 
 export function RevenueCard({ value, breakdown, achieved, goal, trend }: RevenueCardProps) {
-  const pct  = goal > 0 ? Math.min(100, Math.round((achieved / goal) * 100)) : 0;
+  const pct  = goal !== undefined && goal > 0 ? Math.min(100, Math.round((achieved / goal) * 100)) : 0;
   const maxT = Math.max(...trend, 1);
   const tHeights = trend.map((v) => Math.max(3, Math.round((v / maxT) * 22)));
   const lastIdx  = trend.length - 1;
@@ -63,41 +63,43 @@ export function RevenueCard({ value, breakdown, achieved, goal, trend }: Revenue
         {breakdown}
       </p>
 
-      {/* Barra de progreso */}
-      <div>
-        <div
-          style={{
-            height: '5px',
-            backgroundColor: 'var(--an-surf)',
-            borderRadius: '3px',
-            overflow: 'hidden',
-          }}
-        >
+      {/* Barra de progreso — solo si hay meta configurada */}
+      {goal !== undefined && (
+        <div>
           <div
             style={{
-              width: `${pct}%`,
-              height: '100%',
-              backgroundColor: 'var(--an-ac)',
+              height: '5px',
+              backgroundColor: 'var(--an-surf)',
               borderRadius: '3px',
-              transition: 'width 0.3s ease',
+              overflow: 'hidden',
             }}
-          />
+          >
+            <div
+              style={{
+                width: `${pct}%`,
+                height: '100%',
+                backgroundColor: 'var(--an-ac)',
+                borderRadius: '3px',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              marginTop: '4px',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: '10px', color: 'var(--an-t3)' }}>
+              {pct}% de la meta
+            </p>
+            <p style={{ margin: 0, fontSize: '10px', color: 'var(--an-t3)' }}>
+              {value} / {goal.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })}
+            </p>
+          </div>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            marginTop: '4px',
-          }}
-        >
-          <p style={{ margin: 0, fontSize: '10px', color: 'var(--an-t3)' }}>
-            {pct}% de la meta
-          </p>
-          <p style={{ margin: 0, fontSize: '10px', color: 'var(--an-t3)' }}>
-            {value} / {goal.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })}
-          </p>
-        </div>
-      </div>
+      )}
 
       {/* Mini sparkline */}
       <div

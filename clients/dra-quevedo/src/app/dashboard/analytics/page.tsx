@@ -139,6 +139,13 @@ export default async function AnalyticsPage({
         ...metrics,
         from: metrics.from.toISOString(),
         to: metrics.to.toISOString(),
+        sparklines: {
+          completed:   [...metrics.sparklines.completed],
+          newPatients: [...metrics.sparklines.newPatients],
+          noShows:     [...metrics.sparklines.noShows],
+          botChats:    [...metrics.sparklines.botChats],
+        },
+        heatmap: metrics.heatmap.map((c) => ({ ...c })),
       }}
       initialAlerts={alerts}
       initialAtRiskPatients={atRiskPatients.map((p) => ({
@@ -147,6 +154,7 @@ export default async function AnalyticsPage({
       }))}
       initialPeriod={period}
       clientId={clientId}
+      revenueGoal={clientConfig.design.analytics?.monthlyRevenueGoal}
     />
   );
 }

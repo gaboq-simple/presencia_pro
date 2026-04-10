@@ -215,6 +215,7 @@ export const clientConfig = {
     // ─── Analytics palette — papel premium ───────────────────────────────────
     // Estos tokens se leen en analytics/layout.tsx para inyectar CSS variables.
     analytics: {
+      monthlyRevenueGoal: 50000,
       pg:    '#FAF8F5',
       card:  '#FFFFFF',
       surf:  '#F2EEE8',

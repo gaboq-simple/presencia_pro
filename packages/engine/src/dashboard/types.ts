@@ -151,6 +151,22 @@ export interface AnalyticsMetrics {
    * Siempre 7 elementos — índice 0 = día más antiguo, índice 6 = día más reciente.
    */
   readonly completedSparkline: readonly number[];
+  /**
+   * Sparklines por métrica individual — 7 puntos, últimos 7 días naturales hasta `to`.
+   * Índice 0 = día más antiguo, índice 6 = día más reciente.
+   */
+  readonly sparklines: {
+    readonly completed:   readonly number[];
+    readonly newPatients: readonly number[];
+    readonly noShows:     readonly number[];
+    readonly botChats:    readonly number[];
+  };
+  /**
+   * Ocupación histórica por día de semana y hora.
+   * day: DOW (0=dom…6=sab), hour: 0–23, pct: 0–100.
+   * Solo contiene combinaciones con al menos 1 cita en el período.
+   */
+  readonly heatmap: ReadonlyArray<{ readonly day: number; readonly hour: number; readonly pct: number }>;
   /** Número de pacientes sin cita en más de `riskThresholdDays` días */
   readonly atRiskPatientCount: number;
 }

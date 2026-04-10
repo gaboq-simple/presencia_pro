@@ -2,18 +2,22 @@
 
 // ─── OccupancyHeatmap ──────────────────────────────────────────────────────────
 // Grid 5 días × 7 horarios con colores de ocupación.
-// TODO: conectar con query de ocupación histórica (ver CLAUDE.md — open decisions).
-// Actualmente usa datos mock realistas para mostrar el componente.
+// Datos reales de DB via getOccupancyHeatmap().
 // hmLo (<60%): #F5A89A, hmMd (60–80%): #F5D78A, hmHi (>80%): #9ACFB8.
+// Celdas sin datos históricos: surf2 #E8E2DA + tooltip "Sin datos históricos".
 
 import type { HeatmapCell } from './types';
 
 export type OccupancyHeatmapProps = {
-  readonly data: HeatmapCell[];
+  readonly data: readonly HeatmapCell[];
 };
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'];
-const HOUR_LABELS = ['09:00', '10:00', '11:00', '12:00', '14:00', '16:00', '18:00'];
+const HOUR_INTS  = [9, 10, 11, 12, 14, 16, 18] as const;
+const HOUR_LABELS = HOUR_INTS.map((h) => `${String(h).padStart(2, '0')}:00`);
+
+// DOW → display index: 1=lun→0, 2=mar→1, 3=mié→2, 4=jue→3, 5=vie→4
+const DOW_TO_DISPLAY: Readonly<Record<number, number>> = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4 };
 
 function cellColor(pct: number): string {
   if (pct >= 80) return 'var(--an-hmHi)';
@@ -21,29 +25,50 @@ function cellColor(pct: number): string {
   return 'var(--an-hmLo)';
 }
 
-/** Devuelve la recomendación dinámica basada en los datos del heatmap. */
-function buildRecommendation(data: HeatmapCell[]): string {
-  if (data.length === 0) return '';
+/** Devuelve la recomendación dinámica basada en el cellMap procesado. */
+function buildRecommendation(cellMap: ReadonlyMap<string, number>): string {
+  if (cellMap.size === 0) return '';
 
-  const maxCell = data.reduce((a, b) => (b.pct > a.pct ? b : a), data[0]!);
-  const minCell = data.reduce((a, b) => (b.pct < a.pct ? b : a), data[0]!);
+  let maxKey = '';
+  let maxPct = -1;
+  let minKey = '';
+  let minPct = 101;
 
-  const dayOf = (d: number) => DAY_LABELS[d] ?? `Día ${d}`;
+  for (const [key, pct] of cellMap) {
+    if (pct > maxPct) { maxPct = pct; maxKey = key; }
+    if (pct < minPct) { minPct = pct; minKey = key; }
+  }
+
+  if (!maxKey || !minKey) return '';
+
+  const parseKey = (k: string): [number, number] => {
+    const sep = k.indexOf(':');
+    return [parseInt(k.slice(0, sep), 10), parseInt(k.slice(sep + 1), 10)];
+  };
+
+  const [maxDay, maxHour] = parseKey(maxKey);
+  const [minDay, minHour] = parseKey(minKey);
+
+  const dayLabel  = (d: number) => DAY_LABELS[d] ?? `Día ${d}`;
+  const hourLabel = (h: number) => `${String(h).padStart(2, '0')}:00`;
 
   return (
-    `${dayOf(maxCell.day)} a las ${maxCell.hour} tiene ocupación máxima (${maxCell.pct}%). ` +
-    `Considera ${minCell.pct < 40 ? 'cerrar' : 'abrir'} más horarios el ${dayOf(minCell.day)} a las ${minCell.hour} (${minCell.pct}% ocupado).`
+    `${dayLabel(maxDay)} a las ${hourLabel(maxHour)} tiene ocupación máxima (${maxPct}%). ` +
+    `Considera ${minPct < 40 ? 'cerrar' : 'abrir'} más horarios el ${dayLabel(minDay)} a las ${hourLabel(minHour)} (${minPct}% ocupado).`
   );
 }
 
 export function OccupancyHeatmap({ data }: OccupancyHeatmapProps) {
-  const recommendation = buildRecommendation(data);
-
-  // Indexar por [day][hour] para lookup eficiente
+  // Transformar datos: DOW + integer hour → display index + integer hour
+  // La clave en cellMap es `${displayIdx}:${hourInt}`
   const cellMap = new Map<string, number>();
   for (const cell of data) {
-    cellMap.set(`${cell.day}:${cell.hour}`, cell.pct);
+    const displayIdx = DOW_TO_DISPLAY[cell.day];
+    if (displayIdx === undefined) continue; // saltar fines de semana
+    cellMap.set(`${displayIdx}:${cell.hour}`, cell.pct);
   }
+
+  const recommendation = buildRecommendation(cellMap);
 
   return (
     <div
@@ -123,8 +148,8 @@ export function OccupancyHeatmap({ data }: OccupancyHeatmapProps) {
             </tr>
           </thead>
           <tbody>
-            {HOUR_LABELS.map((hour) => (
-              <tr key={hour}>
+            {HOUR_INTS.map((hourInt, rowIdx) => (
+              <tr key={hourInt}>
                 <td
                   style={{
                     fontSize: '10px',
@@ -134,19 +159,23 @@ export function OccupancyHeatmap({ data }: OccupancyHeatmapProps) {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {hour}
+                  {HOUR_LABELS[rowIdx]}
                 </td>
-                {DAY_LABELS.map((_, dayIdx) => {
-                  const pct = cellMap.get(`${dayIdx}:${hour}`) ?? 0;
-                  const dayName = DAY_LABELS[dayIdx] ?? '';
+                {DAY_LABELS.map((dayName, dayIdx) => {
+                  const key     = `${dayIdx}:${hourInt}`;
+                  const hasData = cellMap.has(key);
+                  const pct     = cellMap.get(key) ?? 0;
+                  const tooltip = hasData
+                    ? `${dayName} ${HOUR_LABELS[rowIdx]} — ${pct}% ocupado`
+                    : `${dayName} ${HOUR_LABELS[rowIdx]} — Sin datos históricos`;
                   return (
                     <td key={dayIdx} style={{ padding: 0 }}>
                       <div
-                        title={`${dayName} ${hour} — ${pct}% ocupado`}
+                        title={tooltip}
                         style={{
                           height: '22px',
                           borderRadius: '4px',
-                          backgroundColor: pct > 0 ? cellColor(pct) : 'var(--an-surf)',
+                          backgroundColor: hasData ? cellColor(pct) : 'var(--an-surf2)',
                           cursor: 'default',
                         }}
                       />

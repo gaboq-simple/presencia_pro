@@ -13,14 +13,14 @@
 //   [OccupancyHeatmap | PatientAttentionList] — grid 2 columnas
 //   [OccupancyGauge | RevenueCard | BotConversionCard] — grid 3 columnas
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { Sun, Moon } from 'lucide-react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import type {
   SerializedAnalyticsMetrics,
   SerializedAlertData,
   SerializedAtRiskPatient,
   Period,
-  HeatmapCell,
 } from './types';
 
 import { PeriodSelector }       from './PeriodSelector';
@@ -34,32 +34,6 @@ import { OccupancyGauge }       from './OccupancyGauge';
 import { RevenueCard }          from './RevenueCard';
 import { BotConversionCard }    from './BotConversionCard';
 
-// ─── Mock heatmap ──────────────────────────────────────────────────────────────
-// TODO: reemplazar con query de ocupación histórica (ver CLAUDE.md — open decisions)
-
-const MOCK_HEATMAP: HeatmapCell[] = [
-  { day: 0, hour: '09:00', pct: 55 }, { day: 1, hour: '09:00', pct: 72 },
-  { day: 2, hour: '09:00', pct: 45 }, { day: 3, hour: '09:00', pct: 88 },
-  { day: 4, hour: '09:00', pct: 60 },
-  { day: 0, hour: '10:00', pct: 94 }, { day: 1, hour: '10:00', pct: 85 },
-  { day: 2, hour: '10:00', pct: 78 }, { day: 3, hour: '10:00', pct: 91 },
-  { day: 4, hour: '10:00', pct: 82 },
-  { day: 0, hour: '11:00', pct: 88 }, { day: 1, hour: '11:00', pct: 75 },
-  { day: 2, hour: '11:00', pct: 68 }, { day: 3, hour: '11:00', pct: 80 },
-  { day: 4, hour: '11:00', pct: 72 },
-  { day: 0, hour: '12:00', pct: 62 }, { day: 1, hour: '12:00', pct: 58 },
-  { day: 2, hour: '12:00', pct: 40 }, { day: 3, hour: '12:00', pct: 55 },
-  { day: 4, hour: '12:00', pct: 48 },
-  { day: 0, hour: '14:00', pct: 78 }, { day: 1, hour: '14:00', pct: 85 },
-  { day: 2, hour: '14:00', pct: 92 }, { day: 3, hour: '14:00', pct: 70 },
-  { day: 4, hour: '14:00', pct: 65 },
-  { day: 0, hour: '16:00', pct: 70 }, { day: 1, hour: '16:00', pct: 65 },
-  { day: 2, hour: '16:00', pct: 80 }, { day: 3, hour: '16:00', pct: 88 },
-  { day: 4, hour: '16:00', pct: 75 },
-  { day: 0, hour: '18:00', pct: 35 }, { day: 1, hour: '18:00', pct: 42 },
-  { day: 2, hour: '18:00', pct: 30 }, { day: 3, hour: '18:00', pct: 50 },
-  { day: 4, hour: '18:00', pct: 28 },
-];
 
 // ─── Props ─────────────────────────────────────────────────────────────────────
 
@@ -69,6 +43,7 @@ type Props = {
   readonly initialAtRiskPatients: readonly SerializedAtRiskPatient[];
   readonly initialPeriod: Period;
   readonly clientId: string;
+  readonly revenueGoal?: number;
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -99,12 +74,32 @@ export function AnalyticsDashboard({
   initialAtRiskPatients,
   initialPeriod,
   clientId,
+  revenueGoal,
 }: Props) {
   const [period, setPeriod]           = useState<Period>(initialPeriod);
   const [metrics, setMetrics]         = useState(initialMetrics);
   const [alerts, setAlerts]           = useState(initialAlerts);
   const [atRisk, setAtRisk]           = useState(initialAtRiskPatients);
   const [loading, setLoading]         = useState(false);
+  const [isDark, setIsDark]           = useState(false);
+
+  // ── Inicializar tema desde localStorage (post-mount, sin hydration mismatch) ──
+  useEffect(() => {
+    const saved = localStorage.getItem('presenciapro-theme');
+    const dark = saved === 'dark';
+    setIsDark(dark);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : '');
+  }, []);
+
+  const handleThemeToggle = useCallback(() => {
+    setIsDark((prev) => {
+      const next = !prev;
+      const value = next ? 'dark' : '';
+      document.documentElement.setAttribute('data-theme', value);
+      localStorage.setItem('presenciapro-theme', value);
+      return next;
+    });
+  }, []);
 
   // Refetch cuando cambia el período
   const handlePeriodChange = useCallback(async (p: Period) => {
@@ -142,12 +137,6 @@ export function AnalyticsDashboard({
   const occupancyPct = calcOccupancyPct(metrics);
   const totalPatients = metrics.newPatients + metrics.returningPatients;
 
-  // Revenue goal: mock hasta tener config de metas
-  const revenueGoal = 50_000;
-
-  // KPI sparklines: completedSparkline del engine (7 días)
-  const spark = [...metrics.completedSparkline] as number[];
-
   return (
     <div
       style={{
@@ -158,9 +147,28 @@ export function AnalyticsDashboard({
         transition: 'opacity 0.2s ease',
       }}
     >
-      {/* ── PeriodSelector ─────────────────────────────────────────────────── */}
-      <div style={{ marginBottom: '4px' }}>
+      {/* ── PeriodSelector + Dark mode toggle ──────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
         <PeriodSelector period={period} onChange={handlePeriodChange} />
+        <button
+          onClick={handleThemeToggle}
+          aria-label={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            border: '1px solid var(--an-br)',
+            backgroundColor: 'var(--an-card)',
+            color: 'var(--an-t2)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          {isDark ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
       </div>
 
       {/* ── AlertBanners ───────────────────────────────────────────────────── */}
@@ -185,28 +193,28 @@ export function AnalyticsDashboard({
           value={String(metrics.completed)}
           delta={fmtPct(metrics.completedDeltaPct)}
           direction={metrics.completedDelta > 0 ? 'up' : metrics.completedDelta < 0 ? 'down' : 'neutral'}
-          sparkline={spark}
+          sparkline={[...metrics.sparklines.completed]}
         />
         <KPICard
           label="Nuevos pacientes"
           value={String(metrics.newPatients)}
           delta={totalPatients > 0 ? `${Math.round((metrics.newPatients / totalPatients) * 100)}% del total` : '—'}
           direction="neutral"
-          sparkline={[0, 0, 0, 0, 0, 0, metrics.newPatients]} // TODO: sparkline propio de pacientes nuevos
+          sparkline={[...metrics.sparklines.newPatients]}
         />
         <KPICard
           label="No-shows"
           value={String(metrics.noShows)}
           delta={`${Math.round(metrics.noShowRate * 100)}% de citas`}
           direction={metrics.noShowRate > 0.15 ? 'down' : metrics.noShows === 0 ? 'up' : 'neutral'}
-          sparkline={[0, 0, 0, 0, 0, 0, metrics.noShows]} // TODO: sparkline propio de no-shows
+          sparkline={[...metrics.sparklines.noShows]}
         />
         <KPICard
           label="Ingresos estimados"
           value={fmtMXN(metrics.revenueEstimated)}
           delta={fmtPct(metrics.completedDeltaPct)}
           direction={metrics.completedDelta > 0 ? 'up' : metrics.completedDelta < 0 ? 'down' : 'neutral'}
-          sparkline={spark}
+          sparkline={[...metrics.sparklines.completed]}
         />
       </div>
 
@@ -239,7 +247,7 @@ export function AnalyticsDashboard({
           gap: '8px',
         }}
       >
-        <OccupancyHeatmap data={MOCK_HEATMAP} />
+        <OccupancyHeatmap data={metrics.heatmap} />
         <PatientAttentionList patients={atRisk} />
       </div>
 
@@ -260,7 +268,7 @@ export function AnalyticsDashboard({
           breakdown={`${metrics.completed} citas · ${metrics.currency}`}
           achieved={metrics.revenueEstimated}
           goal={revenueGoal}
-          trend={spark}
+          trend={[...metrics.sparklines.completed]}
         />
         <BotConversionCard
           chats={metrics.botConversions.total}

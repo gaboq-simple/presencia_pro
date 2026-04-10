@@ -317,11 +317,70 @@ export async function getMonthlyMetrics(params: {
   };
 }
 
+// ─── getOccupancyHeatmap ───────────────────────────────────────────────────────
+
+type HeatmapAppointmentRow = { starts_at: string; status: string };
+
+/**
+ * Calcula la tasa de ocupación por día de semana y hora para el rango dado.
+ * Agrupa en JavaScript — no requiere RPC SQL.
+ *
+ * @returns Array de celdas con datos (solo combinaciones día/hora con citas).
+ *   day: DOW (0=dom…6=sab), hour: 0–23, pct: % citas completadas / total.
+ *   Celdas sin citas históricas NO se incluyen — el componente las muestra como "Sin datos históricos".
+ */
+export async function getOccupancyHeatmap(params: {
+  readonly clientId: string;
+  readonly from: Date;
+  readonly to: Date;
+  readonly supabase: SupabaseClient;
+}): Promise<ReadonlyArray<{ readonly day: number; readonly hour: number; readonly pct: number }>> {
+  const { clientId, from, to, supabase } = params;
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('starts_at, status')
+    .eq('client_id', clientId)
+    .neq('status', 'emergency_blocked')
+    .gte('starts_at', from.toISOString())
+    .lt('starts_at', to.toISOString());
+
+  if (error) {
+    throw new Error(`getOccupancyHeatmap: ${error.message}`);
+  }
+
+  type CellAcc = { completed: number; total: number };
+  const accMap = new Map<string, CellAcc>();
+
+  for (const row of (data ?? []) as HeatmapAppointmentRow[]) {
+    const d    = new Date(row.starts_at);
+    const day  = d.getUTCDay();
+    const hour = d.getUTCHours();
+    const key  = `${day}:${hour}`;
+    const acc  = accMap.get(key) ?? { completed: 0, total: 0 };
+    accMap.set(key, {
+      completed: acc.completed + (row.status === 'completed' ? 1 : 0),
+      total:     acc.total + 1,
+    });
+  }
+
+  const result: Array<{ day: number; hour: number; pct: number }> = [];
+  for (const [key, acc] of accMap) {
+    const sepIdx = key.indexOf(':');
+    const day    = parseInt(key.slice(0, sepIdx), 10);
+    const hour   = parseInt(key.slice(sepIdx + 1), 10);
+    const pct    = Math.round((acc.completed / acc.total) * 100);
+    result.push({ day, hour, pct });
+  }
+
+  return result;
+}
+
 // ─── getAnalyticsMetrics ───────────────────────────────────────────────────────
 
-type BotConversationRow = { patient_phone: string };
+type BotConversationRow = { patient_phone: string; last_message: string };
 type PatientPhoneRow = { phone: string };
-type DailyAppointmentRow = { starts_at: string; status: string };
+type SparkAppointmentRow = { starts_at: string; status: string; patient_id: string | null };
 
 /**
  * Calcula métricas de analytics para un rango de fechas arbitrario.
@@ -423,6 +482,8 @@ export async function getAnalyticsMetrics(params: {
 
   let newPatients       = 0;
   let returningPatients = 0;
+  // priorSet is hoisted here so sparkline computation can reference it
+  let priorSet = new Set<string>();
 
   if (uniquePatientIds.length > 0) {
     const { data: priorData, error: priorError } = await supabase
@@ -437,7 +498,7 @@ export async function getAnalyticsMetrics(params: {
       throw new Error(`getAnalyticsMetrics: prior appointments — ${priorError.message}`);
     }
 
-    const priorSet = new Set(
+    priorSet = new Set(
       ((priorData ?? []) as PriorPatientRow[]).map((r) => r.patient_id),
     );
 
@@ -453,7 +514,7 @@ export async function getAnalyticsMetrics(params: {
   // ── 4. Bot conversations ──────────────────────────────────────────────────────
   const { data: botData, error: botError } = await supabase
     .from('bot_conversations')
-    .select('patient_phone')
+    .select('patient_phone, last_message')
     .eq('client_id', clientId)
     .gte('last_message', fromISO)
     .lt('last_message', toISO);
@@ -485,15 +546,15 @@ export async function getAnalyticsMetrics(params: {
     }
   }
 
-  // ── 6. Sparkline — daily completed counts for last 7 days up to `to` ─────────
+  // ── 6. Sparklines — últimos 7 días naturales hasta `to` por métrica ──────────
   const sparklineEnd   = new Date(to);
   const sparklineStart = new Date(to.getTime() - 7 * 24 * 60 * 60_000);
 
   const { data: sparkData, error: sparkError } = await supabase
     .from('appointments')
-    .select('starts_at, status')
+    .select('starts_at, status, patient_id')
     .eq('client_id', clientId)
-    .eq('status', 'completed')
+    .in('status', ['completed', 'no_show'])
     .gte('starts_at', sparklineStart.toISOString())
     .lt('starts_at', sparklineEnd.toISOString());
 
@@ -501,28 +562,66 @@ export async function getAnalyticsMetrics(params: {
     throw new Error(`getAnalyticsMetrics: sparkline — ${sparkError.message}`);
   }
 
-  // Build a map day-offset → count (UTC day)
-  const sparkMap = new Map<number, number>();
-  for (const row of (sparkData ?? []) as DailyAppointmentRow[]) {
-    const rowDate    = new Date(row.starts_at);
-    const dayOffset  = Math.floor(
+  // Build per-metric sparkline maps (day-offset 0–6 = oldest…newest)
+  const sparkCompletedMap   = new Map<number, number>();
+  const sparkNoShowsMap     = new Map<number, number>();
+  const sparkNewPatientSets = new Map<number, Set<string>>();
+
+  for (const row of (sparkData ?? []) as SparkAppointmentRow[]) {
+    const rowDate   = new Date(row.starts_at);
+    const dayOffset = Math.floor(
       (rowDate.getTime() - sparklineStart.getTime()) / (24 * 60 * 60_000),
     );
-    if (dayOffset >= 0 && dayOffset < 7) {
-      sparkMap.set(dayOffset, (sparkMap.get(dayOffset) ?? 0) + 1);
+    if (dayOffset < 0 || dayOffset >= 7) continue;
+
+    if (row.status === 'completed') {
+      sparkCompletedMap.set(dayOffset, (sparkCompletedMap.get(dayOffset) ?? 0) + 1);
+      // Guard: only count as new patient if patient_id not in prior set (approximate)
+      if (row.patient_id !== null && !priorSet.has(row.patient_id)) {
+        const set = sparkNewPatientSets.get(dayOffset) ?? new Set<string>();
+        set.add(row.patient_id);
+        sparkNewPatientSets.set(dayOffset, set);
+      }
+    } else if (row.status === 'no_show') {
+      sparkNoShowsMap.set(dayOffset, (sparkNoShowsMap.get(dayOffset) ?? 0) + 1);
     }
   }
-  const completedSparkline: number[] = Array.from({ length: 7 }, (_, i) => sparkMap.get(i) ?? 0);
 
-  // ── 7. At-risk patient count ───────────────────────────────────────────────────
+  // Bot chats sparkline — uses botData already fetched (filtered by analytics period)
+  const sparkBotMap = new Map<number, number>();
+  for (const row of (botData ?? []) as BotConversationRow[]) {
+    const msgDate   = new Date(row.last_message);
+    const dayOffset = Math.floor(
+      (msgDate.getTime() - sparklineStart.getTime()) / (24 * 60 * 60_000),
+    );
+    if (dayOffset >= 0 && dayOffset < 7) {
+      sparkBotMap.set(dayOffset, (sparkBotMap.get(dayOffset) ?? 0) + 1);
+    }
+  }
+
+  const completedSparkline: number[] = Array.from({ length: 7 }, (_, i) => sparkCompletedMap.get(i) ?? 0);
+  const sparklines = {
+    completed:   Array.from({ length: 7 }, (_, i) => sparkCompletedMap.get(i) ?? 0),
+    newPatients: Array.from({ length: 7 }, (_, i) => sparkNewPatientSets.get(i)?.size ?? 0),
+    noShows:     Array.from({ length: 7 }, (_, i) => sparkNoShowsMap.get(i) ?? 0),
+    botChats:    Array.from({ length: 7 }, (_, i) => sparkBotMap.get(i) ?? 0),
+  } as const;
+
+  // ── 7. At-risk count + 8. Heatmap — en paralelo (independientes) ─────────────
   const riskCutoff = new Date(Date.now() - riskThresholdDays * 24 * 60 * 60_000);
 
-  const { count: atRiskCount, error: riskError } = await supabase
-    .from('patients')
-    .select('id', { count: 'exact', head: true })
-    .eq('client_id', clientId)
-    .not('last_visit', 'is', null)
-    .lt('last_visit', riskCutoff.toISOString());
+  const [
+    { count: atRiskCount, error: riskError },
+    heatmap,
+  ] = await Promise.all([
+    supabase
+      .from('patients')
+      .select('id', { count: 'exact', head: true })
+      .eq('client_id', clientId)
+      .not('last_visit', 'is', null)
+      .lt('last_visit', riskCutoff.toISOString()),
+    getOccupancyHeatmap({ clientId, from, to, supabase }),
+  ]);
 
   if (riskError) {
     throw new Error(`getAnalyticsMetrics: at-risk count — ${riskError.message}`);
@@ -546,6 +645,8 @@ export async function getAnalyticsMetrics(params: {
     revenueEstimated,
     currency: 'MXN',
     completedSparkline,
+    sparklines,
+    heatmap,
     atRiskPatientCount: atRiskCount ?? 0,
   };
 }

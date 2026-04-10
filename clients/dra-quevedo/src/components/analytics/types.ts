@@ -41,6 +41,15 @@ export interface SerializedAnalyticsMetrics {
   readonly revenueEstimated: number;
   readonly currency: 'MXN';
   readonly completedSparkline: readonly number[];
+  /** Sparklines individuales por métrica — 7 puntos, últimos 7 días hasta `to`. */
+  readonly sparklines: {
+    readonly completed:   readonly number[];
+    readonly newPatients: readonly number[];
+    readonly noShows:     readonly number[];
+    readonly botChats:    readonly number[];
+  };
+  /** Ocupación histórica por día/hora. Solo celdas con datos. */
+  readonly heatmap: ReadonlyArray<{ readonly day: number; readonly hour: number; readonly pct: number }>;
   readonly atRiskPatientCount: number;
 }
 
@@ -53,9 +62,9 @@ export interface SerializedAtRiskPatient {
   readonly daysSinceLastVisit: number;
 }
 
-/** Datos mock del heatmap de ocupación hasta tener query histórica */
+/** Celda del heatmap de ocupación — datos reales de DB. */
 export interface HeatmapCell {
-  readonly day: number;     // 0=lunes … 4=viernes
-  readonly hour: string;    // "09:00"
-  readonly pct: number;     // 0–100
+  readonly day: number;   // DOW: 0=dom … 6=sab
+  readonly hour: number;  // 0–23
+  readonly pct: number;   // 0–100
 }
