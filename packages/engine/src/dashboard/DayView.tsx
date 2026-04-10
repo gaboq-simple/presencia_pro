@@ -9,7 +9,7 @@
 // Receives pre-fetched data from the Server Component (dashboard/page.tsx).
 // Server Actions are injected as props so this component stays framework-agnostic.
 
-import { useState, useTransition } from 'react';
+import React, { useState, useTransition } from 'react';
 import { IntakeViewer } from './IntakeViewer';
 import type { AppointmentWithPatient, EmergencySlot } from './types';
 
@@ -26,6 +26,10 @@ type DayViewProps = {
   /** Optional — when provided, an "Ver expediente" link appears on each card.
    *  Used by PatientHistoryDrawer (medical profile only). */
   readonly onPatientClick?: (patientId: string) => void;
+  /** Optional — render prop for extra per-appointment actions (e.g. Modificar/Cancelar).
+   *  Only called for actionable appointments (pending, pending_confirmation, confirmed).
+   *  The rendered node is injected below the built-in action buttons. */
+  readonly renderExtraActions?: (appointment: AppointmentWithPatient) => React.ReactNode;
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,9 +85,10 @@ type CardProps = {
   onComplete: (id: string) => Promise<void>;
   onNoShow: (id: string) => Promise<void>;
   onPatientClick?: (patientId: string) => void;
+  renderExtraActions?: (appointment: AppointmentWithPatient) => React.ReactNode;
 };
 
-function AppointmentCard({ appointment, timezone, onComplete, onNoShow, onPatientClick }: CardProps) {
+function AppointmentCard({ appointment, timezone, onComplete, onNoShow, onPatientClick, renderExtraActions }: CardProps) {
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [isPendingComplete, startComplete] = useTransition();
   const [isPendingNoShow, startNoShow] = useTransition();
@@ -232,6 +237,9 @@ function AppointmentCard({ appointment, timezone, onComplete, onNoShow, onPatien
         </div>
       )}
 
+      {/* ── Extra actions (Modificar / Cancelar) — injected by client ── */}
+      {canAct && renderExtraActions?.(appointment)}
+
       {/* ── Intake toggle ────────────────────────────────────────────── */}
       {appointment.intakeData ? (
         <>
@@ -338,6 +346,7 @@ export function DayView({
   onNoShow,
   onReleaseEmergency,
   onPatientClick,
+  renderExtraActions,
 }: DayViewProps) {
   const activeAppointments = appointments.filter(
     (a) => a.status !== 'cancelled',
@@ -399,6 +408,7 @@ export function DayView({
               onComplete={onComplete}
               onNoShow={onNoShow}
               onPatientClick={onPatientClick}
+              renderExtraActions={renderExtraActions}
             />
           ))}
         </div>

@@ -2,19 +2,21 @@
 
 // ─── DashboardShell ────────────────────────────────────────────────────────────
 // Client Component wrapper for the dashboard page.
-// Manages interactive state (drawer open/close) that cannot live in a Server
-// Component. Receives all pre-fetched data from dashboard/page.tsx.
+// Manages interactive state (drawer open/close, modals) that cannot live in a
+// Server Component. Receives all pre-fetched data from dashboard/page.tsx.
 //
 // Renders (medical profile only):
-//   DayView              — today's appointments
+//   DayView              — today's appointments (+ Modificar/Cancelar via renderExtraActions)
 //   BlockedDaysManager   — monthly day-blocking calendar
 //   PatientHistoryDrawer — slide-in patient expedition drawer
 
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useState, useCallback } from 'react';
 import { DayView } from '@presenciapro/engine/dashboard';
 import type { AppointmentWithPatient, EmergencySlot } from '@presenciapro/engine/dashboard';
 import { BlockedDaysManager } from './BlockedDaysManager';
 import { PatientHistoryDrawer } from './PatientHistoryDrawer';
+import { AppointmentActions } from './AppointmentActions';
 
 // ─── Props ─────────────────────────────────────────────────────────────────────
 
@@ -48,7 +50,14 @@ export function DashboardShell({
   specialistId,
   appointmentDates,
 }: Props) {
+  const router = useRouter();
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
+
+  // Called by AppointmentActions after a successful reschedule or cancel.
+  // router.refresh() re-fetches Server Component data without full navigation.
+  const handleAppointmentUpdate = useCallback(() => {
+    router.refresh();
+  }, [router]);
 
   return (
     <>
@@ -62,6 +71,9 @@ export function DashboardShell({
         onNoShow={onNoShow}
         onReleaseEmergency={onReleaseEmergency}
         onPatientClick={setActivePatientId}
+        renderExtraActions={(apt) => (
+          <AppointmentActions appointment={apt} onUpdate={handleAppointmentUpdate} />
+        )}
       />
 
       {/* ── Day-blocking calendar ──────────────────────────────────────── */}
