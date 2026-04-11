@@ -86,7 +86,8 @@ export async function scheduleReminder(
     .insert({
       client_id:      request.clientId,
       appointment_id: request.appointmentId,
-      patient_phone:  request.patientPhone,
+      patient_phone:  request.patientWhatsappId,   // Edge Function compat — dispatcher lee patient_phone
+      whatsapp_id:    request.patientWhatsappId,
       patient_email:  request.patientEmail,
       type:           request.type,
       channel:        request.channel,

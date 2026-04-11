@@ -324,7 +324,7 @@ export async function POST(request: Request): Promise<Response> {
                     {
                       clientId: clientConfig.client.id,
                       appointmentId: appointment.id,
-                      patientPhone:  whatsappId,   // campo legacy — se mantiene por compatibilidad
+                      patientWhatsappId: whatsappId,
                       patientEmail:  null,
                       type: 'appointment_reminder',
                       channel: 'whatsapp',

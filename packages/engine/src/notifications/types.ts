@@ -54,7 +54,7 @@ export interface ScheduledNotification {
 export interface ReminderRequest {
   readonly clientId: string;
   readonly appointmentId: string | null;
-  readonly patientPhone: string | null;
+  readonly patientWhatsappId: string | null;
   readonly patientEmail: string | null;
   readonly type: ReminderType;
   readonly channel: NotificationChannel;

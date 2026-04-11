@@ -176,7 +176,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       .eq('id', appt.patient_id)
       .maybeSingle();
 
-    const patient = patientRow as { name: string; phone: string } | null;
+    const patient = patientRow as { name: string; whatsapp_id: string } | null;
 
     if (patient?.whatsapp_id) {
       const timezone = clientConfig.client.timezone;
