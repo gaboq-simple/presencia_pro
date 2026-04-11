@@ -17,17 +17,18 @@ export type { TimeSlot, Appointment } from '../scheduling';
 
 export type AppointmentRequest = {
   readonly clientId: string
-  readonly patientPhone: string    // el bot conoce el teléfono, no el UUID
+  readonly patientWhatsappId: string  // identificador canónico normalizado del paciente
   readonly specialistId: string
   readonly serviceId: string
   readonly serviceMode: 'domicilio' | 'consultorio'
-  readonly startsAt: Date          // Date object — conversión a ISO en el webhook handler
+  readonly startsAt: Date             // Date object — conversión a ISO en el webhook handler
 }
 
 // ─── Incoming message ─────────────────────────────────────────────────────────
 
 export type IncomingMessage = {
-  readonly from: string           // número WhatsApp del paciente — ej: "5215558056215"
+  readonly whatsappId: string     // identificador canónico normalizado — reemplaza 'from'
+  readonly rawFrom: string        // valor original del webhook — para logs únicamente
   readonly body: string           // texto del mensaje recibido
   readonly clientId: string       // para cargar config del cliente correcto
   readonly timestamp: Date
@@ -90,7 +91,7 @@ export type ConversationMessage = {
 export type ConversationState = {
   readonly id: string
   readonly clientId: string
-  readonly patientPhone: string
+  readonly whatsappId: string     // identificador canónico normalizado del paciente
   readonly state: ConversationStep
   readonly context: ConversationContext
   readonly lastMessage: Date

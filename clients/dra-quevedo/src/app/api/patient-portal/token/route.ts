@@ -15,7 +15,7 @@ import { clientConfig } from '@/config/client.config';
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const BodySchema = z.object({
-  patientPhone: z.string().min(1),
+  whatsappId: z.string().min(1),
 });
 
 // ─── Row shapes ───────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     .from('patients')
     .select('id')
     .eq('client_id', clientId)
-    .eq('phone', body.patientPhone)
+    .eq('whatsapp_id', body.whatsappId)
     .maybeSingle<PatientRow>();
 
   // Guard: paciente no encontrado — 404 genérico sin revelar detalles

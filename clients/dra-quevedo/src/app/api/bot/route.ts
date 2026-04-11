@@ -12,6 +12,7 @@ import type { Appointment, GoogleCredentials } from '@presenciapro/engine/schedu
 import { sendWhatsApp, scheduleReminder } from '@presenciapro/engine/notifications';
 import type { WhatsAppCredentials } from '@presenciapro/engine/notifications';
 import { generateIntakeUrl } from '@presenciapro/engine/intake';
+import { normalizeWhatsAppId } from '@presenciapro/engine/utils';
 import { clientConfig } from '@/config/client.config';
 import { buildNewAppointmentNotification } from '@/lib/doctor-notifications';
 
@@ -91,20 +92,21 @@ function extractTextMessages(payload: MetaWebhookPayload): MetaTextMessage[] {
 // ─── Patient resolution ───────────────────────────────────────────────────────
 
 /**
- * Busca o crea un paciente por teléfono. Devuelve su UUID.
- * UNIQUE(client_id, phone) garantiza que el upsert retorna el registro existente
+ * Busca o crea un paciente por whatsapp_id canónico. Devuelve su UUID.
+ * UNIQUE(client_id, whatsapp_id) garantiza que el upsert retorna el registro existente
  * si el paciente ya tiene citas previas.
+ * phone queda NULL al crear — se llena cuando el paciente lo proporciona en el intake.
  */
 async function resolvePatientId(
   supabase: SupabaseClient,
   clientId: string,
-  phone: string,
+  whatsappId: string,
 ): Promise<string> {
   const { data, error } = await supabase
     .from('patients')
     .upsert(
-      { client_id: clientId, phone },
-      { onConflict: 'client_id,phone' },
+      { client_id: clientId, whatsapp_id: whatsappId },
+      { onConflict: 'client_id,whatsapp_id' },
     )
     .select('id')
     .single();
@@ -196,8 +198,12 @@ export async function POST(request: Request): Promise<Response> {
       };
 
       for (const msg of sorted) {
+        // ── Normalizar identificador una sola vez al recibirlo ─────────────
+        const whatsappId = normalizeWhatsAppId(msg.from);
+
         const incoming: IncomingMessage = {
-          from: msg.from,
+          whatsappId,
+          rawFrom: msg.from,
           body: msg.text.body,
           clientId: clientConfig.client.id,
           timestamp: new Date(Number(msg.timestamp) * 1000),
@@ -209,7 +215,7 @@ export async function POST(request: Request): Promise<Response> {
           const preResolvedPatientId = await resolvePatientId(
             supabase,
             clientConfig.client.id,
-            msg.from,
+            whatsappId,
           ).catch(() => null);
 
           let upcomingAppointmentOpt: HandleIncomingMessageOptions['upcomingAppointment'];
@@ -243,7 +249,7 @@ export async function POST(request: Request): Promise<Response> {
 
           // ── 1. Enviar respuesta al paciente ──────────────────────────────
           await sendWhatsApp(
-            { to: incoming.from, body: botResponse.message },
+            { to: whatsappId, body: botResponse.message },
             whatsappCreds,
           );
 
@@ -253,11 +259,11 @@ export async function POST(request: Request): Promise<Response> {
           if (action?.type === 'CREATE_APPOINTMENT') {
             const botData = action.data;
 
-            // patientPhone → UUID: lookup/upsert en tabla patients
+            // patientWhatsappId → UUID: lookup/upsert en tabla patients
             const patientId = await resolvePatientId(
               supabase,
               clientConfig.client.id,
-              botData.patientPhone,
+              botData.patientWhatsappId,
             );
 
             const appointment = await createAppointment(
@@ -273,7 +279,7 @@ export async function POST(request: Request): Promise<Response> {
             );
 
             // Persistir appointmentId y transicionar estado de conversación
-            const conv = await getConversation(clientConfig.client.id, incoming.from);
+            const conv = await getConversation(clientConfig.client.id, whatsappId);
             if (conv) {
               const nextStep = clientConfig.scheduling.confirmationRequired
                 ? 'AWAITING_CONFIRMATION'
@@ -318,8 +324,8 @@ export async function POST(request: Request): Promise<Response> {
                     {
                       clientId: clientConfig.client.id,
                       appointmentId: appointment.id,
-                      patientPhone: botData.patientPhone,
-                      patientEmail: null,
+                      patientPhone:  whatsappId,   // campo legacy — se mantiene por compatibilidad
+                      patientEmail:  null,
                       type: 'appointment_reminder',
                       channel: 'whatsapp',
                       scheduledFor,
@@ -331,7 +337,7 @@ export async function POST(request: Request): Promise<Response> {
               }
             }
 
-            // Notificación a la doctora (hueco B.5)
+            // Notificación a la doctora
             const specialist = clientConfig.specialists.find(
               (s) => s.id === botData.specialistId,
             );
@@ -341,7 +347,7 @@ export async function POST(request: Request): Promise<Response> {
                   to: specialist.whatsapp,
                   body: buildNewAppointmentNotification(
                     appointment,
-                    botData.patientPhone,
+                    whatsappId,
                     clientConfig,
                   ),
                 },
@@ -367,7 +373,7 @@ export async function POST(request: Request): Promise<Response> {
               });
               await sendWhatsApp(
                 {
-                  to: incoming.from,
+                  to: whatsappId,
                   body: `Para completar tu cita, por favor llena este breve formulario médico antes de tu consulta 📋\n\n${intakeUrl}\n\nTiene validez por 48 horas.`,
                 },
                 whatsappCreds,

@@ -378,8 +378,8 @@ export async function getOccupancyHeatmap(params: {
 
 // ─── getAnalyticsMetrics ───────────────────────────────────────────────────────
 
-type BotConversationRow = { patient_phone: string; last_message: string };
-type PatientPhoneRow = { phone: string };
+type BotConversationRow = { whatsapp_id: string; last_message: string };
+type PatientPhoneRow = { whatsapp_id: string };
 type SparkAppointmentRow = { starts_at: string; status: string; patient_id: string | null };
 
 /**
@@ -514,7 +514,7 @@ export async function getAnalyticsMetrics(params: {
   // ── 4. Bot conversations ──────────────────────────────────────────────────────
   const { data: botData, error: botError } = await supabase
     .from('bot_conversations')
-    .select('patient_phone, last_message')
+    .select('whatsapp_id, last_message')
     .eq('client_id', clientId)
     .gte('last_message', fromISO)
     .lt('last_message', toISO);
@@ -524,7 +524,7 @@ export async function getAnalyticsMetrics(params: {
   }
 
   const botPhones = new Set(
-    ((botData ?? []) as BotConversationRow[]).map((r) => r.patient_phone),
+    ((botData ?? []) as BotConversationRow[]).map((r) => r.whatsapp_id),
   );
   const botTotal = botPhones.size;
 
@@ -533,7 +533,7 @@ export async function getAnalyticsMetrics(params: {
   if (botPhones.size > 0) {
     const { data: patientPhoneData, error: phoneError } = await supabase
       .from('patients')
-      .select('phone')
+      .select('whatsapp_id')
       .eq('client_id', clientId)
       .in('id', uniquePatientIds.length > 0 ? uniquePatientIds : ['__none__']);
 
@@ -542,7 +542,7 @@ export async function getAnalyticsMetrics(params: {
     }
 
     for (const row of (patientPhoneData ?? []) as PatientPhoneRow[]) {
-      if (botPhones.has(row.phone)) botBooked++;
+      if (botPhones.has(row.whatsapp_id)) botBooked++;
     }
   }
 

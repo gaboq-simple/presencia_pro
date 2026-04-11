@@ -108,11 +108,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   // ── Obtener teléfono del paciente para notificaciones ─────────────────────
   const { data: patientRow } = await supabase
     .from('patients')
-    .select('phone')
+    .select('whatsapp_id')
     .eq('id', appointment.patientId)
     .single();
 
-  const patientPhone = (patientRow as { phone: string } | null)?.phone ?? null;
+  const patientWhatsappId = (patientRow as { whatsapp_id: string } | null)?.whatsapp_id ?? null;
 
   // ── 3. Notificar al especialista ──────────────────────────────────────────
   const service    = clientConfig.services.find((s) => s.id === appointment.serviceId);
@@ -133,7 +133,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         to: specialist.whatsapp,
         body:
           `❌ Cita cancelada por paciente\n\n` +
-          `Paciente: +${patientPhone ?? appointment.patientId}\n` +
+          `Paciente: +${patientWhatsappId ?? appointment.patientId}\n` +
           `Servicio: ${service?.name ?? appointment.serviceId}\n` +
           `Fecha: ${fecha}\n` +
           `Razón: cancelación desde link de recordatorio`,

@@ -96,17 +96,17 @@ export async function POST(request: Request): Promise<NextResponse> {
   // Obtener teléfono del paciente — está en la tabla patients, no en appointments
   const { data: patientRow } = await supabase
     .from('patients')
-    .select('phone')
+    .select('whatsapp_id')
     .eq('id', appointment.patientId)
     .single();
 
-  const patientPhone = (patientRow as { phone: string } | null)?.phone ?? null;
+  const patientWhatsappId = (patientRow as { whatsapp_id: string } | null)?.whatsapp_id ?? null;
   const now = new Date();
 
   for (const hours of clientConfig.scheduling.reminderSchedule) {
     const scheduledFor = new Date(appointment.startsAt.getTime() - hours * 60 * 60_000);
     // Guard: solo programar si el momento del recordatorio es futuro
-    if (scheduledFor > now && patientPhone) {
+    if (scheduledFor > now && patientWhatsappId) {
       // Recordatorio de 24h incluye link firmado de cancelación
       let messageBody: string | undefined;
       if (hours === 24 && appointment.patientId) {
@@ -132,7 +132,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         {
           clientId,
           appointmentId,
-          patientPhone,
+          patientWhatsappId,
           patientEmail: null,
           type: 'appointment_reminder',
           channel: 'whatsapp',

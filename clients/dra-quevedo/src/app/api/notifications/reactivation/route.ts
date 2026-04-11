@@ -24,7 +24,7 @@ function verifyCronSecret(request: Request): boolean {
 
 interface PatientRow {
   id:         string;
-  phone:      string;
+  whatsapp_id: string;
   name:       string | null;
   last_visit: string;  // ISO 8601
 }
@@ -73,7 +73,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // ── 1. Candidatos: last_visit > minDays días ──────────────────────────────
   const { data: candidates, error: candidatesError } = await supabase
     .from('patients')
-    .select('id, phone, name, last_visit')
+    .select('id, whatsapp_id, name, last_visit')
     .eq('client_id', clientId)
     .lt('last_visit', dbCutoff.toISOString())
     .not('last_visit', 'is', null);
@@ -115,7 +115,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // ── 4. Filtrar elegibles (excluir activos y con reactivación reciente) ────
   const potentiallyEligible = (candidates as PatientRow[]).filter(
-    (p) => !activePatientIds.has(p.id) && !recentPhones.has(p.phone),
+    (p) => !activePatientIds.has(p.id) && !recentPhones.has(p.whatsapp_id),
   );
 
   if (potentiallyEligible.length === 0) {
@@ -165,7 +165,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   for (const patient of eligible) {
     const result = await sendWhatsApp(
-      { to: patient.phone, body: reactivationMsg },
+      { to: patient.whatsapp_id, body: reactivationMsg },
       whatsappCreds,
     );
 
@@ -178,7 +178,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     await supabase.from('scheduled_notifications').insert({
       client_id:      clientId,
       appointment_id: null,
-      patient_phone:  patient.phone,
+      patient_phone:  patient.whatsapp_id,
       patient_email:  null,
       type:           'reactivation',
       channel:        'whatsapp',

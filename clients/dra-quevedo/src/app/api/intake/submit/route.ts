@@ -79,18 +79,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (apptRow?.patient_id) {
       const { data: patientRow } = await supabase
         .from('patients')
-        .select('phone')
+        .select('whatsapp_id')
         .eq('id', (apptRow as { patient_id: string }).patient_id)
         .eq('client_id', decoded.clientId)
         .single();
 
-      const phone = (patientRow as { phone: string } | null)?.phone;
-      if (phone) {
+      const whatsappId = (patientRow as { whatsapp_id: string } | null)?.whatsapp_id;
+      if (whatsappId) {
         const { data: convRow } = await supabase
           .from('bot_conversations')
           .select('id, context')
           .eq('client_id', decoded.clientId)
-          .eq('patient_phone', phone)
+          .eq('whatsapp_id', whatsappId)
           .maybeSingle();
 
         if (convRow) {

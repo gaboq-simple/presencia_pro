@@ -16,6 +16,7 @@
     "./bot": "./src/bot/index.ts",
     "./dashboard": "./src/dashboard/index.ts",
     "./intake": "./src/intake/index.ts",
-    "./portal": "./src/utils/patientPortalTokens.ts"
+    "./portal": "./src/utils/patientPortalTokens.ts",
+    "./utils": "./src/utils/index.ts"
   }
 }

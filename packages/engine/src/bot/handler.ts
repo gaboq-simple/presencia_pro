@@ -38,7 +38,6 @@ function appendToHistory(
   content: string,
 ): ConversationMessage[] {
   const updated = [...(context.messages ?? []), { role, content }];
-  // Keep last N messages to avoid token overflow
   return updated.slice(-MAX_HISTORY_MESSAGES);
 }
 
@@ -113,17 +112,10 @@ function contextUpdatesFromAction(
 }
 
 // ─── Confirmation response intercept ─────────────────────────────────────────
-// Cuando la conversación está en AWAITING_CONFIRMATION, el bot no llama a Claude.
-// Detecta SÍ/NO de forma determinista y devuelve la acción correspondiente.
 
 const YES_PATTERN = /^(s[ií]|1|confirmo?|confirmar|yes|ok|dale|va|claro|perfecto|listo)$/i;
 const NO_PATTERN = /^(no?|2|cancelar|cancel)$/i;
 
-/**
- * Maneja la respuesta del paciente cuando el bot espera confirmación de cita.
- * No llama a Claude — lógica determinista de SÍ/NO.
- * Las acciones CONFIRM_APPOINTMENT y CANCEL_APPOINTMENT son ejecutadas por el webhook.
- */
 async function handleConfirmationResponse(
   message: IncomingMessage,
   conversation: ConversationState,
@@ -132,7 +124,6 @@ async function handleConfirmationResponse(
   const trimmed = message.body.trim();
   const appointmentId = conversation.context.appointmentId;
 
-  // Guard: si falta appointmentId escalamos — no debería ocurrir en condiciones normales
   if (!appointmentId) {
     if (conversation.id) {
       try {
@@ -145,7 +136,6 @@ async function handleConfirmationResponse(
     };
   }
 
-  // ── Respuesta afirmativa ───────────────────────────────────────────────────
   if (YES_PATTERN.test(trimmed)) {
     if (conversation.id) {
       try {
@@ -163,7 +153,6 @@ async function handleConfirmationResponse(
     };
   }
 
-  // ── Respuesta negativa ────────────────────────────────────────────────────
   if (NO_PATTERN.test(trimmed)) {
     if (conversation.id) {
       try {
@@ -180,7 +169,6 @@ async function handleConfirmationResponse(
     };
   }
 
-  // ── Respuesta ambigua ─────────────────────────────────────────────────────
   const retries = conversation.context.confirmationRetries ?? 0;
 
   if (retries < 1) {
@@ -196,7 +184,6 @@ async function handleConfirmationResponse(
     };
   }
 
-  // Segunda vez sin respuesta válida — escalamos a humano
   if (conversation.id) {
     try {
       await updateConversation(conversation.id, { state: 'ESCALATED' });
@@ -213,14 +200,7 @@ async function handleConfirmationResponse(
 }
 
 // ─── Cancel confirmation response intercept ───────────────────────────────────
-// Cuando el bot detectó intención de cancelar y preguntó para confirmar,
-// se intercede aquí antes de llamar a Claude con lógica determinista SÍ/NO.
 
-/**
- * Maneja la respuesta del paciente cuando el bot esperaba confirmación de cancelación.
- * Si confirma → devuelve acción CANCEL_APPOINTMENT.
- * Si niega → reanuda flujo normal sin cancelar.
- */
 async function handleCancelConfirmationResponse(
   message: IncomingMessage,
   conversation: ConversationState,
@@ -228,7 +208,6 @@ async function handleCancelConfirmationResponse(
   const trimmed = message.body.trim();
   const appointmentId = conversation.context.pendingCancelAppointmentId;
 
-  // Guard: sin appointmentId no podemos continuar — reanudar flujo normal
   if (!appointmentId) {
     if (conversation.id) {
       try {
@@ -238,7 +217,6 @@ async function handleCancelConfirmationResponse(
     return { message: 'Entendido, seguimos con el flujo normal. En qué te puedo ayudar?' };
   }
 
-  // ── Respuesta afirmativa — cancelar ────────────────────────────────────────
   if (YES_PATTERN.test(trimmed)) {
     if (conversation.id) {
       try {
@@ -254,7 +232,6 @@ async function handleCancelConfirmationResponse(
     };
   }
 
-  // ── Respuesta negativa — mantener cita ────────────────────────────────────
   if (NO_PATTERN.test(trimmed)) {
     if (conversation.id) {
       try {
@@ -269,7 +246,6 @@ async function handleCancelConfirmationResponse(
     };
   }
 
-  // ── Respuesta ambigua ─────────────────────────────────────────────────────
   return {
     message: 'Para confirmar la cancelación responde *Sí*, o *No* si prefieres mantener tu cita.',
   };
@@ -284,12 +260,9 @@ function buildAwayResponse(config: ClientConfig): BotResponse {
 // ─── Empty / non-text message ─────────────────────────────────────────────────
 
 function isEmptyOrEmojiOnly(text: string): boolean {
-  // Strip emojis and whitespace — if nothing remains, treat as empty
   const stripped = text.replace(/\p{Emoji}/gu, '').trim();
   return stripped.length === 0;
 }
-
-// ─── Main handler ─────────────────────────────────────────────────────────────
 
 // ─── Options ──────────────────────────────────────────────────────────────────
 
@@ -308,7 +281,7 @@ export type HandleIncomingMessageOptions = {
 /**
  * Procesa un mensaje entrante de WhatsApp y devuelve la respuesta del bot.
  *
- * @param message - Mensaje entrante del paciente
+ * @param message - Mensaje entrante del paciente (whatsappId ya normalizado por el webhook)
  * @param config  - Configuración del cliente (cargada por el webhook, nunca hardcodeada aquí)
  * @param opts    - Opciones opcionales: cita próxima para detección de intención de cancelación
  */
@@ -331,14 +304,14 @@ export async function handleIncomingMessage(
   let conversation: ConversationState;
 
   try {
-    const existing = await getConversation(message.clientId, message.from);
-    conversation = existing ?? (await createConversation(message.clientId, message.from));
+    const existing = await getConversation(message.clientId, message.whatsappId);
+    conversation = existing ?? (await createConversation(message.clientId, message.whatsappId));
   } catch {
     // Guard: Supabase read failed — create fresh conversation, never block the patient
     conversation = {
       id: '',
       clientId: message.clientId,
-      patientPhone: message.from,
+      whatsappId: message.whatsappId,
       state: 'GREETING',
       context: {},
       lastMessage: message.timestamp,

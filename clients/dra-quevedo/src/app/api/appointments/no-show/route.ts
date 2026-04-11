@@ -102,21 +102,21 @@ export async function POST(request: Request): Promise<NextResponse> {
   // ── 4. Obtener teléfono del paciente para notificar al especialista ────────
   const { data: patientRow } = await supabase
     .from('patients')
-    .select('phone')
+    .select('whatsapp_id')
     .eq('id', appointment.patientId)
     .single();
 
-  const patientPhone = (patientRow as { phone: string } | null)?.phone ?? null;
+  const patientWhatsappId = (patientRow as { whatsapp_id: string } | null)?.whatsapp_id ?? null;
 
   // ── 5. Notificar al especialista (NO al paciente — decisión de la doctora) ─
   const specialist = clientConfig.specialists.find(
     (s) => s.id === appointment.specialistId,
   );
-  if (specialist?.whatsapp && patientPhone) {
+  if (specialist?.whatsapp && patientWhatsappId) {
     await sendWhatsApp(
       {
         to: specialist.whatsapp,
-        body: buildNoShowNotification(appointment, patientPhone, clientConfig),
+        body: buildNoShowNotification(appointment, patientWhatsappId, clientConfig),
       },
       whatsappCreds,
     ).catch(() => { /* fire-and-forget — non-fatal */ });

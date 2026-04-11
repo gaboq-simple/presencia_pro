@@ -128,17 +128,17 @@ export async function POST(request: Request): Promise<NextResponse> {
   // ── Obtener teléfono del paciente para notificaciones ─────────────────────
   const { data: patientRow } = await supabase
     .from('patients')
-    .select('phone')
+    .select('whatsapp_id')
     .eq('id', appointment.patientId)
     .single();
 
-  const patientPhone = (patientRow as { phone: string } | null)?.phone ?? null;
+  const patientWhatsappId = (patientRow as { whatsapp_id: string } | null)?.whatsapp_id ?? null;
 
   // ── 4. Notificar al paciente ───────────────────────────────────────────────
-  if (patientPhone) {
+  if (patientWhatsappId) {
     await sendWhatsApp(
       {
-        to: patientPhone,
+        to: patientWhatsappId,
         body: 'Tu cita ha sido cancelada. Si quieres agendar en otro momento, escríbenos y con gusto te ayudamos.',
       },
       whatsappCreds,
@@ -164,7 +164,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         to: specialist.whatsapp,
         body:
           `❌ Cita cancelada\n\n` +
-          `Paciente: +${patientPhone ?? appointment.patientId}\n` +
+          `Paciente: +${patientWhatsappId ?? appointment.patientId}\n` +
           `Servicio: ${service?.name ?? appointment.serviceId}\n` +
           `Fecha: ${fecha}\n` +
           `Razón: ${reason ?? 'no especificada'}`,

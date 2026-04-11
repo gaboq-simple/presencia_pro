@@ -24,7 +24,7 @@ function getSupabaseClient() {
 type ConversationRow = {
   id: string;
   client_id: string;
-  patient_phone: string;
+  whatsapp_id: string;
   state: string;
   context: Record<string, unknown>;
   last_message: string;
@@ -35,7 +35,7 @@ function rowToState(row: ConversationRow): ConversationState {
   return {
     id: row.id,
     clientId: row.client_id,
-    patientPhone: row.patient_phone,
+    whatsappId: row.whatsapp_id,
     state: row.state as ConversationStep,
     context: row.context as ConversationContext,
     lastMessage: new Date(row.last_message),
@@ -46,11 +46,12 @@ function rowToState(row: ConversationRow): ConversationState {
 
 /**
  * Retorna la conversación activa del paciente para este cliente.
+ * Busca por whatsapp_id normalizado — no por patient_phone legacy.
  * Retorna null si no existe — el caller decide si crear una nueva.
  */
 export async function getConversation(
   clientId: string,
-  patientPhone: string,
+  whatsappId: string,
 ): Promise<ConversationState | null> {
   const supabase = getSupabaseClient();
 
@@ -58,7 +59,7 @@ export async function getConversation(
     .from('bot_conversations')
     .select('*')
     .eq('client_id', clientId)
-    .eq('patient_phone', patientPhone)
+    .eq('whatsapp_id', whatsappId)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -71,18 +72,20 @@ export async function getConversation(
 
 /**
  * Crea una conversación nueva en estado GREETING para el paciente.
+ * Persiste whatsapp_id normalizado y mantiene patient_phone para compatibilidad.
  */
 export async function createConversation(
   clientId: string,
-  patientPhone: string,
+  whatsappId: string,
 ): Promise<ConversationState> {
   const supabase = getSupabaseClient();
 
   const { data, error } = await supabase
     .from('bot_conversations')
     .insert({
-      client_id: clientId,
-      patient_phone: patientPhone,
+      client_id:    clientId,
+      whatsapp_id:  whatsappId,
+      patient_phone: whatsappId,  // mantener patient_phone por compatibilidad con datos existentes
       state: 'GREETING' satisfies ConversationStep,
       context: {},
       last_message: new Date().toISOString(),

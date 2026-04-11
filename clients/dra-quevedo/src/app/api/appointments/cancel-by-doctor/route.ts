@@ -172,13 +172,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (appt.patient_id && accountSid && authToken && fromNumber) {
     const { data: patientRow } = await supabase
       .from('patients')
-      .select('name, phone')
+      .select('name, whatsapp_id')
       .eq('id', appt.patient_id)
       .maybeSingle();
 
     const patient = patientRow as { name: string; phone: string } | null;
 
-    if (patient?.phone) {
+    if (patient?.whatsapp_id) {
       const timezone = clientConfig.client.timezone;
       const startsAt = new Date(appt.starts_at);
 
@@ -201,7 +201,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
       await sendWhatsApp(
         {
-          to: patient.phone,
+          to: patient.whatsapp_id,
           body: [
             `Hola ${firstName}, tu cita del ${fecha} a las ${hora} ha sido cancelada.`,
             '',

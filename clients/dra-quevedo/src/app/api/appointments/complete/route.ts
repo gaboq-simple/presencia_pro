@@ -113,15 +113,15 @@ export async function POST(request: Request): Promise<NextResponse> {
   // ── Obtener teléfono del paciente ─────────────────────────────────────────
   const { data: patientRow } = await supabase
     .from('patients')
-    .select('phone')
+    .select('whatsapp_id')
     .eq('id', appointment.patientId)
     .single();
 
-  const patientPhone = (patientRow as { phone: string } | null)?.phone ?? null;
+  const patientWhatsappId = (patientRow as { whatsapp_id: string } | null)?.whatsapp_id ?? null;
   const now = new Date();
 
   // ── 3. Programar post_consulta (1h después de ends_at) ────────────────────
-  if (patientPhone) {
+  if (patientWhatsappId) {
     const postConsultaFor = new Date(appointment.endsAt.getTime() + 60 * 60_000);
     // Guard: solo programar si el momento es futuro
     if (postConsultaFor > now) {
@@ -129,7 +129,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         {
           clientId,
           appointmentId,
-          patientPhone,
+          patientWhatsappId,
           patientEmail: null,
           type: 'post_consulta',
           channel: 'whatsapp',
@@ -149,7 +149,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     cancellationWindowMs:  clientConfig.scheduling.cancellationWindowHours * 60 * 60_000,
   });
 
-  if (patientPhone && reviewEligible) {
+  if (patientWhatsappId && reviewEligible) {
     const reviewFor = new Date(
       appointment.endsAt.getTime() +
         clientConfig.postConsulta.reviewRequestDelayHours * 60 * 60_000,
@@ -160,7 +160,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         {
           clientId,
           appointmentId,
-          patientPhone,
+          patientWhatsappId,
           patientEmail: null,
           type: 'review_request',
           channel: 'whatsapp',
@@ -183,13 +183,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   const specialist = clientConfig.specialists.find(
     (s) => s.id === appointment.specialistId,
   );
-  if (specialist?.whatsapp && patientPhone) {
+  if (specialist?.whatsapp && patientWhatsappId) {
     await sendWhatsApp(
       {
         to: specialist.whatsapp,
         body: buildCompletedAppointmentNotification(
           appointment,
-          patientPhone,
+          patientWhatsappId,
           clientConfig,
         ),
       },
