@@ -184,6 +184,8 @@ export function DashboardShell({
           renderExtraActions={(apt) => (
             <AppointmentActions appointment={apt} onUpdate={handleAppointmentUpdate} />
           )}
+          authToken={authToken}
+          clientId={clientConfig.client.id}
         />
       )}
 

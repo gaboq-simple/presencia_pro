@@ -213,6 +213,20 @@ export interface PatientProfile extends PatientSearchResult {
   readonly firstVisit: string | null;   // ISO string
 }
 
+// ─── Patient notes (operational) ──────────────────────────────────────────────
+
+/**
+ * Una nota operativa del médico sobre un paciente.
+ * No es clínica — es observación de gestión: preferencias, recordatorios, logística.
+ * Inmutable: nunca se edita ni elimina.
+ */
+export type PatientNote = {
+  readonly id: string;
+  readonly patientId: string;
+  readonly body: string;
+  readonly createdAt: string; // ISO 8601
+};
+
 // ─── Monthly report metrics ────────────────────────────────────────────────────
 
 /**

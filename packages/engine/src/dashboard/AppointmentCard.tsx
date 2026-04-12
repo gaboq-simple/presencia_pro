@@ -10,9 +10,14 @@
 // Extra actions (Modificar/Cancelar) are injected via renderExtraActions in both
 // modes — called only when status is actionable (pending | pending_confirmation |
 // confirmed).
+//
+// Patient notes icon: shown in the full layout when authToken + clientId are
+// provided. Opens PatientNotesPopover inline — coordination (one-at-a-time)
+// is handled internally by PatientNotesPopover via CustomEvent.
 
 import React, { useState, useTransition } from 'react';
 import { IntakeViewer } from './IntakeViewer';
+import { PatientNotesPopover } from './PatientNotesPopover';
 import type { AppointmentWithPatient } from './types';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -25,6 +30,9 @@ export type AppointmentCardProps = {
   readonly onNoShow?: (id: string) => Promise<void>;
   readonly onPatientClick?: (patientId: string) => void;
   readonly renderExtraActions?: (appointment: AppointmentWithPatient) => React.ReactNode;
+  /** Cuando están presentes, muestra el ícono de notas operativas en el full layout. */
+  readonly authToken?: string;
+  readonly clientId?: string;
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -87,6 +95,8 @@ export function AppointmentCard({
   onNoShow,
   onPatientClick,
   renderExtraActions,
+  authToken,
+  clientId,
 }: AppointmentCardProps) {
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [isPendingComplete, startComplete] = useTransition();
@@ -98,6 +108,13 @@ export function AppointmentCard({
 
   const statusColors = compact ? COMPACT_STATUS_COLORS : FULL_STATUS_COLORS;
   const statusColor = statusColors[status] ?? { bg: '#F3F4F6', text: '#6B7280' };
+
+  // Guard: notas visibles solo en full layout cuando el paciente y las credenciales están disponibles
+  const showNotes =
+    !compact &&
+    appointment.patientId !== null &&
+    authToken !== undefined &&
+    clientId !== undefined;
 
   // ── Compact layout ─────────────────────────────────────────────────────────
   if (compact) {
@@ -257,18 +274,37 @@ export function AppointmentCard({
         </span>
       </div>
 
-      {/* ── Patient + service ────────────────────────────────────────── */}
-      <div style={{ marginBottom: '0.125rem', display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+      {/* ── Patient + notes icon + "Ver expediente" ───────────────────── */}
+      <div
+        style={{
+          marginBottom: '0.125rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+        }}
+      >
         <p
           style={{
             margin: 0,
             fontSize: '1.0625rem',
             fontWeight: 600,
             color: 'var(--color-ink)',
+            flexGrow: 1,
           }}
         >
           {appointment.patientName ?? 'Paciente sin nombre'}
         </p>
+
+        {/* ── Ícono de notas operativas ─────────────────────────────── */}
+        {showNotes && (
+          <PatientNotesPopover
+            patientId={appointment.patientId!}
+            patientName={appointment.patientName ?? 'Paciente'}
+            clientId={clientId!}
+            authToken={authToken!}
+          />
+        )}
+
         {onPatientClick && appointment.patientId && (
           <button
             onClick={() => onPatientClick(appointment.patientId!)}
@@ -281,12 +317,14 @@ export function AppointmentCard({
               color: 'var(--color-accent)',
               fontWeight: 500,
               whiteSpace: 'nowrap',
+              flexShrink: 0,
             }}
           >
             Ver expediente →
           </button>
         )}
       </div>
+
       <p
         style={{
           margin: '0 0 0.875rem',

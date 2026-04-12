@@ -30,6 +30,11 @@ type DayViewProps = {
    *  Only called for actionable appointments (pending, pending_confirmation, confirmed).
    *  The rendered node is injected below the built-in action buttons. */
   readonly renderExtraActions?: (appointment: AppointmentWithPatient) => React.ReactNode;
+  /** Supabase session token — enables the patient notes icon on each card.
+   *  Passed through to PatientNotesPopover for API auth. */
+  readonly authToken?: string;
+  /** Client slug — scopes all notes queries to this client instance. */
+  readonly clientId?: string;
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -128,6 +133,8 @@ export function DayView({
   onReleaseEmergency,
   onPatientClick,
   renderExtraActions,
+  authToken,
+  clientId,
 }: DayViewProps) {
   const activeAppointments = appointments.filter(
     (a) => a.status !== 'cancelled',
@@ -190,6 +197,8 @@ export function DayView({
               onNoShow={onNoShow}
               onPatientClick={onPatientClick}
               renderExtraActions={renderExtraActions}
+              authToken={authToken}
+              clientId={clientId}
             />
           ))}
         </div>

@@ -13,6 +13,8 @@ export type { WeekNavProps } from './WeekNav';
 export { IntakeViewer } from './IntakeViewer';
 export { getPatientHistory, getMonthlyMetrics, getAnalyticsMetrics, getAtRiskPatients, getOccupancyHeatmap } from './queries';
 export { generateAlerts } from './alerts';
+export { PatientNotesPopover } from './PatientNotesPopover';
+export type { PatientNotesPopoverProps } from './PatientNotesPopover';
 export { PatientSearch } from './PatientSearch';
 export type { PatientSearchProps } from './PatientSearch';
 export { PatientDrawer } from './PatientDrawer';
@@ -28,6 +30,7 @@ export type {
   PatientHistory,
   PatientHistorySummary,
   PatientHistoryAppointment,
+  PatientNote,
   MonthlyMetrics,
   ServiceCount,
   AnalyticsMetrics,

@@ -24,6 +24,9 @@
     "clients/dra-quevedo/src/app/api/appointments/no-show/route.ts",
     "clients/dra-quevedo/src/app/api/notifications/reactivation/route.ts",
     "clients/dra-quevedo/src/app/api/bot/route.ts",
-    "packages/engine/src/**/*.ts"
+    "clients/dra-quevedo/src/app/api/patients/[patientId]/notes/route.ts",
+    "clients/dra-quevedo/src/components/dashboard/DashboardShell.tsx",
+    "packages/engine/src/**/*.ts",
+    "packages/engine/src/**/*.tsx"
   ]
 }
