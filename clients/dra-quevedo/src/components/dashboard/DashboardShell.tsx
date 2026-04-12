@@ -18,8 +18,10 @@ import type { CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { useState, useCallback, useEffect } from 'react';
 import { CalendarDays, List } from 'lucide-react';
-import { DayView } from '@presenciapro/engine/dashboard';
+import { DayView, PatientSearch, PatientDrawer } from '@presenciapro/engine/dashboard';
 import type { AppointmentWithPatient, EmergencySlot } from '@presenciapro/engine/dashboard';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { clientConfig } from '@/config/client.config';
 import { BlockedDaysManager } from './BlockedDaysManager';
 import { PatientHistoryDrawer } from './PatientHistoryDrawer';
 import { AppointmentActions } from './AppointmentActions';
@@ -65,6 +67,18 @@ export function DashboardShell({
 }: Props) {
   const router = useRouter();
   const [activePatientId, setActivePatientId] = useState<string | null>(null);
+  // patientId selected from search — opens PatientDrawer
+  const [searchPatientId, setSearchPatientId] = useState<string | null>(null);
+  // Supabase session token — for Authorization header on API calls from engine components
+  const [authToken, setAuthToken] = useState<string | undefined>(undefined);
+
+  // Load auth token once on mount
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.access_token) setAuthToken(session.access_token);
+    });
+  }, []);
 
   // ── View toggle — initialized after mount to avoid SSR hydration mismatch ─
   const [view, setView] = useState<DashboardView>('day');
@@ -104,19 +118,34 @@ export function DashboardShell({
     };
   }
 
+  // Service list for PatientDrawer — built from clientConfig
+  const drawerServices = clientConfig.services.map((s) => ({
+    id:    s.id,
+    name:  s.name,
+    modes: 'modes' in s ? s.modes as readonly string[] : undefined,
+  }));
+
   return (
     <>
-      {/* ── View toggle ───────────────────────────────────────────────── */}
+      {/* ── View toggle + search bar ──────────────────────────────────── */}
       {viewReady && (
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            gap: '0.375rem',
+            gap: '0.5rem',
             marginBottom: '1rem',
           }}
         >
+          {/* Search bar */}
+          <PatientSearch
+            clientId={clientConfig.client.id}
+            onSelect={(pid) => setSearchPatientId(pid)}
+            authToken={authToken}
+          />
+
+          {/* View toggles */}
           <button
             onClick={() => handleSetView('week')}
             title="Vista semanal"
@@ -165,11 +194,22 @@ export function DashboardShell({
         appointmentDates={appointmentDates}
       />
 
-      {/* ── Patient history drawer ─────────────────────────────────────── */}
+      {/* ── Patient history drawer (from appointment card click) ─────── */}
       <PatientHistoryDrawer
         patientId={activePatientId}
         timezone={timezone}
         onClose={() => setActivePatientId(null)}
+      />
+
+      {/* ── Patient profile drawer (from search) ──────────────────────── */}
+      <PatientDrawer
+        patientId={searchPatientId}
+        clientId={clientConfig.client.id}
+        services={drawerServices}
+        specialistId={specialistId}
+        timezone={timezone}
+        authToken={authToken}
+        onClose={() => setSearchPatientId(null)}
       />
     </>
   );

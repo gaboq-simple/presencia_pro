@@ -171,6 +171,48 @@ export interface AnalyticsMetrics {
   readonly atRiskPatientCount: number;
 }
 
+// ─── Patient search ────────────────────────────────────────────────────────────
+
+/**
+ * A single result from the patient search API.
+ * Returned by GET /api/patients/search?q=...
+ */
+export interface PatientSearchResult {
+  readonly id: string;
+  readonly whatsappId: string;
+  readonly phone: string | null;
+  readonly name: string;
+  readonly createdAt: string;           // ISO string
+  readonly lastServiceId: string | null;
+  readonly lastServiceName: string | null;
+  readonly lastVisit: string | null;    // ISO string
+  readonly totalAppointments: number;
+}
+
+/**
+ * Appointment summary line for PatientProfile.
+ * Used by the history section of PatientDrawer.
+ */
+export interface AppointmentSummary {
+  readonly id: string;
+  readonly serviceId: string;
+  readonly serviceName: string;
+  readonly startsAt: string;            // ISO string
+  readonly mode: string;
+  readonly status: AppointmentStatus;
+}
+
+/**
+ * Full patient profile — extends PatientSearchResult with computed status
+ * and last 10 appointment summaries.
+ * Returned by GET /api/patients/[patientId]
+ */
+export interface PatientProfile extends PatientSearchResult {
+  readonly status: 'active' | 'at-risk' | 'inactive';
+  readonly appointments: readonly AppointmentSummary[];
+  readonly firstVisit: string | null;   // ISO string
+}
+
 // ─── Monthly report metrics ────────────────────────────────────────────────────
 
 /**
