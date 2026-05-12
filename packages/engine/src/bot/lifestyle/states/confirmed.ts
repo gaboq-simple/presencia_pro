@@ -1,0 +1,372 @@
+// ─── State: CONFIRMED ─────────────────────────────────────────────────────────
+// El cliente confirmó la cita. Este handler:
+//   1. Crea el appointment en Supabase con source='bot'.
+//   2. Actualiza/crea el customer con favorite_staff_id y favorite_service_id.
+//   3. Notifica al barbero asignado vía sendWhatsAppMeta() — best-effort (try/catch).
+//   4. Inserta fila en scheduled_notifications para reminder_1h.
+//   5. Genera mensaje de confirmación vía Claude.
+//   6. Transiciona a estado CONFIRMED (conversación completa).
+
+import Anthropic from '@anthropic-ai/sdk';
+import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
+import type { LifestyleBotContext } from '../../../types/lifestyle.types';
+import { sendWhatsAppMeta } from '../../../notifications/whatsapp';
+import { getCatalog, getStaffForService } from '../catalog';
+import { buildSystemPrompt } from '../prompt';
+import { logBot, maskPhone } from '../../../utils/logger';
+import { formatTimeHumanFromDate } from '../utils';
+import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+
+export async function handleConfirmed(
+  msg: LifestyleIncomingMessage,
+  context: LifestyleBotContext,
+  deps: StateHandlerDeps,
+): Promise<StateHandlerResult> {
+  const { business, supabase, anthropicKey } = deps;
+
+  if (!context.serviceId || !context.staffId || !context.selectedSlot) {
+    return {
+      newState:     'QUALIFYING_SERVICE',
+      newContext:   { ...context },
+      responseText: 'Hubo un problema al agendar. Que servicio te interesa?',
+    };
+  }
+
+  // ── Cargar datos del servicio ─────────────────────────────────────────────
+
+  const catalog  = await getCatalog(business.id, supabase);
+  const service  = catalog.find((s) => s.id === context.serviceId);
+  if (!service) {
+    return {
+      newState:     'QUALIFYING_SERVICE',
+      newContext:   { ...context, serviceId: undefined },
+      responseText: 'No encontre el servicio. Cual quieres elegir?',
+    };
+  }
+
+  const startsAt = new Date(context.selectedSlot);
+  const endsAt   = new Date(startsAt.getTime() + service.duration_minutes * 60_000);
+
+  // ── Pre-check: verificar que el slot sigue disponible ────────────────────
+  // Defense in depth: el constraint de DB (016_no_overlapping_appointments)
+  // es la última línea de defensa, pero este check previo evita un INSERT
+  // fallido y permite dar un mensaje más preciso al cliente.
+  //
+  // Usamos gte/lte con starts_at y ends_at (solapamiento parcial):
+  //   starts_at < endsAt AND ends_at > startsAt
+  // Equivalente a: NOT (ends_at <= startsAt OR starts_at >= endsAt)
+
+  const { data: slotConflict } = await supabase
+    .from('appointments')
+    .select('id')
+    .eq('staff_id', context.staffId)
+    .not('status', 'in', '("cancelled")')
+    .lt('starts_at', endsAt.toISOString())
+    .gt('ends_at',   startsAt.toISOString())
+    .limit(1)
+    .maybeSingle();
+
+  if (slotConflict) {
+    console.error(JSON.stringify({
+      ts:             new Date().toISOString(),
+      service:        'bot',
+      event:          'slot_conflict_precheck',
+      business_id:    business.id,
+      customer_phone: maskPhone(msg.customerPhone),
+      staff_id:       context.staffId,
+      starts_at:      startsAt.toISOString(),
+    }));
+    return {
+      newState:   'SHOWING_SLOTS',
+      newContext: {
+        ...context,
+        selectedSlot: undefined,
+        pendingSlots: [],
+      },
+      responseText: 'Ese horario acaba de ser tomado. Buscando otra opcion...',
+    };
+  }
+
+  // ── Crear cita ────────────────────────────────────────────────────────────
+
+  const { data: apptData, error: apptError } = await supabase
+    .from('appointments')
+    .insert({
+      business_id:  business.id,
+      staff_id:     context.staffId,
+      service_id:   context.serviceId,
+      customer_id:  context.customerId ?? null,
+      starts_at:    startsAt.toISOString(),
+      ends_at:      endsAt.toISOString(),
+      status:       'confirmed',
+      source:       context.isWalkIn ? 'walkin' : 'bot',
+      booking_name: context.bookingName ?? null,
+    })
+    .select('id')
+    .single();
+
+  // Detectar violación del constraint de solapamiento (23P01) o unicidad (23505).
+  // Aunque el pre-check reduce la probabilidad, el constraint es la garantía final.
+  if (apptError) {
+    const pgCode = (apptError as unknown as { code?: string }).code;
+    if (pgCode === '23P01' || pgCode === '23505') {
+      console.error(JSON.stringify({
+        ts:             new Date().toISOString(),
+        service:        'bot',
+        event:          'slot_conflict_constraint',
+        business_id:    business.id,
+        customer_phone: maskPhone(msg.customerPhone),
+        staff_id:       context.staffId,
+        starts_at:      startsAt.toISOString(),
+        pg_code:        pgCode,
+      }));
+      return {
+        newState:   'SHOWING_SLOTS',
+        newContext: {
+          ...context,
+          selectedSlot: undefined,
+          pendingSlots: [],
+        },
+        responseText: 'Ese horario acaba de ser tomado. Buscando otra opcion...',
+      };
+    }
+
+    console.error(JSON.stringify({
+      ts:             new Date().toISOString(),
+      service:        'bot',
+      event:          'appointment_insert_failed',
+      business_id:    business.id,
+      customer_phone: maskPhone(msg.customerPhone),
+      error:          apptError.message,
+    }));
+    return {
+      newState:     'QUALIFYING_SERVICE',
+      newContext:   { ...context },
+      responseText: 'Hubo un error al agendar tu cita. Por favor intenta de nuevo o contactanos directamente.',
+    };
+  }
+
+  if (!apptData) {
+    return {
+      newState:     'QUALIFYING_SERVICE',
+      newContext:   { ...context },
+      responseText: 'Hubo un error al agendar tu cita. Por favor intenta de nuevo o contactanos directamente.',
+    };
+  }
+
+  const appointmentId = (apptData as { id: string }).id;
+
+  // ── Actualizar customer con favoritos ─────────────────────────────────────
+
+  if (context.customerId) {
+    await supabase
+      .from('customers')
+      .update({
+        favorite_staff_id:   context.staffId,
+        favorite_service_id: context.serviceId,
+      })
+      .eq('id', context.customerId);
+  }
+
+  // ── Programar reminder_1h ─────────────────────────────────────────────────
+
+  const reminderAt = new Date(startsAt.getTime() - 60 * 60_000); // 1h antes
+
+  // Cargar staff UNA VEZ — reutilizado para notificación al barbero y reminder
+  const allStaffForAppt = await getStaffForService(business.id, context.serviceId, supabase);
+  const staffMemberForAppt = allStaffForAppt.find((s) => s.id === context.staffId);
+
+  // Mensaje pre-construido: dispatch-lifestyle-notifications lo usa directamente
+  const reminderMessage =
+    `Hola, te recordamos tu cita de ${service.name}` +
+    (staffMemberForAppt ? ` con ${staffMemberForAppt.name}` : '') +
+    ` hoy a las ${formatTimeHumanFromDate(startsAt, business.timezone)} en ${business.name}.`;
+
+  try {
+    const { error: notifError } = await supabase.from('scheduled_notifications').insert({
+      business_id:    business.id,
+      appointment_id: appointmentId,
+      customer_phone: msg.customerPhone,
+      type:           'reminder_1h',
+      scheduled_for:  reminderAt.toISOString(),
+      message_body:   reminderMessage,
+    });
+    if (notifError) throw notifError;
+  } catch (err) {
+    // Best-effort — el appointment ya fue creado exitosamente. Solo loguear.
+    console.error(JSON.stringify({
+      ts:             new Date().toISOString(),
+      service:        'bot',
+      event:          'scheduled_notification_insert_failed',
+      business_id:    business.id,
+      appointment_id: appointmentId,
+      type:           'reminder_1h',
+      error:          err instanceof Error ? err.message : String(err),
+    }));
+  }
+
+  // ── Notificar al barbero — best-effort ────────────────────────────────────
+
+  try {
+    const staffMember = staffMemberForAppt;
+
+    if (staffMember?.whatsapp_id) {
+      const accessToken = process.env['WHATSAPP_ACCESS_TOKEN'] ?? '';
+      if (!accessToken) {
+        console.warn(JSON.stringify({
+          ts:          new Date().toISOString(),
+          service:     'bot',
+          event:       'whatsapp_token_missing',
+          context:     'staff_notification',
+          business_id: business.id,
+        }));
+      }
+      const startTime = formatTimeHumanFromDate(startsAt, business.timezone);
+      const dateStr   = formatDate(startsAt, business.timezone);
+      const notifBody =
+        `📅 Nueva cita agendada:\n` +
+        `Servicio: ${service.name}\n` +
+        `Fecha: ${dateStr} a las ${startTime}\n` +
+        `Desde: ${business.name} Bot`;
+
+      await sendWhatsAppMeta(
+        { to: staffMember.whatsapp_id, body: notifBody },
+        {
+          accessToken,
+          phoneNumberId: business.whatsappPhoneNumberId,
+        },
+      );
+    }
+  } catch {
+    // Best-effort — no bloquear el flujo si la notificación falla
+  }
+
+  // ── Generar mensaje de confirmación vía Claude ────────────────────────────
+
+  const tz           = business.timezone;
+  const staffName    = staffMemberForAppt?.name ?? 'tu barbero';
+  const startTimeStr = formatTimeHumanFromDate(startsAt, tz);
+  const dateStr      = formatDate(startsAt, tz);
+
+  // Primer nombre del booking_name para el saludo final ("Listo, Gabriel!")
+  const firstName = context.bookingName
+    ? (context.bookingName.trim().split(/\s+/)[0] ?? null)
+    : null;
+
+  const confirmationText = await generateConfirmation(
+    anthropicKey,
+    buildSystemPrompt(business, undefined, catalog),
+    service.name,
+    staffName,
+    dateStr,
+    startTimeStr,
+    business.name,
+    business.address,
+    deps.model,
+    business.id,
+    msg.customerPhone,
+    firstName,
+  );
+
+  const newContext: LifestyleBotContext = {
+    ...context,
+    appointmentId,
+    followUpScheduled: true,
+    pendingSlots:      [],
+  };
+
+  return {
+    newState:     'CONFIRMED',
+    newContext,
+    responseText: confirmationText,
+  };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const DAYS_ES   = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+const MONTHS_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+function formatDate(d: Date, tz: string): string {
+  const localDateStr = d.toLocaleDateString('en-CA', { timeZone: tz });  // YYYY-MM-DD
+  const [, , dayStr] = localDateStr.split('-');
+  const dayNum     = parseInt(dayStr!, 10);
+  const dayOfWeek  = new Date(localDateStr + 'T12:00:00Z').getDay();
+  const monthIdx   = parseInt(localDateStr.split('-')[1]!, 10) - 1;
+  return `${DAYS_ES[dayOfWeek]} ${dayNum} de ${MONTHS_ES[monthIdx]}`;
+}
+
+async function generateConfirmation(
+  apiKey:        string,
+  system:        string,
+  serviceName:   string,
+  staffName:     string,
+  dateStr:       string,
+  timeStr:       string,
+  businessName:  string,
+  address:       string,
+  model:         string,
+  businessId:    string,
+  customerPhone: string,
+  firstName:     string | null,
+): Promise<string> {
+  const nameNote = firstName
+    ? `- Nombre del cliente: ${firstName} — empieza el mensaje con "Listo, ${firstName}!"`
+    : '- Empieza el mensaje con "Listo!"';
+
+  const prompt =
+    `La cita quedo confirmada. Genera un mensaje de confirmacion corto y amigable con estos datos:\n` +
+    `${nameNote}\n` +
+    `- Servicio: ${serviceName}\n` +
+    `- Barbero: ${staffName}\n` +
+    `- Fecha: ${dateStr}\n` +
+    `- Hora: ${timeStr}\n` +
+    `- Negocio: ${businessName}\n` +
+    `- Direccion: ${address}\n\n` +
+    `Incluye un recordatorio de donde esta el negocio. Maximo 4 lineas. Sin markdown. Sin signos de interrogacion ni exclamaciones al inicio de oracion.`;
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const resp = await callClaude({
+      client,
+      model,
+      maxTokens: 200,
+      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      messages:  [{ role: 'user', content: prompt }],
+      timeoutMs: TIMEOUT_SONNET_MS,
+      context:   { businessId, customerPhone, state: 'CONFIRMED' },
+    });
+
+    logBot({
+      ts:                new Date().toISOString(),
+      service:           'bot',
+      business_id:       businessId,
+      customer_phone:    customerPhone,
+      state_from:        'AWAITING_BOOKING_NAME',
+      state_to:          'CONFIRMED',
+      model_used:        model,
+      tokens_input:      resp.usage.input_tokens,
+      tokens_cache_read: resp.usage.cache_read_input_tokens ?? 0,
+      tokens_output:     resp.usage.output_tokens,
+    });
+
+    const block = resp.content[0];
+    return block?.type === 'text' ? block.text.trim() : buildFallbackConfirmation(serviceName, staffName, dateStr, timeStr, firstName);
+  } catch {
+    return buildFallbackConfirmation(serviceName, staffName, dateStr, timeStr, firstName);
+  }
+}
+
+function buildFallbackConfirmation(
+  service:    string,
+  staff:      string,
+  date:       string,
+  time:       string,
+  firstName:  string | null,
+): string {
+  const greeting = firstName ? `Listo, ${firstName}!` : 'Listo!';
+  return `${greeting} Tu cita de ${service} con ${staff} esta confirmada para el ${date} a las ${time}. Te esperamos!`;
+}

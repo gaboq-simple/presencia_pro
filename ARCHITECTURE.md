@@ -681,6 +681,8 @@ Edge Function (Deno, Supabase)
 | `dispatch-notifications` | `* * * * *` | Supabase directo | Lee `scheduled_notifications`, envía WhatsApp/email vía fetch, marca `sent_at` |
 | `block-emergency-slots` | `0 13 * * 1-5` (UTC = 07:00 CDMX) | `POST /api/calendar/block-emergency` | Bloquea huecos de emergencia del día en cada cliente activo |
 | `dispatch-monthly-report` | `0 10 1 * *` (UTC = 04:00 CDMX, día 1) | `POST /api/reports/monthly` | Envía reporte mensual (WhatsApp + email HTML) al doctor de cada cliente activo |
+| `check-stale-leads` | `0 8 * * *` (UTC) | `POST /api/internal/check-stale-leads` (sellers-portal) | Detecta leads sin avanzar ≥15 días, envía WhatsApp de recordatorio al vendedor. Marca urgente si ≥28 días |
+| `generate-monthly-commissions` | `0 10 1 * *` (UTC) | `POST /api/internal/generate-monthly-commissions` (sellers-portal) | Genera commission_payouts mensuales para clientes activos dentro del período de comisión pactado. Notifica al vendedor por WhatsApp |
 
 ### Idempotencia en `dispatch-notifications`
 El worker reclama cada fila atómicamente:
@@ -703,6 +705,12 @@ Variable requerida para autenticar llamadas Edge Function → API Route.
 Edge Functions → Schedules:
 - `dispatch-notifications` → `* * * * *`
 - `block-emergency-slots` → `0 13 * * 1-5`
+- `check-stale-leads` → `0 8 * * *`
+- `generate-monthly-commissions` → `0 10 1 * *`
+
+Agregar a Supabase Secrets (mismo valor que en cada `.env.local`):
+- `SELLERS_PORTAL_URL` — URL del portal de vendedores en producción (ej: `https://sellers.presenciapro.com`)
+- `CRON_SECRET` — shared secret entre Supabase Edge Functions y sellers-portal API Routes
 
 Esta configuración no está en código — debe hacerse una vez por ambiente (staging, producción).
 
@@ -742,6 +750,28 @@ RESEND_FROM_EMAIL=
 
 # ─── CLIENTE ──────────────────────────────────────────────
 NEXT_PUBLIC_CLIENT_ID=dra-quevedo    # debe coincidir con client.config.ts
+```
+
+### Variables exclusivas de `apps/sellers-portal`
+
+```bash
+# ─── SUPABASE ─────────────────────────────────────────
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# ─── WHATSAPP BUSINESS API (PresenciaPro) ─────────────
+PRESENCIAPRO_WA_PHONE_ID=            # Phone ID del número de PresenciaPro (no del doctor)
+PRESENCIAPRO_WA_ACCESS_TOKEN=        # Token de acceso Meta Graph v20.0
+
+# ─── NOTIFICACIONES INTERNAS ──────────────────────────
+OPERATOR_WHATSAPP=                   # Número del operador para alertas de nuevos leads
+
+# ─── AUTENTICACIÓN EDGE FUNCTIONS ─────────────────────
+CRON_SECRET=                         # Secret compartido con Supabase Edge Functions
+
+# ─── APP ──────────────────────────────────────────────
+NEXT_PUBLIC_APP_URL=                 # URL pública del portal (ej: https://sellers.presenciapro.com)
 ```
 
 ---

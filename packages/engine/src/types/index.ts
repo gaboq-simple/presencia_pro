@@ -23,3 +23,22 @@ export {
 export type { MonthlyMetrics, ServiceCount } from '../dashboard/types';
 
 export type { PatientPortalToken } from '../utils/patientPortalTokens';
+
+export * from './seller';
+export * from './seller.schema';
+
+export {
+  LifestyleBotStateSchema,
+  LifestyleBotContextSchema,
+  LifestylePendingSlotSchema,
+  AppointmentStatusSchema,
+  AppointmentSourceSchema,
+  StaffRoleSchema,
+  type LifestyleBotState,
+  type LifestyleBotContext,
+  type LifestyleConversationMessage,
+  type LifestylePendingSlot,
+  type AppointmentStatus,
+  type AppointmentSource,
+  type StaffRole,
+} from './lifestyle.types';

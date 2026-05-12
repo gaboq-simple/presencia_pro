@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lifestyle",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["/Users/GaboQ/presenciapro/.claude/start-lifestyle.sh"],
+      "port": 3002,
+      "autoPort": true
+    }
+  ]
+}

@@ -5,6 +5,7 @@
 export { handleIncomingMessage } from './handler';
 export type { HandleIncomingMessageOptions } from './handler';
 export { updateConversation, getConversation } from './state';
+export { verifyWebhookSignature } from './verifyWebhookSignature';
 
 export type {
   AppointmentRequest,
@@ -14,3 +15,14 @@ export type {
   IncomingMessage,
   TimeSlot,
 } from './types';
+
+// ─── Lifestyle bot ────────────────────────────────────────────────────────────
+
+export { handleLifestyleMessage } from './lifestyle/handler';
+export { invalidateBusinessCache } from './lifestyle/catalog';
+export type {
+  HandleLifestyleMessageOptions,
+  LifestyleBotResponse,
+  LifestyleIncomingMessage,
+  LifestyleBusinessConfig,
+} from './lifestyle/handler';

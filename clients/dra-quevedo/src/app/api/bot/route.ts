@@ -5,7 +5,7 @@
 
 import { after } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { handleIncomingMessage, updateConversation, getConversation } from '@presenciapro/engine/bot';
+import { handleIncomingMessage, updateConversation, getConversation, verifyWebhookSignature } from '@presenciapro/engine/bot';
 import type { IncomingMessage, HandleIncomingMessageOptions } from '@presenciapro/engine/bot';
 import { createAppointment, generateCancelUrl } from '@presenciapro/engine/scheduling';
 import type { Appointment, GoogleCredentials } from '@presenciapro/engine/scheduling';
@@ -40,35 +40,6 @@ type MetaWebhookPayload = {
     }>;
   }>;
 };
-
-// ─── Signature verification ───────────────────────────────────────────────────
-
-async function verifySignature(request: Request, rawBody: string): Promise<boolean> {
-  const signature = request.headers.get('x-hub-signature-256');
-  if (!signature) return false;
-
-  const appSecret = process.env['WHATSAPP_APP_SECRET'];
-  if (!appSecret) return false;
-
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(appSecret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-
-  const signatureBytes = await crypto.subtle.sign('HMAC', key, encoder.encode(rawBody));
-  const expectedSignature =
-    'sha256=' +
-    Array.from(new Uint8Array(signatureBytes))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-
-  // Constant-time comparison to prevent timing attacks
-  return signature === expectedSignature;
-}
 
 // ─── Message extraction ───────────────────────────────────────────────────────
 
@@ -139,7 +110,11 @@ export async function POST(request: Request): Promise<Response> {
   const rawBody = await request.text();
 
   // Verify Meta signature before processing anything
-  const isValid = await verifySignature(request, rawBody);
+  const isValid = verifyWebhookSignature({
+    signatureHeader: request.headers.get('x-hub-signature-256'),
+    rawBody,
+    appSecret: process.env['WHATSAPP_APP_SECRET'],
+  });
   if (!isValid) {
     return new Response('Unauthorized', { status: 401 });
   }
@@ -200,6 +175,25 @@ export async function POST(request: Request): Promise<Response> {
       for (const msg of sorted) {
         // ── Normalizar identificador una sola vez al recibirlo ─────────────
         const whatsappId = normalizeWhatsAppId(msg.from);
+        const wamid = msg.id;
+
+        // ── Idempotencia: guard contra reintentos de Meta ──────────────────
+        // INSERT ... ON CONFLICT DO NOTHING — si el WAMID ya existe, data=[].
+        // Si falla por error de DB (no conflicto): loggea y permite continuar
+        // para no perder mensajes. Un duplicado ocasional es preferible a
+        // silenciar un mensaje legítimo.
+        const { data: wamidInserted, error: wamidError } = await supabase
+          .from('processed_wamids')
+          .insert({ wamid, client_id: clientConfig.client.id, whatsapp_id: whatsappId })
+          .select('wamid');
+
+        if (wamidError) {
+          console.error('[bot] idempotency insert failed, proceeding:', wamidError.message);
+        } else if (!wamidInserted || wamidInserted.length === 0) {
+          // WAMID ya procesado — reintento de Meta, descartar sin procesar
+          console.error('[bot] wamid already processed, skipping:', wamid);
+          continue;
+        }
 
         const incoming: IncomingMessage = {
           whatsappId,
@@ -207,6 +201,7 @@ export async function POST(request: Request): Promise<Response> {
           body: msg.text.body,
           clientId: clientConfig.client.id,
           timestamp: new Date(Number(msg.timestamp) * 1000),
+          messageId: wamid,
         };
 
         try {

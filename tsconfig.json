@@ -15,5 +15,6 @@
     "paths": {
       "@presenciapro/engine/*": ["./packages/engine/src/*"]
     }
-  }
+  },
+  "exclude": ["node_modules", "apps", "clients", "supabase"]
 }

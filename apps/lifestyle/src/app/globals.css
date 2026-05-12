@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/*
+ * Tokens globales de la plataforma.
+ * Los tokens específicos de cada negocio se inyectan como variables CSS
+ * en el layout del [slug] a partir de los datos de la tabla businesses.
+ *
+ * @theme permite que Tailwind v4 genere utilidades a partir de estas variables.
+ */
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}

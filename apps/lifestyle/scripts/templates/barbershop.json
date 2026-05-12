@@ -1,0 +1,149 @@
+{
+  "_meta": {
+    "version": "1.1",
+    "created_by": "gabriel",
+    "created_at": "2026-05-10"
+  },
+
+  "_comment_organization": "OPCIONAL — incluir solo para negocios multi-sucursal. Si se omite, el negocio es standalone. Si el slug de la organizacion ya existe en DB, se reutiliza (util para agregar una segunda sucursal al mismo grupo).",
+  "organization": {
+    "name": "Barberias Don Carlos",
+    "slug": "don-carlos-group",
+    "owner_name": "Carlos Hernandez",
+    "owner_email": "carlos@doncarlos.com",
+    "owner_phone": "5215598765432"
+  },
+
+  "business": {
+    "name": "La Barbería de Don Carlos",
+    "slug": "don-carlos",
+    "business_type": "barbershop",
+    "description": "Cortes clásicos y modernos en el corazón de Coyoacán",
+    "tagline": "Tu estilo, nuestra pasión",
+    "address": "Av. Coyoacán 123, Col. Del Valle, CDMX",
+    "timezone": "America/Mexico_City",
+    "palette": "arena",
+    "walk_in_buffer_minutes": 15,
+
+    "office_hours": {
+      "mon": { "open": "09:00", "close": "20:00" },
+      "tue": { "open": "09:00", "close": "20:00" },
+      "wed": { "open": "09:00", "close": "20:00" },
+      "thu": { "open": "09:00", "close": "20:00" },
+      "fri": { "open": "09:00", "close": "21:00" },
+      "sat": { "open": "08:00", "close": "18:00" },
+      "sun": null
+    },
+
+    "social": {
+      "instagram_url": "https://instagram.com/doncarlosbarberia",
+      "tiktok_url": null
+    }
+  },
+
+  "bot": {
+    "assistant_name": "Carlos Bot",
+    "greeting": "Hola! Soy el asistente de La Barbería de Don Carlos. En que te puedo ayudar?",
+    "fallback_message": "Dejame conectarte con alguien del equipo.",
+    "away_message": "Estamos fuera de horario. Te respondemos manana a primera hora.",
+    "followup_message": "Hola! Pudiste revisar la informacion? Quedamos a tus ordenes para agendar.",
+    "whatsapp_message": "Hola, quiero agendar una cita"
+  },
+
+  "staff": [
+    {
+      "name": "Pedro García",
+      "role": "barber",
+      "photo_url": null,
+      "availability": {
+        "mon": { "start": "09:00", "end": "20:00" },
+        "tue": { "start": "09:00", "end": "20:00" },
+        "wed": { "start": "09:00", "end": "20:00" },
+        "thu": { "start": "09:00", "end": "20:00" },
+        "fri": { "start": "09:00", "end": "21:00" },
+        "sat": { "start": "08:00", "end": "18:00" }
+      },
+      "services": ["corte-clasico", "afeitado", "barba"]
+    },
+    {
+      "name": "Juan López",
+      "role": "barber",
+      "photo_url": null,
+      "availability": {
+        "mon": { "start": "10:00", "end": "19:00" },
+        "tue": { "start": "10:00", "end": "19:00" },
+        "wed": null,
+        "thu": { "start": "10:00", "end": "19:00" },
+        "fri": { "start": "10:00", "end": "21:00" },
+        "sat": { "start": "09:00", "end": "17:00" }
+      },
+      "services": ["corte-clasico", "corte-fade"]
+    }
+  ],
+
+  "services": [
+    {
+      "id": "corte-clasico",
+      "name": "Corte Clásico",
+      "description": "Corte tradicional con tijera y máquina",
+      "price": 150,
+      "currency": "MXN",
+      "duration_minutes": 30
+    },
+    {
+      "id": "afeitado",
+      "name": "Afeitado Tradicional",
+      "description": "Afeitado con navaja y toalla caliente",
+      "price": 120,
+      "currency": "MXN",
+      "duration_minutes": 25
+    },
+    {
+      "id": "corte-fade",
+      "name": "Corte Fade",
+      "description": "Degradado moderno con diseño",
+      "price": 180,
+      "currency": "MXN",
+      "duration_minutes": 40
+    },
+    {
+      "id": "barba",
+      "name": "Arreglo de Barba",
+      "description": "Perfilado y arreglo de barba",
+      "price": 100,
+      "currency": "MXN",
+      "duration_minutes": 20
+    }
+  ],
+
+  "whatsapp": {
+    "_comment": "FASE 2 — opcional. Si falta, el script advierte pero no bloquea.",
+
+    "number_model": "own",
+    "phone_number": "5215512345678",
+
+    "business_profile": {
+      "display_name": "La Barbería de Don Carlos",
+      "category": "Beauty, Spa & Salon",
+      "description_short": "Cortes clásicos y modernos. Agenda tu cita por WhatsApp.",
+      "email": "contacto@doncarlos.com",
+      "logo_url": null
+    },
+
+    "verification": {
+      "legal_name": "Carlos Barbería SA de CV",
+      "rfc": "CBR210315XYZ",
+      "fiscal_address": "Av. Coyoacán 123, Col. Del Valle, Benito Juárez, CDMX, 03100",
+      "owner_name": "Carlos Hernández",
+      "owner_email": "carlos@doncarlos.com",
+      "owner_phone": "5215598765432"
+    }
+  },
+
+  "owner_contact": {
+    "_comment": "Datos del dueño para comunicación interna de PresenciaPro",
+    "name": "Carlos Hernández",
+    "phone": "5215598765432",
+    "email": "carlos@doncarlos.com"
+  }
+}

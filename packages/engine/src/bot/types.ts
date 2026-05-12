@@ -32,6 +32,12 @@ export type IncomingMessage = {
   readonly body: string           // texto del mensaje recibido
   readonly clientId: string       // para cargar config del cliente correcto
   readonly timestamp: Date
+  /**
+   * WAMID de WhatsApp (entry[0].changes[0].value.messages[0].id).
+   * Opcional para no romper tests existentes.
+   * En producción siempre debe estar presente — es la clave de idempotencia.
+   */
+  readonly messageId?: string
 }
 
 // ─── Bot response ─────────────────────────────────────────────────────────────

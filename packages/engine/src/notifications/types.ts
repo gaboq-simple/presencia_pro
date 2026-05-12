@@ -105,6 +105,12 @@ export interface WhatsAppCredentials {
   readonly fromNumber: string;  // número origen registrado — ej: "14155238886"
 }
 
+/** Credenciales para Meta WhatsApp Business Cloud API v20.0 */
+export interface MetaWhatsAppCredentials {
+  readonly accessToken: string;   // System User Token del Meta Business Account
+  readonly phoneNumberId: string; // Phone Number ID del número origen — businesses.whatsapp_phone_number_id
+}
+
 /** Resultado de sendWhatsApp() */
 export interface WhatsAppSendResult {
   readonly success: boolean;

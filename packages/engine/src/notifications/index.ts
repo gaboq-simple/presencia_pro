@@ -9,6 +9,7 @@ export type {
   NotificationPayload,
   WhatsAppMessage,
   WhatsAppCredentials,
+  MetaWhatsAppCredentials,
   WhatsAppSendResult,
   EmailMessage,
   ResendCredentials,
@@ -17,7 +18,11 @@ export type {
 } from './types';
 
 // WhatsApp client
-export { sendWhatsApp } from './whatsapp';
+export { sendWhatsApp, sendWhatsAppMeta } from './whatsapp';
+
+// Messaging abstraction (Twilio / Meta swap via MESSAGING_PROVIDER env var)
+export type { MessagingProvider } from './messaging';
+export { sendMessage } from './messaging';
 
 // Email client
 export { sendEmail, wrapHtml } from './email';
