@@ -27,10 +27,11 @@ import {
   getAllStaffForManagement,
   toDateStr,
 } from '@/lib/dashboard.types';
-import { getCurrentSession, getBusinessName, getOrganizationBranches } from '@/lib/auth';
+import { getCurrentSession, getBusinessName, getBusinessTimezone, getOrganizationBranches } from '@/lib/auth';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import ConsolidatedView from '@/components/admin/ConsolidatedView';
 import AssistantLayout from '@/components/staff/AssistantLayout';
+import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -109,21 +110,35 @@ export default async function DashboardPage({
 
   // ── Vista asistente — early return con datos propios ─────────────────────
   if (session.role === 'assistant') {
-    const [businessName, appointments, allStaff] = await Promise.all([
+    const [businessName, timezone, appointments, allStaff, staffBlocks] = await Promise.all([
       getBusinessName(businessId),
+      getBusinessTimezone(businessId),
       getDayAppointments(businessId, date),
       getActiveStaffWithAvailability(businessId, dayOfWeek),
+      getStaffBlocksForDay(date),
     ]);
     const staffOptions = allStaff
       .filter((s) => s.role === 'barber')
       .map((s) => ({ id: s.id, name: s.name }));
+    const staffWithAvailability = allStaff
+      .filter((s) => s.role === 'barber')
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        availabilityToday: s.availabilityToday
+          ? { start_time: s.availabilityToday.start_time, end_time: s.availabilityToday.end_time }
+          : null,
+      }));
     return (
       <AssistantLayout
         businessId={businessId}
         businessName={businessName}
         date={date}
+        timezone={timezone}
         initialAppointments={appointments}
         staffOptions={staffOptions}
+        staffWithAvailability={staffWithAvailability}
+        initialStaffBlocks={staffBlocks}
       />
     );
   }

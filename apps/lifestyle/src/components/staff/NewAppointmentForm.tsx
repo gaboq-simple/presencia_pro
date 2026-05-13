@@ -41,6 +41,8 @@ type Props = {
   onCreated: () => void;        // callback — dispara refresh
   defaultName?: string;         // pre-llenado desde búsqueda de cliente (Feature 6)
   defaultPhone?: string;        // pre-llenado desde búsqueda de cliente (Feature 6)
+  defaultStaffId?: string;      // pre-llenado desde click en slot del timeline
+  defaultTime?: string;         // 'HH:MM' — pre-llenado desde click en slot del timeline
 };
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -71,6 +73,8 @@ export default function NewAppointmentForm({
   onCreated,
   defaultName = '',
   defaultPhone = '',
+  defaultStaffId,
+  defaultTime,
 }: Props) {
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
@@ -79,8 +83,8 @@ export default function NewAppointmentForm({
   const [customerName, setCustomerName]   = useState(defaultName);
   const [customerPhone, setCustomerPhone] = useState(defaultPhone);
   const [serviceId, setServiceId]         = useState('');
-  const [staffId, setStaffId]             = useState(staffOptions[0]?.id ?? '');
-  const [startTime, setStartTime]         = useState(defaultStartTime);
+  const [staffId, setStaffId]             = useState(defaultStaffId ?? staffOptions[0]?.id ?? '');
+  const [startTime, setStartTime]         = useState(defaultTime ?? defaultStartTime);
   const [notes, setNotes]                 = useState('');
   const [submitting, setSubmitting]       = useState(false);
   const [error, setError]                 = useState<string | null>(null);

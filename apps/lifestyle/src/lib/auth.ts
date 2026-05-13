@@ -155,6 +155,21 @@ export async function getBusinessName(businessId: string): Promise<string> {
 }
 
 /**
+ * Obtiene el timezone del negocio a partir del business_id.
+ * Devuelve 'America/Mexico_City' como fallback si no está configurado.
+ */
+export async function getBusinessTimezone(businessId: string): Promise<string> {
+  const supabase = getServiceClient();
+  const { data } = await supabase
+    .from('businesses')
+    .select('timezone')
+    .eq('id', businessId)
+    .maybeSingle();
+
+  return (data as { timezone: string } | null)?.timezone ?? 'America/Mexico_City';
+}
+
+/**
  * Carga id + name de todas las sucursales de una organización.
  * Usado por el dashboard para renderizar el BranchSelector.
  */

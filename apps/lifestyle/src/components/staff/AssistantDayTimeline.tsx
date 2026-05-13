@@ -14,7 +14,7 @@
 
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import {
   cancelAppointment,
@@ -31,6 +31,7 @@ type StaffOption = { id: string; name: string };
 type Props = {
   appointments: DashboardAppointment[];
   date: string;
+  timezone: string;             // IANA — para la linea "Ahora"
   onMutated: () => void;
   staffOptions: StaffOption[];  // para el selector de barbero en reagendar
 };
@@ -425,16 +426,50 @@ function AssistantAppointmentCard({ appointment, onMutated, date, staffOptions }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+// ─── Helper: hora actual en el timezone del negocio ───────────────────────────
+
+function getNowLocalTime(timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date());
+}
+
+function isLocalToday(date: string, timezone: string): boolean {
+  const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: timezone })
+    .format(new Date());
+  return localDate === date;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function AssistantDayTimeline({
   appointments,
   date,
+  timezone,
   onMutated,
   staffOptions,
 }: Props) {
+  // Hora actual (actualiza cada minuto) — solo se usa cuando date === hoy
+  const [nowTime, setNowTime] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isLocalToday(date, timezone)) {
+      setNowTime(null);
+      return;
+    }
+    const update = () => setNowTime(getNowLocalTime(timezone));
+    update();
+    const interval = setInterval(update, 60_000);
+    return () => clearInterval(interval);
+  }, [date, timezone]);
+
   if (appointments.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center">
-        <p className="text-sm text-gray-400">Sin citas para este día.</p>
+        <p className="text-sm text-gray-400">Sin citas para este dia.</p>
         <p className="mt-1 text-xs text-gray-300">{date}</p>
       </div>
     );
@@ -444,21 +479,67 @@ export default function AssistantDayTimeline({
     a.starts_at.localeCompare(b.starts_at),
   );
 
+  // Calcular el indice de corte "Ahora" (entre ultima pasada y primera futura)
+  let nowSplitIndex: number | null = null;
+  if (nowTime !== null) {
+    // Comparar hora local de cada cita con la hora actual
+    const nowHHMM = nowTime; // 'HH:MM'
+    let lastPastIdx = -1;
+    for (let i = 0; i < sorted.length; i++) {
+      const apptTime = new Intl.DateTimeFormat('en-GB', {
+        timeZone: timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date(sorted[i]!.ends_at));
+      if (apptTime <= nowHHMM) {
+        lastPastIdx = i;
+      }
+    }
+    // Insertar separador despues del ultimo pasado (antes del primero futuro)
+    if (lastPastIdx >= 0 && lastPastIdx < sorted.length - 1) {
+      nowSplitIndex = lastPastIdx;
+    }
+  }
+
   return (
     <div className="space-y-2">
       <p className="px-1 text-xs font-medium text-gray-500">
         Agenda completa · {sorted.length} {sorted.length === 1 ? 'cita' : 'citas'}
       </p>
       <div className="space-y-2">
-        {sorted.map((appt) => (
-          <AssistantAppointmentCard
-            key={appt.id}
-            appointment={appt}
-            onMutated={onMutated}
-            date={date}
-            staffOptions={staffOptions}
-          />
-        ))}
+        {sorted.map((appt, idx) => {
+          const isPast = nowTime !== null && (() => {
+            const apptEndTime = new Intl.DateTimeFormat('en-GB', {
+              timeZone: timezone,
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }).format(new Date(appt.ends_at));
+            return apptEndTime <= nowTime;
+          })();
+
+          return (
+            <div key={appt.id} className={isPast ? 'opacity-50' : undefined}>
+              {/* Separador "Ahora" — se inserta DESPUES de la ultima cita pasada */}
+              {nowSplitIndex === idx && (
+                <div className="flex items-center gap-2 py-1">
+                  <div className="h-px flex-1 bg-red-400" />
+                  <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-600">
+                    Ahora · {nowTime}
+                  </span>
+                  <div className="h-px flex-1 bg-red-400" />
+                </div>
+              )}
+              <AssistantAppointmentCard
+                appointment={appt}
+                onMutated={onMutated}
+                date={date}
+                staffOptions={staffOptions}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

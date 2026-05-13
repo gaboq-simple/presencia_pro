@@ -22,7 +22,9 @@ import {
 import type { CustomerSearchResult } from '@/app/staff/assistant-actions';
 import AssistantUpcoming from './AssistantUpcoming';
 import AssistantDayTimeline from './AssistantDayTimeline';
+import AvailabilityTimeline from './AvailabilityTimeline';
 import NewAppointmentForm from './NewAppointmentForm';
+import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 
@@ -31,14 +33,23 @@ type StaffOption = {
   name: string;
 };
 
+type StaffWithAvailability = {
+  id: string;
+  name: string;
+  availabilityToday: { start_time: string; end_time: string } | null;
+};
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 export type AssistantLayoutProps = {
   businessId: string;
   businessName: string;
   date: string;                                  // 'YYYY-MM-DD'
+  timezone: string;                              // IANA timezone del negocio
   initialAppointments: DashboardAppointment[];
   staffOptions: StaffOption[];                   // barberos activos (para nueva cita)
+  staffWithAvailability: StaffWithAvailability[];// barberos con horario (para timeline)
+  initialStaffBlocks: StaffBlockForDay[];        // bloques aprobados del dia
 };
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -76,17 +87,25 @@ export default function AssistantLayout({
   businessId,
   businessName,
   date,
+  timezone,
   initialAppointments,
   staffOptions,
+  staffWithAvailability,
+  initialStaffBlocks,
 }: AssistantLayoutProps) {
   const router = useRouter();
   const [appointments, setAppointments] =
     useState<DashboardAppointment[]>(initialAppointments);
 
-  // Nueva cita — estado de apertura + pre-llenado desde búsqueda
-  const [showNewForm, setShowNewForm]   = useState(false);
-  const [prefillName, setPrefillName]   = useState('');
-  const [prefillPhone, setPrefillPhone] = useState('');
+  // Nueva cita — estado de apertura + pre-llenado desde búsqueda / slot click
+  const [showNewForm, setShowNewForm]       = useState(false);
+  const [prefillName, setPrefillName]       = useState('');
+  const [prefillPhone, setPrefillPhone]     = useState('');
+  const [prefillStaffId, setPrefillStaffId] = useState<string | undefined>();
+  const [prefillTime, setPrefillTime]       = useState<string | undefined>();
+
+  // Timeline — colapsable
+  const [timelineOpen, setTimelineOpen] = useState(true);
 
   // Búsqueda de cliente (Feature 6)
   const [searchQuery, setSearchQuery]     = useState('');
@@ -143,6 +162,18 @@ export default function AssistantLayout({
   function openFormWithPrefill(name: string, phone: string | null) {
     setPrefillName(name);
     setPrefillPhone(phone ?? '');
+    setPrefillStaffId(undefined);
+    setPrefillTime(undefined);
+    setSearchQuery('');
+    setSearchResults([]);
+    setShowNewForm(true);
+  }
+
+  function openFormFromSlot(staffId: string, time: string) {
+    setPrefillName('');
+    setPrefillPhone('');
+    setPrefillStaffId(staffId);
+    setPrefillTime(time);
     setSearchQuery('');
     setSearchResults([]);
     setShowNewForm(true);
@@ -264,6 +295,8 @@ export default function AssistantLayout({
           onClick={() => {
             setPrefillName('');
             setPrefillPhone('');
+            setPrefillStaffId(undefined);
+            setPrefillTime(undefined);
             setSearchQuery('');
             setSearchResults([]);
             setShowNewForm(true);
@@ -273,6 +306,32 @@ export default function AssistantLayout({
           <span className="text-lg leading-none">+</span>
           Nueva cita
         </button>
+
+        {/* Timeline visual de disponibilidad */}
+        <section aria-label="Timeline del dia">
+          <div className="flex items-center justify-between px-1 pb-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              Timeline
+            </p>
+            <button
+              onClick={() => setTimelineOpen((o) => !o)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+              aria-expanded={timelineOpen}
+            >
+              {timelineOpen ? '▲ Ocultar' : '▼ Ver'}
+            </button>
+          </div>
+          {timelineOpen && (
+            <AvailabilityTimeline
+              appointments={appointments}
+              staff={staffWithAvailability}
+              staffBlocks={initialStaffBlocks}
+              date={date}
+              timezone={timezone}
+              onSlotClick={openFormFromSlot}
+            />
+          )}
+        </section>
 
         {/* Próximas 2 horas */}
         <section aria-label="Próximas 2 horas">
@@ -284,6 +343,7 @@ export default function AssistantLayout({
           <AssistantDayTimeline
             appointments={appointments}
             date={date}
+            timezone={timezone}
             onMutated={() => void refresh()}
             staffOptions={staffOptions}
           />
@@ -300,15 +360,21 @@ export default function AssistantLayout({
             setShowNewForm(false);
             setPrefillName('');
             setPrefillPhone('');
+            setPrefillStaffId(undefined);
+            setPrefillTime(undefined);
           }}
           onCreated={() => {
             setShowNewForm(false);
             setPrefillName('');
             setPrefillPhone('');
+            setPrefillStaffId(undefined);
+            setPrefillTime(undefined);
             void refresh();
           }}
           defaultName={prefillName}
           defaultPhone={prefillPhone}
+          defaultStaffId={prefillStaffId}
+          defaultTime={prefillTime}
         />
       )}
     </div>

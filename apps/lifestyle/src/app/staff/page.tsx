@@ -20,7 +20,8 @@ import {
   getStaffBlockRequests,
   toDateStr,
 } from '@/lib/dashboard.types';
-import { getCurrentSession, getBusinessName } from '@/lib/auth';
+import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
+import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
 import StaffLayout from '@/components/staff/StaffLayout';
 import AssistantLayout from '@/components/staff/AssistantLayout';
 import PinForm from '@/components/staff/PinForm';
@@ -73,10 +74,13 @@ export default async function StaffPage({
 
   // ── Asistente: AssistantLayout — ve TODAS las citas + puede crear/cancelar ──
   if (session.role === 'assistant') {
-    const [businessName, appointments, allStaff] = await Promise.all([
+    const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
+    const [businessName, timezone, appointments, allStaff, staffBlocks] = await Promise.all([
       getBusinessName(businessId),
+      getBusinessTimezone(businessId),
       getDayAppointments(businessId, date),
-      getActiveStaffWithAvailability(businessId, new Date(`${date}T12:00:00`).getDay()),
+      getActiveStaffWithAvailability(businessId, dayOfWeek),
+      getStaffBlocksForDay(date),
     ]);
 
     // Filtrar solo barberos para el formulario de nueva cita
@@ -84,13 +88,27 @@ export default async function StaffPage({
       .filter((s) => s.role === 'barber')
       .map((s) => ({ id: s.id, name: s.name }));
 
+    // Barberos con disponibilidad para el timeline
+    const staffWithAvailability = allStaff
+      .filter((s) => s.role === 'barber')
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        availabilityToday: s.availabilityToday
+          ? { start_time: s.availabilityToday.start_time, end_time: s.availabilityToday.end_time }
+          : null,
+      }));
+
     return (
       <AssistantLayout
         businessId={businessId}
         businessName={businessName}
         date={date}
+        timezone={timezone}
         initialAppointments={appointments}
         staffOptions={staffOptions}
+        staffWithAvailability={staffWithAvailability}
+        initialStaffBlocks={staffBlocks}
       />
     );
   }
@@ -100,21 +118,35 @@ export default async function StaffPage({
   // del negocio. El staff_id de la sesión se usa para trazabilidad.
   if (session.role === 'barber' && rawView === 'manage') {
     const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
-    const [businessName, appointments, allStaff] = await Promise.all([
+    const [businessName, timezone, appointments, allStaff, staffBlocks] = await Promise.all([
       getBusinessName(businessId),
+      getBusinessTimezone(businessId),
       getDayAppointments(businessId, date),
       getActiveStaffWithAvailability(businessId, dayOfWeek),
+      getStaffBlocksForDay(date),
     ]);
     const staffOptions = allStaff
       .filter((s) => s.role === 'barber')
       .map((s) => ({ id: s.id, name: s.name }));
+    const staffWithAvailability = allStaff
+      .filter((s) => s.role === 'barber')
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        availabilityToday: s.availabilityToday
+          ? { start_time: s.availabilityToday.start_time, end_time: s.availabilityToday.end_time }
+          : null,
+      }));
     return (
       <AssistantLayout
         businessId={businessId}
         businessName={businessName}
         date={date}
+        timezone={timezone}
         initialAppointments={appointments}
         staffOptions={staffOptions}
+        staffWithAvailability={staffWithAvailability}
+        initialStaffBlocks={staffBlocks}
       />
     );
   }

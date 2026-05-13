@@ -357,6 +357,57 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
   if (error) throw new Error(`rescheduleAppointment failed: ${error.message}`);
 }
 
+// ─── Staff blocks del día (para AvailabilityTimeline) ────────────────────────
+
+export type StaffBlockForDay = {
+  staffId: string;
+  startsAt: string;  // ISO 8601 UTC
+  endsAt: string;    // ISO 8601 UTC
+};
+
+/**
+ * Retorna los bloques aprobados de todos los barberos del negocio para el día dado.
+ * Solo status='approved' — los pending no afectan la operación.
+ */
+export async function getStaffBlocksForDay(
+  date: string,
+): Promise<StaffBlockForDay[]> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  // 1. IDs de staff activo del negocio
+  const { data: staffData, error: staffErr } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('business_id', session.business_id)
+    .eq('active', true);
+
+  if (staffErr || !staffData) return [];
+
+  const staffIds = (staffData as { id: string }[]).map((s) => s.id);
+  if (staffIds.length === 0) return [];
+
+  // 2. Bloques aprobados que se solapan con el día
+  const dayStart = `${date}T00:00:00`;
+  const dayEnd   = `${date}T23:59:59`;
+
+  const { data, error } = await supabase
+    .from('staff_blocks')
+    .select('staff_id, starts_at, ends_at')
+    .in('staff_id', staffIds)
+    .eq('status', 'approved')
+    .lt('starts_at', dayEnd)
+    .gt('ends_at', dayStart);
+
+  if (error || !data) return [];
+
+  return (data as { staff_id: string; starts_at: string; ends_at: string }[]).map((b) => ({
+    staffId: b.staff_id,
+    startsAt: b.starts_at,
+    endsAt: b.ends_at,
+  }));
+}
+
 // ─── Buscar cliente ───────────────────────────────────────────────────────────
 
 export type CustomerSearchResult = {
