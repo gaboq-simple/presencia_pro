@@ -156,7 +156,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   // Guard: redirect unauthenticated users away from protected routes.
   // /[slug] is intentionally NOT in this list — it is public.
-  if ((pathname.startsWith('/dashboard') || pathname.startsWith('/staff')) && !user) {
+  // /staff is intentionally NOT guarded here — the page renders PinForm when there is no session.
+  if (pathname.startsWith('/dashboard') && !user) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
