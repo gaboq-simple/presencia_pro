@@ -236,22 +236,31 @@ export default function StaffLayout({
               {staffName}
             </p>
 
-            {/* Toggle solo para barberos */}
+            {/* Toggle + link gestion — solo para barberos */}
             {role === 'barber' && (
-              <div className="flex rounded-lg border border-gray-200 p-0.5">
-                {(['day', 'week'] as StaffView[]).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setView(v)}
-                    className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                      view === v
-                        ? 'bg-gray-900 text-white'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    {v === 'day' ? 'Hoy' : 'Semana'}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-lg border border-gray-200 p-0.5">
+                  {(['day', 'week'] as StaffView[]).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setView(v)}
+                      className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                        view === v
+                          ? 'bg-gray-900 text-white'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {v === 'day' ? 'Hoy' : 'Semana'}
+                    </button>
+                  ))}
+                </div>
+                <a
+                  href="/staff?view=manage"
+                  className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                  title="Vista de gestion"
+                >
+                  Gestion →
+                </a>
               </div>
             )}
           </div>

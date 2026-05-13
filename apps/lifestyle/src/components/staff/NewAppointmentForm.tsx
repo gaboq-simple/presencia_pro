@@ -3,7 +3,8 @@
 //
 // Flujo:
 //   1. Carga catálogo de servicios (GET /api/catalog?businessId=)
-//   2. Asistente elige: canal (walkin/llamada/manual), servicio, barbero, hora.
+//   2. Asistente elige: canal, nombre del cliente, teléfono (opcional),
+//      servicio, barbero, hora.
 //   3. endsAt se calcula automáticamente: startsAt + duration_minutes.
 //   4. Submit → createAssistantAppointment (Server Action).
 //   5. onCreated() callback → AssistantLayout refresca las citas.
@@ -38,6 +39,8 @@ type Props = {
   date: string;                 // 'YYYY-MM-DD' — fecha del día actual
   onClose: () => void;
   onCreated: () => void;        // callback — dispara refresh
+  defaultName?: string;         // pre-llenado desde búsqueda de cliente (Feature 6)
+  defaultPhone?: string;        // pre-llenado desde búsqueda de cliente (Feature 6)
 };
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -66,17 +69,21 @@ export default function NewAppointmentForm({
   date,
   onClose,
   onCreated,
+  defaultName = '',
+  defaultPhone = '',
 }: Props) {
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
 
-  const [source, setSource]       = useState<Source>('walkin');
-  const [serviceId, setServiceId] = useState('');
-  const [staffId, setStaffId]     = useState(staffOptions[0]?.id ?? '');
-  const [startTime, setStartTime] = useState(defaultStartTime);
-  const [notes, setNotes]         = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError]           = useState<string | null>(null);
+  const [source, setSource]               = useState<Source>('walkin');
+  const [customerName, setCustomerName]   = useState(defaultName);
+  const [customerPhone, setCustomerPhone] = useState(defaultPhone);
+  const [serviceId, setServiceId]         = useState('');
+  const [staffId, setStaffId]             = useState(staffOptions[0]?.id ?? '');
+  const [startTime, setStartTime]         = useState(defaultStartTime);
+  const [notes, setNotes]                 = useState('');
+  const [submitting, setSubmitting]       = useState(false);
+  const [error, setError]                 = useState<string | null>(null);
 
   // Cargar catálogo
   useEffect(() => {
@@ -97,11 +104,14 @@ export default function NewAppointmentForm({
     })();
   }, [businessId]);
 
-  // Servicio seleccionado — para calcular endsAt
   const selectedService = services.find((s) => s.id === serviceId);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!customerName.trim()) {
+      setError('El nombre del cliente es obligatorio');
+      return;
+    }
     if (!serviceId || !staffId || !startTime) {
       setError('Completa todos los campos requeridos');
       return;
@@ -115,7 +125,6 @@ export default function NewAppointmentForm({
     setError(null);
 
     try {
-      // Construir ISO datetime con zona horaria local
       const [hh, mm] = startTime.split(':').map(Number);
       const startDate = new Date(`${date}T00:00:00`);
       startDate.setHours(hh ?? 0, mm ?? 0, 0, 0);
@@ -123,7 +132,6 @@ export default function NewAppointmentForm({
         startDate.getTime() + selectedService.duration_minutes * 60_000,
       );
 
-      // Formatear con offset local
       const tzOffset = -startDate.getTimezoneOffset();
       const sign = tzOffset >= 0 ? '+' : '-';
       const pad = (n: number) => String(Math.abs(n)).padStart(2, '0');
@@ -142,10 +150,12 @@ export default function NewAppointmentForm({
       await createAssistantAppointment({
         staffId,
         serviceId,
-        startsAt: toIsoLocal(startDate),
-        endsAt:   toIsoLocal(endDate),
+        startsAt:      toIsoLocal(startDate),
+        endsAt:        toIsoLocal(endDate),
         source,
-        notes:    notes.trim() || undefined,
+        notes:         notes.trim() || undefined,
+        customerName:  customerName.trim(),
+        customerPhone: customerPhone.trim() || undefined,
       });
 
       onCreated();
@@ -206,6 +216,40 @@ export default function NewAppointmentForm({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Nombre del cliente — OBLIGATORIO */}
+            <div>
+              <label htmlFor="na-cname" className="mb-1 block text-xs font-medium text-gray-600">
+                Nombre del cliente <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="na-cname"
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                maxLength={120}
+                placeholder="Nombre completo"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+                required
+                autoFocus
+              />
+            </div>
+
+            {/* Telefono — opcional */}
+            <div>
+              <label htmlFor="na-phone" className="mb-1 block text-xs font-medium text-gray-600">
+                Telefono <span className="font-normal text-gray-400">(opcional)</span>
+              </label>
+              <input
+                id="na-phone"
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                maxLength={20}
+                placeholder="Para clientes recurrentes"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+              />
             </div>
 
             {/* Servicio */}
@@ -270,10 +314,10 @@ export default function NewAppointmentForm({
               )}
             </div>
 
-            {/* Notas (opcional) */}
+            {/* Notas adicionales (opcional) */}
             <div>
               <label htmlFor="na-notes" className="mb-1 block text-xs font-medium text-gray-600">
-                Notas <span className="font-normal text-gray-400">(opcional)</span>
+                Notas adicionales <span className="font-normal text-gray-400">(opcional)</span>
               </label>
               <textarea
                 id="na-notes"
@@ -281,7 +325,7 @@ export default function NewAppointmentForm({
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
                 maxLength={500}
-                placeholder="Nombre del cliente, preferencias…"
+                placeholder="Preferencias, observaciones…"
                 className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
               />
             </div>
@@ -294,7 +338,7 @@ export default function NewAppointmentForm({
             {/* Submit */}
             <button
               type="submit"
-              disabled={submitting || !serviceId || !staffId}
+              disabled={submitting || !serviceId || !staffId || !customerName.trim()}
               className="w-full rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white disabled:opacity-40"
             >
               {submitting ? 'Creando…' : 'Crear cita'}

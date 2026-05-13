@@ -5,6 +5,9 @@
 // Capacidades adicionales vs StaffDayTimeline:
 //   · Cancelar cita con razón (inline form).
 //   · Editar notas inline por cita.
+//   · Reagendar cita (Feature 3) — cambia fecha, hora y/o barbero.
+//   · Trazabilidad (Feature 5) — muestra quién creó o modificó.
+//   · Nombre del cliente prominente.
 //
 // Las mutaciones usan Server Actions de assistant-actions.ts.
 // El callback onMutated() notifica a AssistantLayout para refrescar el estado.
@@ -18,14 +21,18 @@ import {
   completeAppointment,
   noShowAppointment,
   updateAppointmentNotes,
+  rescheduleAppointment,
 } from '@/app/staff/assistant-actions';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
+type StaffOption = { id: string; name: string };
+
 type Props = {
   appointments: DashboardAppointment[];
   date: string;
-  onMutated: () => void;  // notifica al padre para refrescar
+  onMutated: () => void;
+  staffOptions: StaffOption[];  // para el selector de barbero en reagendar
 };
 
 // ─── Config visual ────────────────────────────────────────────────────────────
@@ -35,7 +42,7 @@ const STATUS_LABEL: Record<string, string> = {
   confirmed: 'Confirmada',
   completed: 'Completada',
   cancelled: 'Cancelada',
-  no_show:   'No asistió',
+  no_show:   'No asistio',
   walkin:    'Walk-in',
 };
 
@@ -71,14 +78,24 @@ function isCancellable(status: string): boolean {
   return ['pending', 'confirmed', 'walkin'].includes(status);
 }
 
+function isReschedulable(status: string): boolean {
+  return ['pending', 'confirmed'].includes(status);
+}
+
+function todayString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // ─── AppointmentCard ──────────────────────────────────────────────────────────
 
 type CardProps = {
   appointment: DashboardAppointment;
   onMutated: () => void;
+  date: string;
+  staffOptions: StaffOption[];
 };
 
-function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
+function AssistantAppointmentCard({ appointment, onMutated, date, staffOptions }: CardProps) {
   const [isPending, startTransition] = useTransition();
 
   // Cancel flow
@@ -86,11 +103,22 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
   const [cancelReason, setCancelReason]     = useState('');
 
   // Notes flow
-  const [showNotes, setShowNotes]   = useState(false);
-  const [notesValue, setNotesValue] = useState(appointment.notes ?? '');
+  const [showNotes, setShowNotes]     = useState(false);
+  const [notesValue, setNotesValue]   = useState(appointment.notes ?? '');
   const [notesSaving, setNotesSaving] = useState(false);
 
-  const { id, starts_at, ends_at, status, service, customer, staff, notes } = appointment;
+  // Reschedule flow
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [reschedDate, setReschedDate]       = useState(date);
+  const [reschedTime, setReschedTime]       = useState('');
+  const [reschedStaffId, setReschedStaffId] = useState(appointment.staff.id);
+  const [reschedError, setReschedError]     = useState<string | null>(null);
+  const [reschedPending, setReschedPending] = useState(false);
+
+  const {
+    id, starts_at, ends_at, status, service, customer, staff, notes,
+    created_by, modified_by,
+  } = appointment;
   const badgeClass  = STATUS_BADGE[status]  ?? 'bg-gray-100 text-gray-600';
   const borderClass = STATUS_BORDER[status] ?? 'border-gray-200';
 
@@ -128,36 +156,62 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
     }
   }
 
+  async function handleReschedule() {
+    if (!reschedTime) {
+      setReschedError('Indica la hora');
+      return;
+    }
+    setReschedPending(true);
+    setReschedError(null);
+    try {
+      await rescheduleAppointment({
+        appointmentId: id,
+        newDate:       reschedDate,
+        newStartTime:  reschedTime,
+        newStaffId:    reschedStaffId !== appointment.staff.id ? reschedStaffId : undefined,
+      });
+      setShowReschedule(false);
+      onMutated();
+    } catch (err) {
+      setReschedError(err instanceof Error ? err.message : 'Error al reagendar');
+    } finally {
+      setReschedPending(false);
+    }
+  }
+
+  // Texto de trazabilidad sutil
+  const traceText = modified_by
+    ? `Modificada por ${modified_by.name}`
+    : created_by
+    ? `Creada por ${created_by.name}`
+    : null;
+
   return (
     <div
       className={`rounded-lg border bg-white px-3 py-2.5 transition-opacity ${borderClass} ${isPending ? 'opacity-50' : ''}`}
     >
-      {/* Fila superior: hora + badge */}
+      {/* Nombre del cliente — prominente */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs font-semibold tabular-nums text-gray-700">
-            {formatTime(starts_at)}
-            <span className="font-normal text-gray-400"> – {formatTime(ends_at)}</span>
+          <p className="truncate text-base font-semibold text-gray-900">
+            {customer ? customer.name : 'Sin nombre'}
           </p>
-          <p className="mt-0.5 truncate text-sm font-medium text-gray-900">
-            {service.name}
-          </p>
+          <p className="truncate text-sm text-gray-500">{service.name}</p>
         </div>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
           {STATUS_LABEL[status] ?? status}
         </span>
       </div>
 
-      {/* Cliente + barbero */}
-      <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-        <span className="truncate">
-          {customer ? customer.name : 'Sin cliente'}
+      {/* Hora + barbero */}
+      <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+        <span className="tabular-nums font-medium text-gray-600">
+          {formatTime(starts_at)}
+          <span className="font-normal text-gray-400"> – {formatTime(ends_at)}</span>
         </span>
         <span className="text-gray-300">·</span>
-        <span className="shrink-0 text-gray-400">{staff.name}</span>
-        <span className="ml-auto shrink-0 text-gray-300">
-          {service.duration_minutes} min
-        </span>
+        <span className="truncate">{staff.name}</span>
+        <span className="ml-auto shrink-0">{service.duration_minutes} min</span>
       </div>
 
       {/* Notas existentes (lectura) */}
@@ -165,10 +219,15 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
         <p className="mt-1.5 text-xs italic text-gray-400">📝 {notes}</p>
       )}
 
+      {/* Trazabilidad — texto sutil */}
+      {traceText && !showCancelForm && !showNotes && !showReschedule && (
+        <p className="mt-1 text-xs text-gray-300">{traceText}</p>
+      )}
+
       {/* Acciones del asistente */}
-      {status !== 'cancelled' && status !== 'no_show' && !showCancelForm && !showNotes && (
+      {status !== 'cancelled' && status !== 'no_show' && !showCancelForm && !showNotes && !showReschedule && (
         <div className="mt-2 space-y-1.5">
-          {/* Fila 1: Completar + No asistio (acciones de estado final) */}
+          {/* Fila 1: Completar + No asistio */}
           {status !== 'completed' && (
             <div className="flex gap-1.5">
               <button
@@ -190,8 +249,29 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
             </div>
           )}
 
-          {/* Fila 2: Cancelar + Notas */}
+          {/* Fila 2: Reagendar + Cancelar + Notas */}
           <div className="flex gap-1.5">
+            {isReschedulable(status) && (
+              <button
+                onClick={() => {
+                  setReschedDate(date);
+                  setReschedTime(
+                    new Date(starts_at).toLocaleTimeString('es-MX', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false,
+                    }),
+                  );
+                  setReschedStaffId(appointment.staff.id);
+                  setReschedError(null);
+                  setShowReschedule(true);
+                }}
+                disabled={isPending}
+                className="flex-1 rounded border border-indigo-200 bg-indigo-50 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                Reagendar
+              </button>
+            )}
             {isCancellable(status) && (
               <button
                 onClick={() => setShowCancelForm(true)}
@@ -211,6 +291,68 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
               title="Editar notas"
             >
               📝
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reagendar inline */}
+      {showReschedule && (
+        <div className="mt-2 space-y-1.5">
+          <p className="text-xs font-medium text-gray-600">Reagendar cita</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <label className="mb-0.5 block text-xs text-gray-500">Fecha</label>
+              <input
+                type="date"
+                value={reschedDate}
+                min={todayString()}
+                onChange={(e) => setReschedDate(e.target.value)}
+                className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs focus:border-gray-400 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-0.5 block text-xs text-gray-500">Hora</label>
+              <input
+                type="time"
+                value={reschedTime}
+                onChange={(e) => setReschedTime(e.target.value)}
+                className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs focus:border-gray-400 focus:outline-none"
+                autoFocus
+              />
+            </div>
+          </div>
+          {staffOptions.length > 1 && (
+            <div>
+              <label className="mb-0.5 block text-xs text-gray-500">Barbero</label>
+              <select
+                value={reschedStaffId}
+                onChange={(e) => setReschedStaffId(e.target.value)}
+                className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs focus:border-gray-400 focus:outline-none"
+              >
+                {staffOptions.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {reschedError && (
+            <p className="text-xs text-red-600">{reschedError}</p>
+          )}
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => void handleReschedule()}
+              disabled={reschedPending || !reschedTime}
+              className="flex-1 rounded bg-indigo-600 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {reschedPending ? 'Guardando…' : 'Confirmar reagenda'}
+            </button>
+            <button
+              onClick={() => setShowReschedule(false)}
+              disabled={reschedPending}
+              className="rounded border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+            >
+              Volver
             </button>
           </div>
         </div>
@@ -283,7 +425,12 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function AssistantDayTimeline({ appointments, date, onMutated }: Props) {
+export default function AssistantDayTimeline({
+  appointments,
+  date,
+  onMutated,
+  staffOptions,
+}: Props) {
   if (appointments.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center">
@@ -308,6 +455,8 @@ export default function AssistantDayTimeline({ appointments, date, onMutated }: 
             key={appt.id}
             appointment={appt}
             onMutated={onMutated}
+            date={date}
+            staffOptions={staffOptions}
           />
         ))}
       </div>

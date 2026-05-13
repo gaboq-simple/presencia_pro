@@ -50,7 +50,7 @@ function deriveUpcomingCustomerId(
 export default async function StaffPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{ date?: string; view?: string }>;
 }) {
   // 1. Sesión activa — ls_session (PIN/token) o Supabase Auth
   const session = await getCurrentSession();
@@ -68,7 +68,7 @@ export default async function StaffPage({
   const businessId = session.business_id;
 
   // 2. Resolver fecha desde searchParams (default: hoy)
-  const { date: rawDate } = await searchParams;
+  const { date: rawDate, view: rawView } = await searchParams;
   const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
 
   // ── Asistente: AssistantLayout — ve TODAS las citas + puede crear/cancelar ──
@@ -84,6 +84,30 @@ export default async function StaffPage({
       .filter((s) => s.role === 'barber')
       .map((s) => ({ id: s.id, name: s.name }));
 
+    return (
+      <AssistantLayout
+        businessId={businessId}
+        businessName={businessName}
+        date={date}
+        initialAppointments={appointments}
+        staffOptions={staffOptions}
+      />
+    );
+  }
+
+  // ── Barbero en vista gestion (Feature 5B — Opción B) ─────────────────────
+  // Barbero accede a AssistantLayout con ?view=manage para gestionar citas
+  // del negocio. El staff_id de la sesión se usa para trazabilidad.
+  if (session.role === 'barber' && rawView === 'manage') {
+    const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
+    const [businessName, appointments, allStaff] = await Promise.all([
+      getBusinessName(businessId),
+      getDayAppointments(businessId, date),
+      getActiveStaffWithAvailability(businessId, dayOfWeek),
+    ]);
+    const staffOptions = allStaff
+      .filter((s) => s.role === 'barber')
+      .map((s) => ({ id: s.id, name: s.name }));
     return (
       <AssistantLayout
         businessId={businessId}

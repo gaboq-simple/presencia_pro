@@ -96,7 +96,7 @@ export type ServiceRef = {
 export type CustomerRef = {
   id: string;
   name: string;
-  phone: string;
+  phone: string | null;
 };
 
 // ─── Cita con joins ───────────────────────────────────────────────────────────
@@ -111,6 +111,9 @@ export type DashboardAppointment = {
   staff: StaffRef;
   service: ServiceRef;
   customer: CustomerRef | null;  // null en walk-ins sin cliente registrado
+  created_by: StaffRef | null;   // quien creó la cita (Feature 5)
+  modified_by: StaffRef | null;  // quien hizo la última modificación (Feature 5)
+  modified_at: string | null;    // timestamp de la última modificación (Feature 5)
 };
 
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
@@ -220,7 +223,7 @@ export type TopClientEntry = {
 // ─── Shape interno del select de appointments con joins ───────────────────────
 // Representa lo que Supabase JS retorna para el select anidado.
 // El FK staff_id y service_id son NOT NULL → objeto (no array).
-// customer_id es nullable → objeto | null.
+// customer_id, created_by_staff_id, modified_by_staff_id son nullable → objeto | null.
 
 type RawAppointmentRow = {
   id: string;
@@ -232,6 +235,9 @@ type RawAppointmentRow = {
   staff: StaffRef;
   service: ServiceRef;
   customer: CustomerRef | null;
+  created_by: StaffRef | null;
+  modified_by: StaffRef | null;
+  modified_at: string | null;
 };
 
 // Shape interno del select de staff con availability (one-to-many → array)
@@ -273,9 +279,12 @@ export async function getDayAppointments(
       status,
       source,
       notes,
+      modified_at,
       staff:staff_id(id, name),
       service:service_id(id, name, duration_minutes, price, currency),
-      customer:customer_id(id, name, phone)
+      customer:customer_id(id, name, phone),
+      created_by:created_by_staff_id(id, name),
+      modified_by:modified_by_staff_id(id, name)
     `)
     .eq('business_id', businessId)
     .gte('starts_at', `${date}T00:00:00`)
