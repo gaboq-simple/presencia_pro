@@ -106,6 +106,64 @@ export async function updateAppointmentNotes(
   if (error) throw new Error(`updateAppointmentNotes failed: ${error.message}`);
 }
 
+// ─── Completar cita ───────────────────────────────────────────────────────────
+
+/**
+ * Marca una cita como completada.
+ * Verifica que la cita pertenece al negocio de la sesión activa.
+ */
+export async function completeAppointment(appointmentId: string): Promise<void> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from('appointments')
+    .select('id, business_id, status')
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+
+  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (existing.status === 'completed') return; // idempotente
+
+  const { error } = await supabase
+    .from('appointments')
+    .update({ status: 'completed' })
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id);
+
+  if (error) throw new Error(`completeAppointment failed: ${error.message}`);
+}
+
+// ─── Registrar no-show ────────────────────────────────────────────────────────
+
+/**
+ * Marca una cita como no asistida (no-show).
+ * Verifica que la cita pertenece al negocio de la sesión activa.
+ */
+export async function noShowAppointment(appointmentId: string): Promise<void> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from('appointments')
+    .select('id, business_id, status')
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+
+  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (existing.status === 'no_show') return; // idempotente
+
+  const { error } = await supabase
+    .from('appointments')
+    .update({ status: 'no_show' })
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id);
+
+  if (error) throw new Error(`noShowAppointment failed: ${error.message}`);
+}
+
 // ─── Crear cita rápida ────────────────────────────────────────────────────────
 
 type CreateAppointmentInput = {

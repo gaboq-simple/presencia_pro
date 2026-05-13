@@ -169,9 +169,19 @@ export default function DashboardLayout({
             >
               ‹
             </Link>
-            <span className="flex-1 text-center text-sm font-medium capitalize text-gray-800">
-              {formatDateDisplay(date)}
-            </span>
+            <div className="flex flex-1 flex-col items-center">
+              <span className="text-sm font-medium capitalize text-gray-800">
+                {formatDateDisplay(date)}
+              </span>
+              {date !== toDateStr(new Date()) && (
+                <Link
+                  href={`/dashboard?date=${toDateStr(new Date())}${branchParam}`}
+                  className="mt-0.5 text-xs text-gray-400 underline hover:text-gray-600"
+                >
+                  Ir a hoy
+                </Link>
+              )}
+            </div>
             <Link
               href={`/dashboard?date=${nextDate}${branchParam}`}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-200 text-base text-gray-600 hover:bg-gray-50"

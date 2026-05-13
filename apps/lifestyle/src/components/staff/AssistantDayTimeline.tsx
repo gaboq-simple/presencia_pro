@@ -15,6 +15,8 @@ import { useState, useTransition } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import {
   cancelAppointment,
+  completeAppointment,
+  noShowAppointment,
   updateAppointmentNotes,
 } from '@/app/staff/assistant-actions';
 
@@ -92,6 +94,20 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
   const badgeClass  = STATUS_BADGE[status]  ?? 'bg-gray-100 text-gray-600';
   const borderClass = STATUS_BORDER[status] ?? 'border-gray-200';
 
+  function handleComplete() {
+    startTransition(async () => {
+      await completeAppointment(id);
+      onMutated();
+    });
+  }
+
+  function handleNoShow() {
+    startTransition(async () => {
+      await noShowAppointment(id);
+      onMutated();
+    });
+  }
+
   function handleCancel() {
     startTransition(async () => {
       await cancelAppointment(id, cancelReason);
@@ -150,21 +166,41 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
       )}
 
       {/* Acciones del asistente */}
-      {status !== 'cancelled' && status !== 'no_show' && (
-        <div className="mt-2 flex gap-1.5">
-          {/* Botón cancelar — solo si la cita es cancelable */}
-          {isCancellable(status) && !showCancelForm && !showNotes && (
-            <button
-              onClick={() => setShowCancelForm(true)}
-              disabled={isPending}
-              className="flex-1 rounded border border-red-200 bg-red-50 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
-            >
-              Cancelar
-            </button>
+      {status !== 'cancelled' && status !== 'no_show' && !showCancelForm && !showNotes && (
+        <div className="mt-2 space-y-1.5">
+          {/* Fila 1: Completar + No asistio (acciones de estado final) */}
+          {status !== 'completed' && (
+            <div className="flex gap-1.5">
+              <button
+                onClick={handleComplete}
+                disabled={isPending}
+                className="flex-1 rounded border border-gray-800 bg-gray-900 py-1.5 text-xs font-semibold text-white hover:bg-gray-700 disabled:opacity-50"
+              >
+                Completar
+              </button>
+              {(status === 'pending' || status === 'confirmed') && (
+                <button
+                  onClick={handleNoShow}
+                  disabled={isPending}
+                  className="flex-1 rounded border border-orange-200 bg-orange-50 py-1.5 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50"
+                >
+                  No asistio
+                </button>
+              )}
+            </div>
           )}
 
-          {/* Botón notas */}
-          {!showCancelForm && !showNotes && (
+          {/* Fila 2: Cancelar + Notas */}
+          <div className="flex gap-1.5">
+            {isCancellable(status) && (
+              <button
+                onClick={() => setShowCancelForm(true)}
+                disabled={isPending}
+                className="flex-1 rounded border border-red-200 bg-red-50 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            )}
             <button
               onClick={() => {
                 setNotesValue(appointment.notes ?? '');
@@ -176,7 +212,7 @@ function AssistantAppointmentCard({ appointment, onMutated }: CardProps) {
             >
               📝
             </button>
-          )}
+          </div>
         </div>
       )}
 

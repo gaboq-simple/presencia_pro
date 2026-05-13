@@ -30,6 +30,7 @@ import {
 import { getCurrentSession, getBusinessName, getOrganizationBranches } from '@/lib/auth';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import ConsolidatedView from '@/components/admin/ConsolidatedView';
+import AssistantLayout from '@/components/staff/AssistantLayout';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -102,12 +103,33 @@ export default async function DashboardPage({
     businessId = session.business_id;
   }
 
-  // 2. Nombre del negocio (siempre desde DB — el token no lo incluye)
-  const businessName = await getBusinessName(businessId);
-
-  // 3. Resolver fecha desde searchParams (default: hoy)
+  // 2. Resolver fecha desde searchParams (default: hoy)
   const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
   const dayOfWeek = new Date(`${date}T12:00:00`).getDay(); // 0=dom … 6=sáb
+
+  // ── Vista asistente — early return con datos propios ─────────────────────
+  if (session.role === 'assistant') {
+    const [businessName, appointments, allStaff] = await Promise.all([
+      getBusinessName(businessId),
+      getDayAppointments(businessId, date),
+      getActiveStaffWithAvailability(businessId, dayOfWeek),
+    ]);
+    const staffOptions = allStaff
+      .filter((s) => s.role === 'barber')
+      .map((s) => ({ id: s.id, name: s.name }));
+    return (
+      <AssistantLayout
+        businessId={businessId}
+        businessName={businessName}
+        date={date}
+        initialAppointments={appointments}
+        staffOptions={staffOptions}
+      />
+    );
+  }
+
+  // 3. Nombre del negocio para vista owner/admin
+  const businessName = await getBusinessName(businessId);
 
   // 4. Fetch en paralelo — citas del día + staff activo + solicitudes + fotos + gestión
   const [appointments, staffList, pendingBlockRequests, staffForPhotos, staffForManagement] = await Promise.all([

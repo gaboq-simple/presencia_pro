@@ -100,7 +100,7 @@ export default function AssistantLayout({
 
   // ── Navegación ────────────────────────────────────────────────────────────
   function navigate(targetDate: string) {
-    router.push(`/staff?date=${targetDate}`);
+    router.push(`/dashboard?date=${targetDate}`);
   }
 
   const prevDate  = addDays(date, -1);
@@ -157,7 +157,7 @@ export default function AssistantLayout({
         {/* + Nueva cita */}
         <button
           onClick={() => setShowNewForm(true)}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 py-3 text-sm font-medium text-gray-600 hover:border-gray-400 hover:text-gray-800 active:bg-gray-50"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white hover:bg-gray-800 active:bg-gray-700"
         >
           <span className="text-lg leading-none">+</span>
           Nueva cita
