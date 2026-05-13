@@ -1,30 +1,43 @@
 // ─── Appointments API ─────────────────────────────────────────────────────────
-// GET  /api/appointments?businessId=&staffId=&date=YYYY-MM-DD
-//   → Devuelve citas del día para el negocio/staff solicitado.
-//   → Requiere sesión autenticada.
+// GET  /api/appointments?date=YYYY-MM-DD[&staffId=UUID][&businessId=UUID]
+//   → Devuelve citas del día para el negocio de la sesión activa.
+//   → Requiere sesión autenticada (ls_session o Supabase Auth).
+//   → businessId del query param solo se usa en sesiones de organización
+//     y se valida contra session.business_ids. En sesiones de negocio directo
+//     se ignora — el businessId siempre viene del servidor.
+//   → Sesiones de barbero fuerzan staffId a su propio staff_id.
 //
 // POST /api/appointments
 //   → Crea una nueva cita.
 //   → Requiere sesión autenticada.
+//   → businessId del body solo aplica en sesiones de organización
+//     (se valida contra session.business_ids). En sesiones de negocio
+//     directo se ignora — el businessId siempre viene del servidor.
 //   → Input validado con Zod.
 //
 // PATCH /api/appointments
 //   body: { id: UUID, status: 'completed' | 'cancelled' | 'confirmed' | 'no_show' }
 //   → Actualiza el estado de la cita.
+//   → businessId siempre del servidor — nunca del cliente.
 //   → Si status='completed' y el negocio tiene review_requests_enabled=true:
 //     programa scheduled_notification type='review_request' para 24h después.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { getCurrentSession } from '@/lib/auth';
+
+// ─── UUID regex ───────────────────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ─── Input schemas ────────────────────────────────────────────────────────────
 
 const GetQuerySchema = z.object({
-  businessId: z.string().uuid('businessId debe ser UUID'),
   staffId:    z.string().uuid('staffId debe ser UUID').optional(),
   date:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date debe ser YYYY-MM-DD'),
+  // businessId solo se valida en sesiones de organización — ver handler
+  businessId: z.string().optional(),
 });
 
 const PatchAppointmentSchema = z.object({
@@ -33,7 +46,9 @@ const PatchAppointmentSchema = z.object({
 });
 
 const CreateAppointmentSchema = z.object({
-  businessId:  z.string().uuid(),
+  // businessId solo aplica en sesiones de organización — se ignora en sesiones
+  // de negocio directo (el businessId viene del servidor, no del cliente).
+  businessId:  z.string().uuid().optional(),
   staffId:     z.string().uuid(),
   serviceId:   z.string().uuid(),
   customerId:  z.string().uuid().optional(),
@@ -75,19 +90,17 @@ function getAdminClient() {
 // ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  // ── Auth check ──────────────────────────────────────────────────────────────
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
+  // ── Auth check — ls_session o Supabase Auth ─────────────────────────────────
+  const session = await getCurrentSession();
+  if (!session) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
   // ── Validate query params ───────────────────────────────────────────────────
   const parsed = GetQuerySchema.safeParse({
-    businessId: request.nextUrl.searchParams.get('businessId'),
     staffId:    request.nextUrl.searchParams.get('staffId') ?? undefined,
     date:       request.nextUrl.searchParams.get('date'),
+    businessId: request.nextUrl.searchParams.get('businessId') ?? undefined,
   });
 
   if (!parsed.success) {
@@ -97,7 +110,34 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { businessId, staffId, date } = parsed.data;
+  const { staffId: rawStaffId, date, businessId: rawBusinessId } = parsed.data;
+
+  // ── Resolver businessId desde la sesión — nunca del cliente ────────────────
+  let businessId: string;
+
+  if (session.type === 'organization') {
+    // Sesiones de organización: el caller debe especificar qué sucursal consultar.
+    if (!rawBusinessId || !UUID_RE.test(rawBusinessId)) {
+      return NextResponse.json(
+        { error: 'businessId requerido para sesiones de organización' },
+        { status: 400 },
+      );
+    }
+    if (!session.business_ids.includes(rawBusinessId)) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+    businessId = rawBusinessId;
+  } else {
+    // Sesiones de negocio directo (owner, assistant, barber):
+    // siempre usamos el business_id de la sesión — ignoramos cualquier parámetro del cliente.
+    businessId = session.business_id;
+  }
+
+  // ── Barbero: solo puede ver su propia agenda ────────────────────────────────
+  let staffId = rawStaffId;
+  if (session.role === 'barber' && session.staff_id) {
+    staffId = session.staff_id;
+  }
 
   // ── Date range for the requested day ────────────────────────────────────────
   const dayStart = `${date}T00:00:00+00:00`;
@@ -128,11 +168,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // ─── POST ─────────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // ── Auth check ──────────────────────────────────────────────────────────────
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
+  // ── Auth check — ls_session o Supabase Auth ─────────────────────────────────
+  const session = await getCurrentSession();
+  if (!session) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
@@ -153,8 +191,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { businessId, staffId, serviceId, customerId, startsAt, endsAt, source, notes } =
-    parsed.data;
+  const { staffId, serviceId, customerId, startsAt, endsAt, source, notes } = parsed.data;
+
+  // ── Resolver businessId desde la sesión — nunca del cliente ────────────────
+  let businessId: string;
+
+  if (session.type === 'organization') {
+    // Sesiones de organización: el caller debe especificar la sucursal destino.
+    const rawBizId = parsed.data.businessId;
+    if (!rawBizId || !UUID_RE.test(rawBizId)) {
+      return NextResponse.json(
+        { error: 'businessId requerido para sesiones de organización' },
+        { status: 400 },
+      );
+    }
+    if (!session.business_ids.includes(rawBizId)) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+    businessId = rawBizId;
+  } else {
+    // Sesiones de negocio directo: siempre usamos el business_id de la sesión.
+    businessId = session.business_id;
+  }
 
   // ── Insert ──────────────────────────────────────────────────────────────────
   const admin = getAdminClient();
@@ -185,28 +243,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 // ─── PATCH ────────────────────────────────────────────────────────────────────
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  // ── Auth check ──────────────────────────────────────────────────────────────
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
+  // ── Auth check — ls_session o Supabase Auth ─────────────────────────────────
+  const session = await getCurrentSession();
+  if (!session) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
-  // Resolver business_id del admin autenticado
-  const admin = getAdminClient();
-  const { data: staffRecord } = await admin
-    .from('staff')
-    .select('business_id, role')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (!staffRecord) {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+  // Sesiones de organización no tienen business_id implícito para mutaciones.
+  if (session.type === 'organization') {
+    return NextResponse.json(
+      { error: 'Usa el token de sucursal para gestionar citas' },
+      { status: 403 },
+    );
   }
 
-  const businessId = (staffRecord as { business_id: string; role: string }).business_id;
+  const businessId = session.business_id;
 
   // ── Parse and validate body ─────────────────────────────────────────────────
   let rawBody: unknown;
@@ -225,6 +276,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
 
   const { id, status } = parsed.data;
+
+  const admin = getAdminClient();
 
   // ── Update — solo si pertenece a este negocio ───────────────────────────────
   const { data: updatedAppt, error: updateError } = await admin
@@ -291,7 +344,7 @@ async function scheduleReviewRequest(
     if (!custData) return;
 
     const cust = custData as { id: string; name: string; phone: string };
-    const firstName   = cust.name.split(' ')[0] ?? cust.name;
+    const firstName    = cust.name.split(' ')[0] ?? cust.name;
     const scheduledFor = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
     const messageBody  =
       `Hola ${firstName}, ¿qué tal tu experiencia hoy en ${biz.name}? 💈 ` +

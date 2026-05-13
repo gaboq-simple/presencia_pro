@@ -95,6 +95,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 // ─── POST — Incoming message ──────────────────────────────────────────────────
+// TODO (B-1 — rate limiting): sin rate limiting, este endpoint puede recibir
+// flood de mensajes. Meta/Twilio tienen límites upstream, pero un atacante que
+// conozca la URL puede generar carga excesiva. Implementar en Fase 2 usando
+// Upstash Redis + sliding window por phone_number_id o IP de origen.
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const provider = (process.env['MESSAGING_PROVIDER'] ?? 'meta').toLowerCase();

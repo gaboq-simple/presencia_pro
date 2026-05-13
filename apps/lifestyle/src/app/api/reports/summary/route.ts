@@ -234,7 +234,11 @@ export async function GET(request: Request): Promise<NextResponse> {
       return NextResponse.json(metrics);
     }
   } catch (err) {
+    // TODO (M-3 — fuga de mensajes de error): err.message puede revelar nombres
+    // de tablas o columnas de Supabase. En producción, loguear internamente y
+    // retornar mensaje genérico: return NextResponse.json({ error: 'Internal error' }, { status: 500 });
     const message = err instanceof Error ? err.message : 'Internal error';
+    console.error('[reports/summary]', message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

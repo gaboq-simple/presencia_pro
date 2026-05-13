@@ -54,6 +54,10 @@ function getServiceClient() {
 }
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
+// TODO (A-2 — solo Supabase Auth): este helper usa createAuthClient().auth.getUser()
+// directamente. Usuarios autenticados vía ls_session (token de acceso, PIN)
+// recibirán 401. Migrar a getCurrentSession() de @/lib/auth para soportar
+// ambos mecanismos de autenticación.
 
 async function requireAdmin(): Promise<
   { ok: true; businessId: string } | { ok: false; status: 401 | 403; error: string }

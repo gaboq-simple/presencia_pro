@@ -71,6 +71,10 @@ function computeTier(days: number): InactiveClientTier {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function GET(request: Request): Promise<NextResponse> {
+  // TODO (A-2 — solo Supabase Auth): este handler usa createAuthClient().auth.getUser()
+  // directamente. Usuarios autenticados vía ls_session (token de acceso) recibirán
+  // 401. Migrar a getCurrentSession() de @/lib/auth para soportar ambos mecanismos.
+
   // 1. Verificar sesión
   const authClient = await createAuthClient();
   const {
@@ -199,7 +203,10 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     return NextResponse.json(result);
   } catch (err) {
+    // TODO (M-3 — fuga de mensajes de error): err.message puede revelar nombres
+    // de tablas o columnas. En producción retornar mensaje genérico.
     const message = err instanceof Error ? err.message : 'Internal error';
+    console.error('[customers/inactive]', message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

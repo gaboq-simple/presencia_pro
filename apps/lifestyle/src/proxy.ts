@@ -39,6 +39,12 @@ async function findTokenResult(
   const headers = { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' };
   const isAssistantHint = roleHint === 'assistant';
 
+  // TODO (A-1 — tokens sin expiración): access_token y assistant_token son
+  // strings estáticos sin fecha de expiración en la DB. Si se filtran (logs,
+  // historial del navegador, pantalla compartida) el acceso es permanente hasta
+  // rotación manual. Solución: agregar `token_expires_at TIMESTAMPTZ` en
+  // businesses, validarlo aquí, y rotar automáticamente cada 90 días.
+
   // 1. businesses.access_token → sucursal directa (dueño o asistente)
   const ownerRes = await fetch(
     `${url}/rest/v1/businesses?select=id&access_token=eq.${encodeURIComponent(token)}&active=eq.true&limit=1`,

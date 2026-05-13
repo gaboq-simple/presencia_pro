@@ -321,6 +321,16 @@ export default async function SlugPage({
     <>
       {/* eslint-disable-next-line react/no-danger */}
       <style dangerouslySetInnerHTML={{ __html: paletteVars }} />
+      {/*
+        TODO (M-1 — XSS en JSON-LD): JSON.stringify no escapa `<` ni `>`.
+        Si business.description o business.address contienen `</script>`, el
+        parser del navegador cerraría el tag prematuramente. Actualmente el
+        onboarding es manual (el operador inserta los datos), lo que mitiga el
+        riesgo, pero en Fase 3 (self-service) es un vector real.
+        Fix: reemplazar con:
+          JSON.stringify(jsonLd).replace(/<\//g, '<\\/')
+        Esto es la técnica estándar para JSON-LD safe embedding.
+      */}
       {/* eslint-disable-next-line react/no-danger */}
       <script
         type="application/ld+json"
