@@ -1,11 +1,5 @@
 {
   "framework": null,
   "buildCommand": null,
-  "ignoreCommand": "echo 'Monorepo root — deploy individual clients, not this directory'",
-  "projects": [
-    {
-      "name": "dra-quevedo",
-      "root": "clients/dra-quevedo"
-    }
-  ]
+  "ignoreCommand": "echo 'Monorepo root — deploy individual clients, not this directory'"
 }
