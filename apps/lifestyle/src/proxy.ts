@@ -95,19 +95,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const isProd = process.env['NODE_ENV'] === 'production';
   const { pathname } = request.nextUrl;
 
-  // ── 1. ls_session cookie (PIN/token auth) ──────────────────────────────────
-  const lsCookie = request.cookies.get(SESSION_COOKIE)?.value;
-  if (lsCookie) {
-    const session = await verifySession(lsCookie);
-    if (session) {
-      if (pathname === '/login') {
-        return NextResponse.redirect(new URL('/dashboard', request.url));
-      }
-      return NextResponse.next({ request });
-    }
-  }
-
-  // ── 2. ?token= in URL (access link flow) ───────────────────────────────────
+  // ── 1. ?token= in URL (access link flow) — checked FIRST so a fresh token
+  //    always overrides any existing cookie (e.g. a stale barber session).
   if (pathname.startsWith('/dashboard')) {
     const token = request.nextUrl.searchParams.get('token');
     if (token) {
@@ -126,6 +115,18 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
         return response;
       }
       return NextResponse.redirect(new URL('/login', request.url));
+    }
+  }
+
+  // ── 2. ls_session cookie (PIN/token auth) ──────────────────────────────────
+  const lsCookie = request.cookies.get(SESSION_COOKIE)?.value;
+  if (lsCookie) {
+    const session = await verifySession(lsCookie);
+    if (session) {
+      if (pathname === '/login') {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
+      return NextResponse.next({ request });
     }
   }
 
