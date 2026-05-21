@@ -21,6 +21,9 @@
     "timezone": "America/Mexico_City",
     "palette": "obsidian",
     "walk_in_buffer_minutes": 30,
+    "max_late_minutes": 15,
+    "auto_cancel_after_minutes": 25,
+    "max_noshows_before_flag": 3,
     "office_hours": {
       "mon": { "open": "09:00", "close": "19:00" },
       "tue": { "open": "09:00", "close": "19:00" },
@@ -47,13 +50,15 @@
     {
       "name": "Carlos Ramirez",
       "role": "admin",
+      "phone": "5512345678",
+      "whatsapp_id": "5512345678",
       "photo_url": null,
       "availability": {
-        "mon": { "start": "09:00", "end": "19:00" },
-        "tue": { "start": "09:00", "end": "19:00" },
-        "wed": { "start": "09:00", "end": "19:00" },
-        "thu": { "start": "09:00", "end": "19:00" },
-        "fri": { "start": "09:00", "end": "20:00" },
+        "mon": { "start": "09:00", "end": "19:00", "break_start": "14:00", "break_end": "15:00" },
+        "tue": { "start": "09:00", "end": "19:00", "break_start": "14:00", "break_end": "15:00" },
+        "wed": { "start": "09:00", "end": "19:00", "break_start": "14:00", "break_end": "15:00" },
+        "thu": { "start": "09:00", "end": "19:00", "break_start": "14:00", "break_end": "15:00" },
+        "fri": { "start": "09:00", "end": "20:00", "break_start": "14:00", "break_end": "15:00" },
         "sat": { "start": "10:00", "end": "18:00" }
       },
       "services": ["corte-clasico", "corte-fade", "barba"]
@@ -61,6 +66,8 @@
     {
       "name": "Luis Torres",
       "role": "barber",
+      "phone": "5598765432",
+      "whatsapp_id": "5598765432",
       "photo_url": null,
       "availability": {
         "tue": { "start": "10:00", "end": "19:00" },
