@@ -71,8 +71,10 @@ export type StaffRow = {
 export type StaffAvailabilityRow = {
   readonly staff_id: string;
   readonly day_of_week: number;
-  readonly start_time: string;  // "HH:MM:SS"
-  readonly end_time: string;    // "HH:MM:SS"
+  readonly start_time: string;         // "HH:MM:SS"
+  readonly end_time: string;           // "HH:MM:SS"
+  readonly break_start: string | null; // "HH:MM:SS" | null
+  readonly break_end: string | null;   // "HH:MM:SS" | null
 };
 
 // ─── Scheduling ───────────────────────────────────────────────────────────────

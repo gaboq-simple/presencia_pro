@@ -44,12 +44,28 @@ const TimeSchema = z.string().regex(
 );
 
 const DaySlotSchema = z.object({
-  day_of_week: z.number().int().min(0).max(6, 'day_of_week debe ser 0-6'),
-  start_time:  TimeSchema,
-  end_time:    TimeSchema,
+  day_of_week:  z.number().int().min(0).max(6, 'day_of_week debe ser 0-6'),
+  start_time:   TimeSchema,
+  end_time:     TimeSchema,
+  break_start:  TimeSchema.nullable().optional(),
+  break_end:    TimeSchema.nullable().optional(),
+  is_active:    z.boolean().optional().default(true),
 }).refine(
   (d) => d.start_time < d.end_time,
   { message: 'start_time debe ser anterior a end_time', path: ['end_time'] },
+).refine(
+  (d) => {
+    const hasStart = d.break_start != null;
+    const hasEnd   = d.break_end   != null;
+    return hasStart === hasEnd;
+  },
+  { message: 'break_start y break_end deben venir juntos o ninguno', path: ['break_end'] },
+).refine(
+  (d) => {
+    if (d.break_start == null || d.break_end == null) return true;
+    return d.break_start < d.break_end;
+  },
+  { message: 'break_start debe ser anterior a break_end', path: ['break_end'] },
 );
 
 const BodySchema = z.object({
@@ -112,7 +128,7 @@ export async function GET(
 
   const { data, error } = await supabase
     .from('staff_availability')
-    .select('day_of_week, start_time, end_time')
+    .select('day_of_week, start_time, end_time, break_start, break_end, is_active')
     .eq('staff_id', staffId)
     .order('day_of_week');
 
@@ -210,6 +226,9 @@ export async function PATCH(
       day_of_week: slot.day_of_week,
       start_time:  slot.start_time,
       end_time:    slot.end_time,
+      break_start: slot.break_start ?? null,
+      break_end:   slot.break_end   ?? null,
+      is_active:   slot.is_active   ?? true,
     }));
 
     const { error: insertError } = await supabase

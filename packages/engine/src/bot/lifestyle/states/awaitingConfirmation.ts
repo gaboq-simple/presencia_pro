@@ -16,6 +16,7 @@ import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { classifyIntent } from '../classifier';
 import { buildSideQuestionResponse } from '../clarification';
 import { getCatalog } from '../catalog';
+import { logBotError } from '../utils/logger';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_RETRIES = 2;
@@ -186,7 +187,7 @@ async function buildSideAnswerFromService(
 
     return `Por cierto, el costo es ${priceStr} y la duracion es de ${service.duration_minutes} min.`;
   } catch (err) {
-    console.error('[bot:awaitingConfirmation] buildSideAnswerFromService failed:', err);
+    logBotError({ context: 'awaitingConfirmation.buildSideAnswerFromService', error: err, businessId: deps.business.id });
     return null;
   }
 }

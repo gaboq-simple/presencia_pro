@@ -74,11 +74,16 @@ export default function DashboardRealtimeProvider({
   staffList,
 }: Props) {
   const [appointments, setAppointments] = useState<DashboardAppointment[]>(initialAppointments);
+  const [prevDate, setPrevDate] = useState(date);
+  if (prevDate !== date) {
+    setPrevDate(date);
+    setAppointments(initialAppointments);
+  }
 
   // Ref para acceder a la fecha actual dentro del callback de Realtime
   // sin que el effect se re-ejecute al cambiar de día.
   const dateRef = useRef(date);
-  dateRef.current = date;
+  useEffect(() => { dateRef.current = date; });
 
   // ── Suscripción Realtime ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -135,12 +140,6 @@ export default function DashboardRealtimeProvider({
       supabase.removeChannel(channel);
     };
   }, [businessId]); // Solo se re-suscribe si cambia el negocio (multi-tenant)
-
-  // ── Reset al navegar entre días ──────────────────────────────────────────────
-  // El server re-renderiza con nuevas initialAppointments cuando cambia la fecha.
-  useEffect(() => {
-    setAppointments(initialAppointments);
-  }, [date, initialAppointments]);
 
   return (
     // Mobile: columna única (375px). sm+: grid — timeline a la izquierda,

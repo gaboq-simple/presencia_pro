@@ -40,6 +40,8 @@ type CustomerRow = {
   favorite_staff_id: string | null;
   favorite_service_id: string | null;
   last_visit: string | null;
+  favorite_staff: { name: string } | null;
+  favorite_service: { name: string } | null;
 };
 
 // ─── Caso de saludo ───────────────────────────────────────────────────────────
@@ -62,26 +64,37 @@ export async function handleGreeting(
   let isReturning = false;
   let favoriteStaffId: string | null    = null;
   let favoriteServiceId: string | null  = null;
+  let favStaffName: string | null       = null;
+  let favServiceName: string | null     = null;
 
   const { data: existing } = await supabase
     .from('customers')
-    .select('id, name, favorite_staff_id, favorite_service_id, last_visit')
+    .select('id, name, favorite_staff_id, favorite_service_id, last_visit, favorite_staff:favorite_staff_id(name), favorite_service:favorite_service_id(name)')
     .eq('business_id', business.id)
     .eq('phone', msg.customerPhone)
     .maybeSingle();
 
   if (existing) {
-    const row        = existing as CustomerRow;
-    customerId       = row.id;
-    customerName     = row.name;
-    favoriteStaffId  = row.favorite_staff_id;
+    const row         = existing as unknown as CustomerRow;
+    customerId        = row.id;
+    customerName      = row.name;
+    favoriteStaffId   = row.favorite_staff_id;
     favoriteServiceId = row.favorite_service_id;
-    isReturning      = true;
+    favStaffName      = row.favorite_staff?.name ?? null;
+    favServiceName    = row.favorite_service?.name ?? null;
+    isReturning       = true;
   } else {
     const nameToSave = msg.customerName ?? 'Cliente';
     const { data: inserted, error } = await supabase
       .from('customers')
-      .insert({ business_id: business.id, phone: msg.customerPhone, name: nameToSave })
+      .insert({
+        business_id:        business.id,
+        phone:              msg.customerPhone,
+        name:               nameToSave,
+        consent_at:         new Date().toISOString(),
+        consented_via:      'whatsapp_first_message',
+        consent_message_id: msg.messageId ?? null,
+      })
       .select('id')
       .single();
 
@@ -251,19 +264,44 @@ export async function handleGreeting(
       break;
     }
     default: {
-      // 'none' — saludo genérico
-      plan = {
-        nextState: 'QUALIFYING_SERVICE',
-        sonnetInstruction: isReturning
-          ? `El cliente se llama ${customerName} y ya ha visitado el negocio antes. `
-            + `Salúdalo por nombre de forma sutil y cálida, sin mencionar su historial explícitamente. `
-            + `Pregunta en qué puedes ayudarle hoy. Máximo 2 líneas.`
-          : `Es un cliente nuevo. Salúdalo de forma amigable en nombre de ${business.name}. `
-            + `Pregunta en qué puedes ayudarle. Máximo 2 líneas.`,
-        deterministicFallback: isReturning
-          ? `Hola ${customerName}, que gusto verte de nuevo. En que puedo ayudarte hoy?`
-          : `Hola, soy ${business.botName}. En que puedo ayudarte?`,
-      };
+      // 'none' — saludo genérico, con personalización si es cliente recurrente con favoritos
+      if (isReturning && favStaffName && favServiceName) {
+        plan = {
+          nextState: 'QUALIFYING_SERVICE',
+          sonnetInstruction:
+            `El cliente se llama ${customerName} y ya ha visitado el negocio antes. `
+            + `La última vez agendó ${favServiceName} con ${favStaffName}. `
+            + `Salúdalo por nombre de forma cálida y pregunta si quiere agendar lo mismo `
+            + `(${favServiceName} con ${favStaffName}) o prefiere algo diferente. `
+            + `Máximo 2 líneas. Sin exclamaciones al inicio.`,
+          deterministicFallback:
+            `Hola ${customerName}, que gusto! Quieres agendar tu ${favServiceName} con ${favStaffName} como la última vez, o prefieres algo diferente?`,
+        };
+      } else if (isReturning && favServiceName) {
+        plan = {
+          nextState: 'QUALIFYING_SERVICE',
+          sonnetInstruction:
+            `El cliente se llama ${customerName} y ya ha visitado el negocio antes. `
+            + `La última vez agendó ${favServiceName}. `
+            + `Salúdalo por nombre de forma cálida y pregunta si quiere agendar lo mismo o algo diferente. `
+            + `Máximo 2 líneas. Sin exclamaciones al inicio.`,
+          deterministicFallback:
+            `Hola ${customerName}! La última vez fue un ${favServiceName}. Agendamos lo mismo?`,
+        };
+      } else {
+        plan = {
+          nextState: 'QUALIFYING_SERVICE',
+          sonnetInstruction: isReturning
+            ? `El cliente se llama ${customerName} y ya ha visitado el negocio antes. `
+              + `Salúdalo por nombre de forma sutil y cálida, sin mencionar su historial explícitamente. `
+              + `Pregunta en qué puedes ayudarle hoy. Máximo 2 líneas.`
+            : `Es un cliente nuevo. Salúdalo de forma amigable en nombre de ${business.name}. `
+              + `Pregunta en qué puedes ayudarle. Máximo 2 líneas.`,
+          deterministicFallback: isReturning
+            ? `Hola ${customerName}, que gusto verte de nuevo. En que puedo ayudarte hoy?`
+            : `Hola, soy ${business.botName}. En que puedo ayudarte?`,
+        };
+      }
       break;
     }
   }
@@ -271,7 +309,7 @@ export async function handleGreeting(
   // ── Generar responseText vía Claude Sonnet ─────────────────────────────────
 
   const systemPrompt = buildSystemPrompt(business, undefined, services);
-  const responseText = await generateGreetingText(
+  const greetingText = await generateGreetingText(
     anthropicKey,
     systemPrompt,
     plan.sonnetInstruction,
@@ -281,6 +319,13 @@ export async function handleGreeting(
     msg.customerPhone,
     plan.nextState,
   );
+
+  // Para clientes nuevos: prepend aviso de privacidad (LFPDPPP Art. 8).
+  // Consentimiento tácito: el cliente sigue interactuando tras el aviso.
+  const privacyUrl = process.env['PRIVACY_POLICY_URL'] ?? 'https://zentriq.mx/aviso-de-privacidad';
+  const responseText = !isReturning
+    ? `Para brindarte un mejor servicio, almacenamos tu nombre y número de teléfono. Puedes consultar nuestro aviso de privacidad en ${privacyUrl} o ejercer tus derechos ARCO escribiendo "mis datos". Al continuar, aceptas el tratamiento de tus datos.\n\n${greetingText}`
+    : greetingText;
 
   // ── Ensamblar resultado ────────────────────────────────────────────────────
 

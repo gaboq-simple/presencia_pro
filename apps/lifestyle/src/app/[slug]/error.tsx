@@ -38,6 +38,15 @@ export default function SlugError({
         <p style={{ fontSize: '0.875rem', color: 'rgba(245,245,245,0.6)', lineHeight: 1.6 }}>
           Ocurrió un error al cargar el sitio. Intenta recargar la página.
         </p>
+        <p style={{ fontSize: '0.75rem', color: 'rgba(245,245,245,0.4)', lineHeight: 1.6, marginTop: '0.5rem' }}>
+          Si el problema persiste,{' '}
+          <a
+            href={`mailto:contacto@zentriq.mx?subject=Error%20presenciapro${error.digest ? `%20${error.digest}` : ''}`}
+            style={{ color: 'inherit', textDecoration: 'underline' }}
+          >
+            escríbenos a contacto@zentriq.mx
+          </a>.
+        </p>
         <button
           onClick={reset}
           style={{

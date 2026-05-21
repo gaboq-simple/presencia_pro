@@ -136,6 +136,11 @@ export default function StaffLayout({
 
   const [appointments, setAppointments] =
     useState<DayAppointmentForStaff[]>(initialAppointments);
+  const [syncedDate, setSyncedDate] = useState(date);
+  if (syncedDate !== date) {
+    setSyncedDate(date);
+    setAppointments(initialAppointments);
+  }
 
   // Vista activa — solo relevante para role='barber'
   const [view, setView] = useState<StaffView>('day');
@@ -143,7 +148,7 @@ export default function StaffLayout({
   // Ref para leer la fecha actual dentro del callback de Realtime
   // sin causar que el effect se re-suscriba al navegar entre días.
   const dateRef = useRef(date);
-  dateRef.current = date;
+  useEffect(() => { dateRef.current = date; });
 
   // ── Suscripción Realtime — citas del barbero ────────────────────────────────
   // Solo activa cuando role='barber' y hay staffId válido.
@@ -206,11 +211,6 @@ export default function StaffLayout({
       supabase.removeChannel(channel);
     };
   }, [staffId, role]);
-
-  // ── Sincronizar appointments con nuevas props al navegar entre días ──────────
-  useEffect(() => {
-    setAppointments(initialAppointments);
-  }, [date, initialAppointments]);
 
   // ── Navegación entre días ─────────────────────────────────────────────────
 

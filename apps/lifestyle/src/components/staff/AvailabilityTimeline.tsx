@@ -106,12 +106,17 @@ export default function AvailabilityTimeline({
 
   // ── Hora actual (actualiza cada minuto) ──────────────────────────────────
   const [nowMinutes, setNowMinutes] = useState<number | null>(null);
-
-  useEffect(() => {
+  const [prevDateTz, setPrevDateTz] = useState(`${date}|${timezone}`);
+  const dateTz = `${date}|${timezone}`;
+  if (prevDateTz !== dateTz) {
+    setPrevDateTz(dateTz);
     if (!isToday(date, timezone)) {
       setNowMinutes(null);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!isToday(date, timezone)) return;
     const update = () => setNowMinutes(nowLocalMinutes(timezone));
     update();
     const interval = setInterval(update, 60_000);

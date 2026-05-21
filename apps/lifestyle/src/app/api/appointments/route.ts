@@ -26,6 +26,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
+import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
 
 // ─── UUID regex ───────────────────────────────────────────────────────────────
 
@@ -285,7 +286,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     .update({ status })
     .eq('id', id)
     .eq('business_id', businessId)
-    .select('id, customer_id, business_id')
+    .select('id, customer_id, business_id, starts_at, staff_id')
     .maybeSingle();
 
   if (updateError) {
@@ -293,6 +294,24 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
   if (!updatedAppt) {
     return NextResponse.json({ error: 'Cita no encontrada' }, { status: 404 });
+  }
+
+  // ── Cancelar recordatorios pendientes si la cita se cancela o no se presenta
+  if (status === 'cancelled' || status === 'no_show') {
+    await admin
+      .from('scheduled_notifications')
+      .update({ failed_at: new Date().toISOString() })
+      .eq('appointment_id', id)
+      .is('sent_at', null)
+      .is('failed_at', null);
+
+    // Notificar waitlist si hay clientes en espera para ese slot — best-effort
+    try {
+      const appt = updatedAppt as unknown as { starts_at: string; staff_id: string | null };
+      await notifyWaitlistOnCancel(admin, businessId, appt.starts_at, appt.staff_id ?? null);
+    } catch {
+      // best-effort — el cambio de estado ya fue exitoso
+    }
   }
 
   // ── Disparar solicitud de reseña si status=completed ───────────────────────

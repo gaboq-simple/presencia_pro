@@ -57,6 +57,7 @@ function addMinutes(date: Date, minutes: number): Date {
 
 type AppointmentBlock = { starts_at: string; ends_at: string };
 type StaffBlock       = { starts_at: string; ends_at: string };
+type ExceptionRow     = { staff_id: string; exception_date: string; available: boolean; start_time: string | null; end_time: string | null };
 
 // ─── Disponibilidad por staff ─────────────────────────────────────────────────
 
@@ -80,9 +81,20 @@ function generateSlotsForStaff(
   minStart: Date | null,  // para walk-in: NOW() + buffer (UTC absoluto)
   shift: 'morning' | 'afternoon' | null,
   tz: string,
+  exception: ExceptionRow | null,
 ): SlotCandidate[] {
-  const startMinutes = timeToMinutes(availability.start_time);
-  const endMinutes   = timeToMinutes(availability.end_time);
+  // Excepción de fecha específica: día libre → sin slots
+  if (exception !== null && !exception.available) return [];
+
+  // Si la excepción tiene horario especial, reemplaza el base (y elimina el break)
+  const hasSpecialSchedule = exception !== null && exception.start_time !== null;
+  const startMinutes = hasSpecialSchedule
+    ? timeToMinutes(exception!.start_time!)
+    : timeToMinutes(availability.start_time);
+  const endMinutes = hasSpecialSchedule
+    ? timeToMinutes(exception!.end_time!)
+    : timeToMinutes(availability.end_time);
+
   const slots: SlotCandidate[] = [];
 
   // Construir ocupaciones en minutos locales desde medianoche (hora del negocio)
@@ -103,6 +115,13 @@ function generateSlotsForStaff(
     occupiedRanges.push({
       start: utcToLocalMinutes(s, tz),
       end:   utcToLocalMinutes(e, tz),
+    });
+  }
+  // Break del turno (solo si no hay horario especial por excepción de fecha)
+  if (!hasSpecialSchedule && availability.break_start && availability.break_end) {
+    occupiedRanges.push({
+      start: timeToMinutes(availability.break_start),
+      end:   timeToMinutes(availability.break_end),
     });
   }
 
@@ -395,12 +414,13 @@ export async function getAvailableSlots(
   // Cargar disponibilidad de todos los candidatos en paralelo
   const staffIds = candidateStaff.map((s) => s.id);
 
-  const [availabilityResult, appointmentsResult, blocksResult] = await Promise.all([
+  const [availabilityResult, appointmentsResult, blocksResult, exceptionsResult] = await Promise.all([
     supabase
       .from('staff_availability')
-      .select('staff_id, day_of_week, start_time, end_time')
+      .select('staff_id, day_of_week, start_time, end_time, break_start, break_end')
       .in('staff_id', staffIds)
-      .eq('day_of_week', dayOfWeek),
+      .eq('day_of_week', dayOfWeek)
+      .eq('is_active', true),
 
     supabase
       .from('appointments')
@@ -415,8 +435,15 @@ export async function getAvailableSlots(
       .from('staff_blocks')
       .select('staff_id, starts_at, ends_at')
       .in('staff_id', staffIds)
+      .eq('status', 'approved')
       .gte('starts_at', dayStartUTC.toISOString())
       .lt('starts_at',  dayEndUTC.toISOString()),
+
+    supabase
+      .from('staff_schedule_exceptions')
+      .select('staff_id, exception_date, available, start_time, end_time')
+      .in('staff_id', staffIds)
+      .eq('exception_date', dateStr),
   ]);
 
   // ── Verificar errores en los queries críticos ────────────────────────────
@@ -464,9 +491,29 @@ export async function getAvailableSlots(
     }));
   }
 
+  if (exceptionsResult.error) {
+    // No crítico — continuar sin excepciones. Peor caso: mostrar slots en días libres.
+    console.error(JSON.stringify({
+      ts:          new Date().toISOString(),
+      service:     'scheduling',
+      event:       'staff_schedule_exceptions_query_failed',
+      business_id: businessId,
+      staff_ids:   staffIds,
+      date:        dateStr,
+      error:       exceptionsResult.error.message,
+    }));
+  }
+
   const availabilityRows = availabilityResult.data as StaffAvailabilityRow[];
-  const apptRows  = appointmentsResult.data       as Array<{ staff_id: string } & AppointmentBlock>;
-  const blockRows = (blocksResult.data ?? [])     as Array<{ staff_id: string } & StaffBlock>;
+  const apptRows         = appointmentsResult.data as Array<{ staff_id: string } & AppointmentBlock>;
+  const blockRows        = (blocksResult.data ?? [])        as Array<{ staff_id: string } & StaffBlock>;
+  const exceptionRows    = (exceptionsResult.data ?? [])    as ExceptionRow[];
+
+  // Mapa staff_id → excepción para el día solicitado (máximo 1 por staff por fecha — UNIQUE constraint)
+  const exceptionMap = new Map<string, ExceptionRow>();
+  for (const exc of exceptionRows) {
+    exceptionMap.set(exc.staff_id, exc);
+  }
 
   // Verificar si el servicio es compatible con el staff (staff_services)
   const { data: ssData } = await supabase
@@ -502,6 +549,7 @@ export async function getAvailableSlots(
       minStart,
       shift,
       tz,
+      exceptionMap.get(staff.id) ?? null,
     );
 
     allSlots.push(...slots);

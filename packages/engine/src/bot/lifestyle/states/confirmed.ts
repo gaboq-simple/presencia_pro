@@ -168,41 +168,90 @@ export async function handleConfirmed(
       .eq('id', context.customerId);
   }
 
-  // ── Programar reminder_1h ─────────────────────────────────────────────────
+  // ── Programar reminders (24h, 2h, 1h) ───────────────────────────────────
+  // Solo se insertan los que quedan en el futuro — evita reminders inútiles
+  // para citas agendadas con menos de 24h de anticipación.
 
-  const reminderAt = new Date(startsAt.getTime() - 60 * 60_000); // 1h antes
-
-  // Cargar staff UNA VEZ — reutilizado para notificación al barbero y reminder
+  // Cargar staff UNA VEZ — reutilizado para notificación al barbero y reminders
   const allStaffForAppt = await getStaffForService(business.id, context.serviceId, supabase);
   const staffMemberForAppt = allStaffForAppt.find((s) => s.id === context.staffId);
 
-  // Mensaje pre-construido: dispatch-lifestyle-notifications lo usa directamente
-  const reminderMessage =
-    `Hola, te recordamos tu cita de ${service.name}` +
-    (staffMemberForAppt ? ` con ${staffMemberForAppt.name}` : '') +
-    ` hoy a las ${formatTimeHumanFromDate(startsAt, business.timezone)} en ${business.name}.`;
+  const staffLabel = staffMemberForAppt ? ` con ${staffMemberForAppt.name}` : '';
+  const timeLabel  = formatTimeHumanFromDate(startsAt, business.timezone);
 
-  try {
-    const { error: notifError } = await supabase.from('scheduled_notifications').insert({
+  const now = Date.now();
+
+  type NotifRow = {
+    business_id:    string;
+    appointment_id: string;
+    customer_phone: string;
+    type:           string;
+    scheduled_for:  string;
+    message_body:   string;
+  };
+
+  const remindersToInsert: NotifRow[] = [];
+
+  const at24h = new Date(startsAt.getTime() - 24 * 60 * 60_000);
+  if (at24h.getTime() > now) {
+    remindersToInsert.push({
+      business_id:    business.id,
+      appointment_id: appointmentId,
+      customer_phone: msg.customerPhone,
+      type:           'reminder_24h',
+      scheduled_for:  at24h.toISOString(),
+      message_body:
+        `Hola, mañana tienes cita de ${service.name}${staffLabel}` +
+        ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
+    });
+  }
+
+  const at2h = new Date(startsAt.getTime() - 2 * 60 * 60_000);
+  if (at2h.getTime() > now) {
+    remindersToInsert.push({
+      business_id:    business.id,
+      appointment_id: appointmentId,
+      customer_phone: msg.customerPhone,
+      type:           'reminder_2h',
+      scheduled_for:  at2h.toISOString(),
+      message_body:
+        `Hola, en 2 horas tienes cita de ${service.name}${staffLabel}` +
+        ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
+    });
+  }
+
+  const at1h = new Date(startsAt.getTime() - 1 * 60 * 60_000);
+  if (at1h.getTime() > now) {
+    remindersToInsert.push({
       business_id:    business.id,
       appointment_id: appointmentId,
       customer_phone: msg.customerPhone,
       type:           'reminder_1h',
-      scheduled_for:  reminderAt.toISOString(),
-      message_body:   reminderMessage,
+      scheduled_for:  at1h.toISOString(),
+      message_body:
+        `Hola, te recordamos tu cita de ${service.name}${staffLabel}` +
+        ` hoy a las ${timeLabel} en ${business.name}.`,
     });
-    if (notifError) throw notifError;
-  } catch (err) {
-    // Best-effort — el appointment ya fue creado exitosamente. Solo loguear.
-    console.error(JSON.stringify({
-      ts:             new Date().toISOString(),
-      service:        'bot',
-      event:          'scheduled_notification_insert_failed',
-      business_id:    business.id,
-      appointment_id: appointmentId,
-      type:           'reminder_1h',
-      error:          err instanceof Error ? err.message : String(err),
-    }));
+  }
+
+  if (remindersToInsert.length > 0) {
+    try {
+      const { error: notifError } = await supabase
+        .from('scheduled_notifications')
+        .insert(remindersToInsert);
+      if (notifError) throw notifError;
+    } catch (err) {
+      // Best-effort — el appointment ya fue creado exitosamente. Solo loguear.
+      console.error(JSON.stringify({
+        ts:             new Date().toISOString(),
+        service:        'bot',
+        event:          'scheduled_notification_insert_failed',
+        business_id:    business.id,
+        appointment_id: appointmentId,
+        types:          remindersToInsert.map((r) => r.type),
+        error:          err instanceof Error ? err.message : String(err),
+      }));
+    }
   }
 
   // ── Notificar al barbero — best-effort ────────────────────────────────────

@@ -348,7 +348,7 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
           onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
         >
-          <div className="w-full max-w-md rounded-t-2xl bg-white px-5 pb-8 pt-5 shadow-xl sm:rounded-2xl">
+          <div className="w-full max-w-md overflow-y-auto rounded-t-2xl bg-white px-5 pb-8 pt-5 shadow-xl sm:rounded-2xl" style={{ maxHeight: '90vh' }}>
             {/* Header */}
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-900">

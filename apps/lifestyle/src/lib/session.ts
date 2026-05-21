@@ -50,11 +50,7 @@ export type SessionPayload =
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 export const SESSION_COOKIE = 'ls_session';
-// TODO (M-2 — duración de sesión): 30 días es largo para producción con acceso
-// a datos de clientes. Para el caso de uso de barbería (tablet en el local),
-// 7 días es más apropiado y reduce la ventana de exposición ante tokens robados.
-// Cambiar a: 7 * 24 * 60 * 60. Requiere re-login de usuarios activos.
-export const SESSION_DURATION_SECS = 30 * 24 * 60 * 60;  // 30 días
+export const SESSION_DURATION_SECS = 7 * 24 * 60 * 60;  // 7 días
 
 // ─── Helpers internos ─────────────────────────────────────────────────────────
 

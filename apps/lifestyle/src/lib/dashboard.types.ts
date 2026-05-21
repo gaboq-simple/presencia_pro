@@ -119,9 +119,12 @@ export type DashboardAppointment = {
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
 
 export type StaffAvailabilitySlot = {
-  day_of_week: number;    // 0=domingo … 6=sábado
-  start_time: string;     // 'HH:MM:SS'
-  end_time: string;       // 'HH:MM:SS'
+  day_of_week:  number;           // 0=domingo … 6=sábado
+  start_time:   string;           // 'HH:MM:SS'
+  end_time:     string;           // 'HH:MM:SS'
+  break_start?: string | null;    // 'HH:MM:SS' o null
+  break_end?:   string | null;    // 'HH:MM:SS' o null
+  is_active?:   boolean;          // default true
 };
 
 export type DashboardStaff = {
@@ -582,10 +585,13 @@ type RawStaffAppointmentRow = {
 };
 
 type RawStaffAvailabilityRow = {
-  id: string;
+  id:          string;
   day_of_week: number;
-  start_time: string;
-  end_time: string;
+  start_time:  string;
+  end_time:    string;
+  break_start: string | null;
+  break_end:   string | null;
+  is_active:   boolean;
 };
 
 type RawStaffBlockRow = {
@@ -657,7 +663,7 @@ export async function getStaffRecurringAvailability(
 
   const { data, error } = await supabase
     .from('staff_availability')
-    .select('id, day_of_week, start_time, end_time')
+    .select('id, day_of_week, start_time, end_time, break_start, break_end, is_active')
     .eq('staff_id', staffId)
     .order('day_of_week');
 

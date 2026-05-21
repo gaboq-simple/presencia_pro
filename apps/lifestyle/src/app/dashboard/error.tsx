@@ -24,6 +24,15 @@ export default function DashboardError({
         <p className="text-zinc-400 text-sm leading-relaxed">
           No pudimos cargar esta sección. Intenta de nuevo o recarga la página.
         </p>
+        <p className="text-zinc-500 text-xs leading-relaxed">
+          Si el problema persiste,{' '}
+          <a
+            href={`mailto:contacto@zentriq.mx?subject=Error%20presenciapro${error.digest ? `%20${error.digest}` : ''}`}
+            className="underline hover:text-zinc-300"
+          >
+            escríbenos a contacto@zentriq.mx
+          </a>.
+        </p>
         <div className="flex gap-3 justify-center">
           <button
             onClick={reset}

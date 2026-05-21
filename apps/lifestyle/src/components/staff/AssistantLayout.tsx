@@ -18,12 +18,14 @@ import type { DashboardAppointment } from '@/lib/dashboard.types';
 import {
   refreshAssistantAppointments,
   searchCustomers,
+  getActiveConversations,
 } from '@/app/staff/assistant-actions';
 import type { CustomerSearchResult } from '@/app/staff/assistant-actions';
 import AssistantUpcoming from './AssistantUpcoming';
 import AssistantDayTimeline from './AssistantDayTimeline';
 import AvailabilityTimeline from './AvailabilityTimeline';
 import NewAppointmentForm from './NewAppointmentForm';
+import ConversationList from './ConversationList';
 import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
@@ -96,6 +98,15 @@ export default function AssistantLayout({
   const router = useRouter();
   const [appointments, setAppointments] =
     useState<DashboardAppointment[]>(initialAppointments);
+  const [syncedDate, setSyncedDate] = useState(date);
+  if (syncedDate !== date) {
+    setSyncedDate(date);
+    setAppointments(initialAppointments);
+  }
+
+  // Panel de conversaciones
+  const [showConversations, setShowConversations] = useState(false);
+  const [humanCount, setHumanCount]               = useState(0);
 
   // Nueva cita — estado de apertura + pre-llenado desde búsqueda / slot click
   const [showNewForm, setShowNewForm]       = useState(false);
@@ -111,10 +122,28 @@ export default function AssistantLayout({
   const [searchQuery, setSearchQuery]     = useState('');
   const [searchResults, setSearchResults] = useState<CustomerSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    if (value.trim().length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    searchTimeoutRef.current = setTimeout(() => {
+      void searchCustomers(value).then((results) => {
+        setSearchResults(results);
+        setSearchLoading(false);
+      });
+    }, 300);
+  }
 
   // Ref para leer la fecha sin causar re-suscripción del intervalo
   const dateRef = useRef(date);
-  dateRef.current = date;
+  useEffect(() => { dateRef.current = date; });
 
   // ── Refresh ───────────────────────────────────────────────────────────────
   const refresh = useCallback(async () => {
@@ -130,29 +159,20 @@ export default function AssistantLayout({
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // ── Sincronizar al navegar entre días ─────────────────────────────────────
+  // ── Contador de conversaciones en modo 'human' (badge del icono de chat) ──
   useEffect(() => {
-    setAppointments(initialAppointments);
-  }, [date, initialAppointments]);
-
-  // ── Búsqueda debounced ────────────────────────────────────────────────────
-  useEffect(() => {
-    if (searchQuery.trim().length < 2) {
-      setSearchResults([]);
-      setSearchLoading(false);
-      return;
+    async function fetchHumanCount() {
+      try {
+        const convs = await getActiveConversations();
+        setHumanCount(convs.filter((c) => c.sessionMode === 'human').length);
+      } catch {
+        // silencio
+      }
     }
-
-    setSearchLoading(true);
-    const timeout = setTimeout(() => {
-      void searchCustomers(searchQuery).then((results) => {
-        setSearchResults(results);
-        setSearchLoading(false);
-      });
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [searchQuery]);
+    void fetchHumanCount();
+    const interval = setInterval(() => void fetchHumanCount(), POLL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   // ── Navegación ────────────────────────────────────────────────────────────
   function navigate(targetDate: string) {
@@ -164,8 +184,7 @@ export default function AssistantLayout({
     setPrefillPhone(phone ?? '');
     setPrefillStaffId(undefined);
     setPrefillTime(undefined);
-    setSearchQuery('');
-    setSearchResults([]);
+    handleSearchChange('');
     setShowNewForm(true);
   }
 
@@ -174,8 +193,7 @@ export default function AssistantLayout({
     setPrefillPhone('');
     setPrefillStaffId(staffId);
     setPrefillTime(time);
-    setSearchQuery('');
-    setSearchResults([]);
+    handleSearchChange('');
     setShowNewForm(true);
   }
 
@@ -189,9 +207,39 @@ export default function AssistantLayout({
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-10 border-b border-gray-100 bg-white px-4 py-3">
         <div className="mx-auto max-w-xl">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-            {businessName}
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              {businessName}
+            </p>
+            {/* Botón de chat — abre ConversationList */}
+            <button
+              onClick={() => setShowConversations(true)}
+              className="relative rounded-lg p-1.5 text-gray-400 hover:bg-gray-50 hover:text-gray-600"
+              aria-label="Conversaciones de WhatsApp"
+            >
+              {/* Icono de chat */}
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+                />
+              </svg>
+              {/* Badge de conversaciones bajo control humano */}
+              {humanCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-yellow-500 text-[9px] font-bold text-white">
+                  {humanCount > 9 ? '9+' : humanCount}
+                </span>
+              )}
+            </button>
+          </div>
 
           <div className="mt-1 flex items-center justify-between gap-2">
             <button
@@ -235,7 +283,7 @@ export default function AssistantLayout({
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Buscar cliente por nombre o telefono..."
             className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:outline-none"
           />
@@ -285,7 +333,7 @@ export default function AssistantLayout({
           {/* Sin resultados */}
           {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
             <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-lg">
-              <p className="text-xs text-gray-400">Sin resultados para "{searchQuery}"</p>
+              <p className="text-xs text-gray-400">Sin resultados para {'"'}{searchQuery}{'"'}</p>
             </div>
           )}
         </div>
@@ -297,8 +345,7 @@ export default function AssistantLayout({
             setPrefillPhone('');
             setPrefillStaffId(undefined);
             setPrefillTime(undefined);
-            setSearchQuery('');
-            setSearchResults([]);
+            handleSearchChange('');
             setShowNewForm(true);
           }}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white hover:bg-gray-800 active:bg-gray-700"
@@ -349,6 +396,31 @@ export default function AssistantLayout({
           />
         </section>
       </main>
+
+      {/* ── Footer ───────────────────────────────────────────────────────── */}
+      <footer className="border-t border-gray-100 px-4 py-4 text-center">
+        <p className="text-xs text-gray-400">
+          Soporte:{' '}
+          <a href="mailto:contacto@zentriq.mx" className="hover:text-gray-600 underline">
+            contacto@zentriq.mx
+          </a>
+          {' · '}
+          <a href="/aviso-de-privacidad" className="hover:text-gray-600 underline">
+            Aviso de privacidad
+          </a>
+          {' · '}
+          <a href="/arco" className="hover:text-gray-600 underline">
+            Derechos ARCO
+          </a>
+        </p>
+      </footer>
+
+      {/* ── Panel de conversaciones ───────────────────────────────────────── */}
+      {showConversations && (
+        <ConversationList
+          onClose={() => setShowConversations(false)}
+        />
+      )}
 
       {/* ── Modal Nueva cita ──────────────────────────────────────────────── */}
       {showNewForm && (
