@@ -157,10 +157,12 @@ export default function AssistantLayout({
   }, []);
 
   // ── Búsqueda debounced ────────────────────────────────────────────────────
+  // Derived: no mostrar resultados ni loading cuando el query es muy corto
+  const displayedResults = searchQuery.trim().length >= 2 ? searchResults : [];
+  const isSearchLoading  = searchQuery.trim().length >= 2 && searchLoading;
+
   useEffect(() => {
     if (searchQuery.trim().length < 2) {
-      setSearchResults([]);
-      setSearchLoading(false);
       return;
     }
 
@@ -290,16 +292,16 @@ export default function AssistantLayout({
             placeholder="Buscar cliente por nombre o telefono..."
             className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:outline-none"
           />
-          {searchLoading && (
+          {isSearchLoading && (
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
               Buscando…
             </span>
           )}
 
           {/* Resultados de búsqueda */}
-          {searchResults.length > 0 && (
+          {displayedResults.length > 0 && (
             <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg">
-              {searchResults.map((c) => {
+              {displayedResults.map((c) => {
                 const ago = c.lastVisit ? daysAgo(c.lastVisit) : null;
                 return (
                   <div
@@ -334,7 +336,7 @@ export default function AssistantLayout({
           )}
 
           {/* Sin resultados */}
-          {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+          {!isSearchLoading && searchQuery.trim().length >= 2 && displayedResults.length === 0 && (
             <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-lg">
               <p className="text-xs text-gray-400">Sin resultados para {'"'}{searchQuery}{'"'}</p>
             </div>
