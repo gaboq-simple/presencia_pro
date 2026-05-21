@@ -122,6 +122,24 @@ export default function AssistantLayout({
   const [searchQuery, setSearchQuery]     = useState('');
   const [searchResults, setSearchResults] = useState<CustomerSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    if (value.trim().length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    searchTimeoutRef.current = setTimeout(() => {
+      void searchCustomers(value).then((results) => {
+        setSearchResults(results);
+        setSearchLoading(false);
+      });
+    }, 300);
+  }
 
   // Ref para leer la fecha sin causar re-suscripción del intervalo
   const dateRef = useRef(date);
@@ -156,27 +174,6 @@ export default function AssistantLayout({
     return () => clearInterval(interval);
   }, []);
 
-  // ── Búsqueda debounced ────────────────────────────────────────────────────
-  // Derived: no mostrar resultados ni loading cuando el query es muy corto
-  const displayedResults = searchQuery.trim().length >= 2 ? searchResults : [];
-  const isSearchLoading  = searchQuery.trim().length >= 2 && searchLoading;
-
-  useEffect(() => {
-    if (searchQuery.trim().length < 2) {
-      return;
-    }
-
-    setSearchLoading(true);
-    const timeout = setTimeout(() => {
-      void searchCustomers(searchQuery).then((results) => {
-        setSearchResults(results);
-        setSearchLoading(false);
-      });
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [searchQuery]);
-
   // ── Navegación ────────────────────────────────────────────────────────────
   function navigate(targetDate: string) {
     router.push(`/dashboard?date=${targetDate}`);
@@ -187,8 +184,7 @@ export default function AssistantLayout({
     setPrefillPhone(phone ?? '');
     setPrefillStaffId(undefined);
     setPrefillTime(undefined);
-    setSearchQuery('');
-    setSearchResults([]);
+    handleSearchChange('');
     setShowNewForm(true);
   }
 
@@ -197,8 +193,7 @@ export default function AssistantLayout({
     setPrefillPhone('');
     setPrefillStaffId(staffId);
     setPrefillTime(time);
-    setSearchQuery('');
-    setSearchResults([]);
+    handleSearchChange('');
     setShowNewForm(true);
   }
 
@@ -288,20 +283,20 @@ export default function AssistantLayout({
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Buscar cliente por nombre o telefono..."
             className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:outline-none"
           />
-          {isSearchLoading && (
+          {searchLoading && (
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
               Buscando…
             </span>
           )}
 
           {/* Resultados de búsqueda */}
-          {displayedResults.length > 0 && (
+          {searchResults.length > 0 && (
             <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg">
-              {displayedResults.map((c) => {
+              {searchResults.map((c) => {
                 const ago = c.lastVisit ? daysAgo(c.lastVisit) : null;
                 return (
                   <div
@@ -336,7 +331,7 @@ export default function AssistantLayout({
           )}
 
           {/* Sin resultados */}
-          {!isSearchLoading && searchQuery.trim().length >= 2 && displayedResults.length === 0 && (
+          {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
             <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-lg">
               <p className="text-xs text-gray-400">Sin resultados para {'"'}{searchQuery}{'"'}</p>
             </div>
@@ -350,8 +345,7 @@ export default function AssistantLayout({
             setPrefillPhone('');
             setPrefillStaffId(undefined);
             setPrefillTime(undefined);
-            setSearchQuery('');
-            setSearchResults([]);
+            handleSearchChange('');
             setShowNewForm(true);
           }}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white hover:bg-gray-800 active:bg-gray-700"
