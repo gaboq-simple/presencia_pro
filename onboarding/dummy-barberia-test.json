@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "created_by": "dry-run-test",
+    "created_at": "2026-05-21"
+  },
+  "organization": {
+    "name": "Barberias Test SA",
+    "slug": "barberias-test",
+    "owner_name": "Juan Prueba",
+    "owner_email": "juan@test.example.com",
+    "owner_phone": "5551234567"
+  },
+  "business": {
+    "name": "Barberia El Filo",
+    "slug": "barberia-el-filo-test",
+    "business_type": "barberia",
+    "description": "La mejor barberia del centro",
+    "tagline": "Cortes de precision para hombres modernos",
+    "address": "Av. Juarez 123, Col. Centro, CDMX",
+    "timezone": "America/Mexico_City",
+    "palette": "obsidian",
+    "walk_in_buffer_minutes": 30,
+    "office_hours": {
+      "mon": { "open": "09:00", "close": "19:00" },
+      "tue": { "open": "09:00", "close": "19:00" },
+      "wed": { "open": "09:00", "close": "19:00" },
+      "thu": { "open": "09:00", "close": "19:00" },
+      "fri": { "open": "09:00", "close": "20:00" },
+      "sat": { "open": "10:00", "close": "18:00" },
+      "sun": null
+    },
+    "social": {
+      "instagram_url": "https://instagram.com/barberiaelfilo",
+      "tiktok_url": null
+    }
+  },
+  "bot": {
+    "assistant_name": "Filo",
+    "greeting": "Hola! Soy Filo, el asistente de Barberia El Filo. ¿En que puedo ayudarte hoy?",
+    "fallback_message": "Lo siento, no entendi tu mensaje. Escribe 'menu' para ver las opciones.",
+    "away_message": "Gracias por escribir. En este momento estamos cerrados. Nuestro horario es lunes a viernes de 9am a 7pm y sabados de 10am a 6pm.",
+    "followup_message": "Hola! Que tal estuvo tu visita? Te esperamos pronto.",
+    "whatsapp_message": "Reserva tu cita con nosotros por WhatsApp."
+  },
+  "staff": [
+    {
+      "name": "Carlos Ramirez",
+      "role": "admin",
+      "photo_url": null,
+      "availability": {
+        "mon": { "start": "09:00", "end": "19:00" },
+        "tue": { "start": "09:00", "end": "19:00" },
+        "wed": { "start": "09:00", "end": "19:00" },
+        "thu": { "start": "09:00", "end": "19:00" },
+        "fri": { "start": "09:00", "end": "20:00" },
+        "sat": { "start": "10:00", "end": "18:00" }
+      },
+      "services": ["corte-clasico", "corte-fade", "barba"]
+    },
+    {
+      "name": "Luis Torres",
+      "role": "barber",
+      "photo_url": null,
+      "availability": {
+        "tue": { "start": "10:00", "end": "19:00" },
+        "wed": { "start": "10:00", "end": "19:00" },
+        "thu": { "start": "10:00", "end": "19:00" },
+        "fri": { "start": "10:00", "end": "20:00" },
+        "sat": { "start": "10:00", "end": "18:00" }
+      },
+      "services": ["corte-clasico", "corte-fade"]
+    },
+    {
+      "name": "Ana Lopez",
+      "role": "assistant",
+      "photo_url": null,
+      "availability": {
+        "mon": { "start": "09:00", "end": "14:00" },
+        "wed": { "start": "09:00", "end": "14:00" },
+        "fri": { "start": "09:00", "end": "14:00" }
+      },
+      "services": []
+    }
+  ],
+  "services": [
+    {
+      "id": "corte-clasico",
+      "name": "Corte Clasico",
+      "description": "Corte tradicional con tijeras y maquina",
+      "price": 150,
+      "currency": "MXN",
+      "duration_minutes": 30
+    },
+    {
+      "id": "corte-fade",
+      "name": "Corte Fade",
+      "description": "Degradado profesional",
+      "price": 200,
+      "currency": "MXN",
+      "duration_minutes": 45
+    },
+    {
+      "id": "barba",
+      "name": "Arreglo de Barba",
+      "description": "Perfilado y arreglo de barba con navaja",
+      "price": 100,
+      "currency": "MXN",
+      "duration_minutes": 20
+    }
+  ],
+  "whatsapp": {
+    "_comment": "Completar en Fase 2 al conectar Meta Business",
+    "number_model": "own",
+    "phone_number": "5512345678",
+    "business_profile": {
+      "display_name": "Barberia El Filo",
+      "category": "BEAUTY_SALON_AND_SPA",
+      "description_short": "Tu barberia de confianza en el centro de CDMX",
+      "email": "contacto@barberiaelfilo.mx"
+    },
+    "verification": {
+      "legal_name": "El Filo Barberia SA de CV",
+      "rfc": "EFB123456XYZ",
+      "owner_name": "Carlos Ramirez",
+      "owner_email": "carlos@barberiaelfilo.mx",
+      "owner_phone": "5512345678"
+    }
+  },
+  "owner_contact": {
+    "_comment": "Datos del dueno para entrega de credenciales",
+    "name": "Carlos Ramirez",
+    "phone": "5512345678",
+    "email": "carlos@barberiaelfilo.mx"
+  }
+}

@@ -450,12 +450,36 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ### Semana 4 — Dry run y go-live
 
-#### S4-OPS-01 — Dry run de onboarding completo ⚪ todo
+#### S4-OPS-01 — Dry run de onboarding completo 🟢 done (2026-05-21)
 **Criterios de aceptación:**
-- [ ] Gabriel (o Claude Code asistiendo) onboardea un negocio dummy desde cero usando SOLO el script + checklist
-- [ ] Documentar todas las fricciones encontradas → cada una se vuelve issue/tarea
-- [ ] Iterar el script hasta que el flujo sea reproducible por una persona razonable siguiendo el checklist
+- [x] Gabriel (o Claude Code asistiendo) onboardea un negocio dummy desde cero usando SOLO el script + checklist
+- [x] Documentar todas las fricciones encontradas → cada una se vuelve issue/tarea
+- [ ] Iterar el script hasta que el flujo sea reproducible — fricciones documentadas, iteración pendiente de Gabriel
+**Notas de ejecución:**
+- Dry-run ejecutado con `onboarding/dummy-barberia-test.json` (3 staff, 3 servicios, organización). Salida correcta.
+- `--dry-run` y `--validate` ya existen en el script. Crea: organizations?, businesses, services, staff, staff_availability, staff_services.
+- 6 fricciones documentadas en `apps/lifestyle/ONBOARDING-FRICTION.md`:
+  - F-01 BLOQUEANTE: criterio S2-OPS-01 no implementado (whatsapp_phone_number_id no se valida post-insert)
+  - F-02: `{NEXT_PUBLIC_APP_URL}` no se resuelve en el checklist generado
+  - F-03: staff_availability config no soporta break_start/break_end
+  - F-04: report_whatsapp, review_url, max_late_minutes no configurables desde JSON
+  - F-05: timezone no valida contra IANA
+  - F-06: staff.phone y staff.whatsapp_id se insertan como strings vacíos sin advertencia
+- 4 gaps de go-live documentados: G-01 CRITICO (Template Approvals WhatsApp), G-02 (Embedded Signup no implementado), G-03 (timezone en notificaciones), G-04 (Upstash env vars no en Vercel)
+- 7 env vars faltantes en .env.local.example: SESSION_SECRET, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, PRIVACY_POLICY_URL, ARCO_URL, NEXT_PUBLIC_SITE_URL, INTAKE_SECRET
 **Prompt:** Ver `SPRINT-PROMPTS.md` → S4-OPS-01
+
+---
+
+#### S4-OPS-04 — Endpoint GET /api/reports/usage 🟢 done (2026-05-21)
+**Origen:** Ad-hoc solicitado junto con S4-OPS-01
+**Criterios de aceptación:**
+- [x] `GET /api/reports/usage?month=YYYY-MM&business_id=<uuid>` retorna JSON con métricas de consumo
+- [x] Auth: solo owner o admin (getCurrentSession, mismo patrón que otros endpoints de reports)
+- [x] business_id opcional — default al business de la sesión; validado contra sesión si se pasa
+- [x] Retorna: total/completed/cancelled/no_show appointments, whatsapp_messages_sent/failed, unique_customers, new_customers, bot_conversations, human_takeovers, period, business_name, generated_at
+- [x] type-check pasa sin errores
+**Notas de ejecución:** Archivo: `apps/lifestyle/src/app/api/reports/usage/route.ts`. Exporta tipo `UsageReport`. Patrón idéntico a summary/route.ts y staff-metrics/route.ts. Rango mes: [inicio, fin_exclusivo) con ISO strings. Errores internos retornan 500 con mensaje genérico (sin leak de schema).
 
 ---
 
@@ -526,6 +550,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-20 | S3-UX-04, S3-OPS-02 | done | icon.tsx + apple-icon.tsx (ImageResponse), public/manifest.json, metadataBase+OG+twitter en layout.tsx, eslint.config.mjs. CI .github/workflows/ci.yml creado. Descubierto: 9 errores lint + 3 errores TS pre-existentes → CI fallará hasta S3-QA-01. |
 | 2026-05-20 | S3-QA-01 | done | Fix 9 errores lint (react-hooks/refs, set-state-in-effect, purity, entities) + 3 errores TS (casts Supabase). lint y type-check pasan 0 errores. CI listo para verde. |
 | 2026-05-21 | S1-OPS-01 | done | scripts/backup-supabase.sh (dump→gzip→gpg→R2→retención 30d), scripts/restore-supabase.sh (R2→descifra→descomprime→imprime psql command), .github/workflows/backup-weekly.yml (cron domingos 3am UTC + manual), scripts/README.md, RUNBOOK.md sección 6 actualizada. PITR queda como recomendación para upgrade a Pro. |
+| 2026-05-21 | S4-OPS-01, S4-OPS-04 | done | Dry-run con dummy-barberia-test.json (--dry-run y --validate funcionan). 6 fricciones + 4 gaps de go-live en ONBOARDING-FRICTION.md. Gap crítico: Template Approvals WhatsApp (notificaciones proactivas fallarán sin templates aprobados). 7 env vars faltantes en .env.local.example. Endpoint GET /api/reports/usage creado en src/app/api/reports/usage/route.ts. type-check limpio. |
 ---
 
 ## Métricas del sprint
