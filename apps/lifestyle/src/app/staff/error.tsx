@@ -24,6 +24,15 @@ export default function StaffError({
         <p className="text-zinc-400 text-sm leading-relaxed">
           No pudimos cargar tu agenda. Intenta de nuevo o contacta al administrador.
         </p>
+        <p className="text-zinc-500 text-xs leading-relaxed">
+          Si el problema persiste,{' '}
+          <a
+            href={`mailto:contacto@zentriq.mx?subject=Error%20presenciapro${error.digest ? `%20${error.digest}` : ''}`}
+            className="underline hover:text-zinc-300"
+          >
+            escríbenos a contacto@zentriq.mx
+          </a>.
+        </p>
         <button
           onClick={reset}
           className="px-6 py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-sm font-medium text-white transition-colors"

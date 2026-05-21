@@ -4,7 +4,7 @@
 // Body:  { pin: string }            — PIN de 4 dígitos
 //
 // Flujo:
-//   1. Rate limiting por IP — máx. 5 intentos/min, bloqueo de 15 min tras 5 fallos.
+//   1. Rate limiting por IP — máx. 5 intentos/60s (distribuido via Upstash Redis).
 //   2. Validar formato del PIN (4 dígitos numéricos).
 //   3. Buscar en staff: pin = $1, active = true.
 //      Si hay múltiples coincidencias entre negocios (demo), tomar la primera.
@@ -15,11 +15,6 @@
 // Security note: el PIN no es un mecanismo de seguridad de producción.
 // Es adecuado para el flujo de demo con un negocio. Para multi-tenant real
 // se requeriría identificador de negocio adicional.
-//
-// TODO (A-1 / rate limiting distribuido): el rate limiter en memoria es
-// instancia-local en Vercel Fluid Compute. Para producción con alta escala
-// migrar a Upstash Redis o Vercel Edge Config para compartir estado entre
-// instancias. En Fase 1 (un cliente, instancias pocas) es aceptable.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -30,24 +25,9 @@ import {
   sessionCookieOptions,
   SESSION_COOKIE,
 } from '@/lib/session';
+import { rateLimit } from '@/lib/rate-limit';
 
-// ─── Rate limiting ────────────────────────────────────────────────────────────
-// Ventana deslizante por IP: máx. MAX_ATTEMPTS por WINDOW_MS.
-// Tras MAX_ATTEMPTS fallos acumulados en la ventana, bloquear BLOCK_MS.
-//
-// La Map es instancia-local. Ver TODO arriba sobre limitaciones en serverless.
-
-const WINDOW_MS       = 60 * 1_000;       // 1 minuto
-const MAX_ATTEMPTS    = 5;                 // máx. intentos en la ventana
-const BLOCK_MS        = 15 * 60 * 1_000;  // 15 minutos de bloqueo
-
-type RateLimitEntry = {
-  count:         number;
-  resetAt:       number;   // timestamp en ms — fin de la ventana actual
-  blockedUntil?: number;   // timestamp en ms — fin del bloqueo activo
-};
-
-const rateLimitMap = new Map<string, RateLimitEntry>();
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -55,38 +35,6 @@ function getClientIp(request: NextRequest): string {
     request.headers.get('x-real-ip') ??
     'unknown'
   );
-}
-
-/**
- * Evalúa si la IP puede hacer otro intento.
- * Retorna { allowed: true } o { allowed: false, retryAfter: segundos }.
- * Incrementa el contador en cada llamada (tanto en éxito como en fallo).
- */
-function checkRateLimit(ip: string): { allowed: true } | { allowed: false; retryAfter: number } {
-  const now   = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  // ── Bloqueo activo ──────────────────────────────────────────────────────────
-  if (entry?.blockedUntil && now < entry.blockedUntil) {
-    return { allowed: false, retryAfter: Math.ceil((entry.blockedUntil - now) / 1_000) };
-  }
-
-  // ── Sin entrada o ventana expirada — nueva ventana ─────────────────────────
-  if (!entry || now >= entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + WINDOW_MS });
-    return { allowed: true };
-  }
-
-  // ── Dentro de la ventana ───────────────────────────────────────────────────
-  entry.count += 1;
-
-  if (entry.count > MAX_ATTEMPTS) {
-    // Activar bloqueo prolongado
-    entry.blockedUntil = now + BLOCK_MS;
-    return { allowed: false, retryAfter: Math.ceil(BLOCK_MS / 1_000) };
-  }
-
-  return { allowed: true };
 }
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -116,16 +64,17 @@ type StaffPinRow = {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // 0. Rate limiting por IP
+  // 0. Rate limiting por IP — 5 intentos / 60s (distribuido via Upstash Redis)
   const ip = getClientIp(request);
-  const rl = checkRateLimit(ip);
+  const rl = await rateLimit(`pin:${ip}`, 5, 60);
 
-  if (!rl.allowed) {
+  if (!rl.success) {
+    const retryAfter = rl.reset > 0 ? rl.reset - Math.floor(Date.now() / 1_000) : 60;
     return NextResponse.json(
       { error: 'Demasiados intentos. Intenta de nuevo más tarde.' },
       {
         status: 429,
-        headers: { 'Retry-After': String(rl.retryAfter) },
+        headers: { 'Retry-After': String(Math.max(1, retryAfter)) },
       },
     );
   }

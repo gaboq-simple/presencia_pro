@@ -94,6 +94,21 @@ export function SiteFooter({
           Creado con PresenciaPro
         </span>
       </div>
+
+      {/* Soporte y legal */}
+      <div className="site-footer__support">
+        <a href="mailto:contacto@zentriq.mx" className="site-footer__support-link">
+          contacto@zentriq.mx
+        </a>
+        <span className="site-footer__support-sep">&nbsp;·&nbsp;</span>
+        <a href="/aviso-de-privacidad" className="site-footer__support-link">
+          Aviso de privacidad
+        </a>
+        <span className="site-footer__support-sep">&nbsp;·&nbsp;</span>
+        <a href="/arco" className="site-footer__support-link">
+          Derechos ARCO
+        </a>
+      </div>
     </footer>
   );
 }

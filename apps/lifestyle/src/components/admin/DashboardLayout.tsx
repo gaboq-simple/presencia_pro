@@ -263,6 +263,23 @@ export default function DashboardLayout({
         </details>
 
       </main>
+
+      <footer className="border-t border-gray-100 px-4 py-4 text-center">
+        <p className="text-xs text-gray-400">
+          Soporte:{' '}
+          <a href="mailto:contacto@zentriq.mx" className="hover:text-gray-600 underline">
+            contacto@zentriq.mx
+          </a>
+          {' · '}
+          <a href="/aviso-de-privacidad" className="hover:text-gray-600 underline">
+            Aviso de privacidad
+          </a>
+          {' · '}
+          <a href="/arco" className="hover:text-gray-600 underline">
+            Derechos ARCO
+          </a>
+        </p>
+      </footer>
     </div>
   );
 }

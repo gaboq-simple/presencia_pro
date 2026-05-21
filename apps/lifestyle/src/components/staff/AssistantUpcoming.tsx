@@ -7,6 +7,7 @@
 
 'use client';
 
+import { useState, useEffect } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -32,8 +33,12 @@ function minutesUntil(iso: string): number {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AssistantUpcoming({ appointments }: Props) {
-  const now = Date.now();
   const twoHoursMs = 2 * 60 * 60 * 1000;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Citas que empiezan en los próximos 120 minutos (o están en curso ahora)
   const upcoming = appointments

@@ -17,12 +17,13 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { handleLifestyleMessage } from '@presenciapro/engine/bot';
+import { handleLifestyleMessage, verifyWebhookSignature } from '@presenciapro/engine/bot';
 import { sendMessage } from '@presenciapro/engine/notifications';
 import type { LifestyleBusinessConfig } from '@presenciapro/engine/bot';
 import { parseTwilioPayload, buildLifestyleMessage as buildTwilioMessage } from '@presenciapro/engine/bot/lifestyle/adapters/twilioAdapter';
 import { parseMetaPayload, buildLifestyleMessage as buildMetaMessage } from '@presenciapro/engine/bot/lifestyle/adapters/metaAdapter';
 import { maskPhone } from '@presenciapro/engine/utils';
+import { rateLimit } from '@/lib/rate-limit';
 
 // ─── Supabase admin client ────────────────────────────────────────────────────
 
@@ -212,43 +213,6 @@ async function handleTwilioPost(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-// ─── Verificación de firma Meta ───────────────────────────────────────────────
-
-/**
- * Verifica la firma X-Hub-Signature-256 de Meta usando HMAC-SHA256.
- *
- * Retorna true  — firma válida.
- * Retorna false — firma inválida → rechazar request.
- * Retorna null  — META_APP_SECRET no configurado → permitir (dev/staging).
- */
-function verifyMetaSignature(rawBody: string, signatureHeader: string | null): boolean | null {
-  const appSecret = process.env['META_APP_SECRET'];
-
-  if (!appSecret) {
-    console.warn('[bot/route:meta] META_APP_SECRET no configurado — omitiendo verificación de firma (solo permitido en dev/staging)');
-    return null;
-  }
-
-  if (!signatureHeader?.startsWith('sha256=')) {
-    return false;
-  }
-
-  const receivedHex  = signatureHeader.slice('sha256='.length);
-  const expectedHmac = crypto
-    .createHmac('sha256', appSecret)
-    .update(rawBody, 'utf8')
-    .digest('hex');
-
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(expectedHmac, 'hex'),
-      Buffer.from(receivedHex,  'hex'),
-    );
-  } catch {
-    return false;
-  }
-}
-
 // ─── Meta POST handler ────────────────────────────────────────────────────────
 
 async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
@@ -263,12 +227,24 @@ async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: 'ok' });
   }
 
-  const signatureValid = verifyMetaSignature(
-    rawBody,
-    request.headers.get('x-hub-signature-256'),
-  );
+  const appSecret = process.env['META_APP_SECRET'];
+  if (!appSecret) {
+    console.error(JSON.stringify({
+      ts:      new Date().toISOString(),
+      service: 'bot',
+      event:   'meta_secret_not_configured',
+      error:   'META_APP_SECRET no configurado — request rechazado',
+    }));
+    return NextResponse.json({ error: 'webhook signature secret not configured' }, { status: 401 });
+  }
 
-  if (signatureValid === false) {
+  const signatureValid = verifyWebhookSignature({
+    signatureHeader: request.headers.get('x-hub-signature-256'),
+    rawBody,
+    appSecret,
+  });
+
+  if (signatureValid !== true) {
     console.error(JSON.stringify({
       ts:      new Date().toISOString(),
       service: 'bot',
@@ -298,6 +274,16 @@ async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
     }
     // Status updates, delivery receipts, etc. — no hay nada más que hacer
     return NextResponse.json({ status: 'ok' });
+  }
+
+  // ── Rate limiting — 30 mensajes / 60s por número de negocio ──────────────
+  const rl = await rateLimit(`bot:${normalized.phoneNumberId}`, 30, 60);
+  if (!rl.success) {
+    const retryAfter = rl.reset > 0 ? rl.reset - Math.floor(Date.now() / 1_000) : 60;
+    return NextResponse.json(
+      { error: 'Too Many Requests' },
+      { status: 429, headers: { 'Retry-After': String(Math.max(1, retryAfter)) } },
+    );
   }
 
   after(() => processMetaMessage(normalized.phoneNumberId, normalized.customerPhone, normalized.body, normalized.customerName));
@@ -450,6 +436,10 @@ async function processTwilioMessage(
 
   if (!business) return; // ya logueado en resolveBusinessByTwilio
 
+  // ── Handoff gate — verificar modo de sesión antes de pasar al FSM ─────────
+  const shouldProcess = await handoffGate(supabase, business.id, customerPhone, messageBody);
+  if (!shouldProcess) return;
+
   // ── 2. Procesar y enviar — fallback garantizado si falla ─────────────────
 
   try {
@@ -538,6 +528,66 @@ async function sendNonTextResponseMeta(phoneNumberId: string, fromPhone: string)
   }
 }
 
+// ─── Handoff gate ─────────────────────────────────────────────────────────────
+// Verifica si la conversación está bajo control humano o pausada.
+// Retorna true  → el FSM debe procesar el mensaje (modo 'bot' o auto-released).
+// Retorna false → mensaje interceptado (persistido pero NO pasa al FSM).
+//
+// Auto-release: si session_mode='human' y taken_at > 30 min, devuelve el control
+// al bot automáticamente (evita que una conversación quede en limbo).
+// 'paused' no tiene auto-release — es una pausa intencional.
+
+const HANDOFF_TIMEOUT_MS = 30 * 60 * 1_000; // 30 minutos
+
+async function handoffGate(
+  supabase: ReturnType<typeof getServiceClient>,
+  businessId: string,
+  customerPhone: string,
+  messageBody: string,
+): Promise<boolean> {
+  const { data: conv } = await supabase
+    .from('bot_conversations')
+    .select('session_mode, taken_at')
+    .eq('business_id', businessId)
+    .eq('customer_phone', customerPhone)
+    .maybeSingle();
+
+  // Sin conversación previa o bot en control → flujo normal
+  if (!conv) return true;
+
+  const row = conv as { session_mode: string; taken_at: string | null };
+
+  if (row.session_mode === 'bot') return true;
+
+  // Auto-release: solo aplica en modo 'human' con timeout superado
+  if (row.session_mode === 'human' && row.taken_at) {
+    const elapsed = Date.now() - new Date(row.taken_at).getTime();
+    if (elapsed > HANDOFF_TIMEOUT_MS) {
+      await supabase
+        .from('bot_conversations')
+        .update({ session_mode: 'bot', taken_by: null, taken_at: null })
+        .eq('business_id', businessId)
+        .eq('customer_phone', customerPhone);
+      return true; // auto-released → FSM retoma control
+    }
+  }
+
+  // Modo 'human' (dentro del timeout) o 'paused': interceptar y persistir
+  await supabase
+    .from('conversation_messages')
+    .insert({
+      business_id:    businessId,
+      customer_phone: customerPhone,
+      direction:      'inbound',
+      body:           messageBody,
+      sent_by:        'customer',
+      staff_id:       null,
+    })
+    .then(() => {/* best-effort */}, () => {/* best-effort */});
+
+  return false; // interceptado — no pasar al FSM
+}
+
 // ─── Procesamiento async — Meta ───────────────────────────────────────────────
 
 async function processMetaMessage(
@@ -584,6 +634,10 @@ async function processMetaMessage(
   }
 
   const business = rowToBusiness(businessData as unknown as BusinessRow);
+
+  // ── Handoff gate — verificar modo de sesión antes de pasar al FSM ─────────
+  const shouldProcess = await handoffGate(supabase, business.id, customerPhone, messageBody);
+  if (!shouldProcess) return;
 
   // ── 2. Procesar y enviar — HUECO 2: fallback garantizado si falla ─────────
 

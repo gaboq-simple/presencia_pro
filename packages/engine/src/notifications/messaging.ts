@@ -8,6 +8,7 @@
 // Sin tocar lógica de negocio ni firmas de handler.
 
 import { sendWhatsApp, sendWhatsAppMeta } from './whatsapp';
+import { maskPhone } from '../bot/lifestyle/utils/logger';
 
 // ─── Interface ────────────────────────────────────────────────────────────────
 
@@ -116,7 +117,8 @@ export async function sendMessage(params: {
     await provider.send(params);
   } catch (err) {
     // Log siempre; relanzar para que el caller decida si silenciar o no.
-    console.error('[sendMessage] Error:', err instanceof Error ? err.message : String(err));
+    const safeMsg = maskPhone(err instanceof Error ? err.message : String(err));
+    console.error('[sendMessage] Error:', safeMsg);
     throw err;
   }
 }

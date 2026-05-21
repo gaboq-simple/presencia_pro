@@ -1,0 +1,26 @@
+-- ─── Migration 035 — Fix ls_staff_update_self: prevenir escalada de rol ─────────
+-- Origen: S1-SEC-05 / Phase 2 R4
+--
+-- Problema: la policy ls_staff_update_self solo tenía USING, sin WITH CHECK.
+-- Un barber podía hacer UPDATE staff SET role='admin' WHERE id = ls_staff_id()
+-- y escalar privilegios.
+--
+-- Fix: agregar WITH CHECK que asegure que role, business_id y auth_id no cambian.
+-- En RLS, WITH CHECK evalúa los valores NEW de la fila; las subqueries ven el
+-- estado pre-UPDATE (snapshot de la sentencia), por lo que el SELECT devuelve
+-- los valores originales y la comparación detecta el intento de cambio.
+--
+-- Nota: service_role bypasa RLS completamente — no se ve afectado.
+
+DROP POLICY IF EXISTS "ls_staff_update_self" ON staff;
+
+CREATE POLICY "ls_staff_update_self"
+  ON staff FOR UPDATE
+  USING (id = ls_staff_id())
+  WITH CHECK (
+    id = ls_staff_id()
+    AND role         = (SELECT s.role        FROM staff s WHERE s.id = ls_staff_id() LIMIT 1)
+    AND business_id  = (SELECT s.business_id FROM staff s WHERE s.id = ls_staff_id() LIMIT 1)
+    AND (auth_id IS NOT DISTINCT FROM
+                       (SELECT s.auth_id     FROM staff s WHERE s.id = ls_staff_id() LIMIT 1))
+  );

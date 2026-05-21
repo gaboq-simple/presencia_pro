@@ -42,3 +42,10 @@ next-env.d.ts
 .next/
 node_modules/
 .mcp.json
+
+# onboarding checklists (contienen tokens y PINs sensibles)
+onboarding/*.md
+!onboarding/README.md
+
+# credenciales y accesos — NO al repo
+apps/lifestyle/ACCESS.md

@@ -23,7 +23,13 @@ export default function GlobalError({
       <div className="text-center max-w-sm space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Algo salió mal</h1>
         <p className="text-zinc-400 text-sm leading-relaxed">
-          Ocurrió un error inesperado. Si el problema persiste, contacta a soporte.
+          Ocurrió un error inesperado. Si el problema persiste,{' '}
+          <a
+            href={`mailto:contacto@zentriq.mx?subject=Error%20presenciapro${error.digest ? `%20${error.digest}` : ''}`}
+            className="underline hover:text-zinc-200"
+          >
+            escríbenos a contacto@zentriq.mx
+          </a>.
         </p>
         <button
           onClick={reset}

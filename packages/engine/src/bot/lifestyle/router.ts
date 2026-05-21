@@ -52,6 +52,19 @@ async function routeToHandler(
   context: LifestyleBotContext,
   deps: StateHandlerDeps,
 ): Promise<StateHandlerResult> {
+  // ── Intent ARCO — prioridad absoluta sobre cualquier estado ───────────────
+  // Si el cliente pregunta por sus datos personales o derechos ARCO,
+  // responde con el link al formulario sin interrumpir el flujo posterior.
+  if (isArcoIntent(msg.body)) {
+    const arcoUrl = process.env['ARCO_URL'] ?? 'https://zentriq.mx/arco';
+    return {
+      newState:   state,   // mantiene el estado actual — no interrumpe el flow
+      newContext: context,
+      responseText:
+        `Puedes ejercer tus derechos ARCO (acceso, rectificación, cancelación u oposición de tus datos) en ${arcoUrl} o escribiéndonos a contacto@zentriq.mx. Tienes derecho a solicitar qué datos almacenamos, corregirlos, eliminarlos o limitar su uso. Tu solicitud será atendida en máximo 20 días hábiles.`,
+    };
+  }
+
   // ── Confirmación pasiva — prioridad sobre el estado actual ────────────────
   // Si el cliente tiene una cita en las próximas 3h, su mensaje se interpreta
   // como respuesta al recordatorio (sí/no/cancelar) antes de evaluar el flujo
@@ -331,6 +344,20 @@ function isModificationIntent(body: string): boolean {
 function isCancellationIntent(body: string): boolean {
   const lower = body.trim().toLowerCase();
   return CANCELLATION_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+// ─── Detección de intent ARCO (derechos sobre datos personales) ───────────────
+
+const ARCO_KEYWORDS = [
+  'mis datos', 'mis derechos', 'quiero mis datos', 'borrar mis datos',
+  'eliminar mis datos', 'derechos arco', 'datos personales', 'privacidad',
+  'derecho de acceso', 'rectificacion', 'cancelacion de datos', 'oposicion',
+  'ley de datos', 'lfpdppp', 'aviso de privacidad',
+];
+
+function isArcoIntent(body: string): boolean {
+  const lower = body.trim().toLowerCase();
+  return ARCO_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
 /**

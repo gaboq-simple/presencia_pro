@@ -756,6 +756,96 @@ function printSummary(
   console.log('\n' + DIVIDER + '\n');
 }
 
+// ─── Checklist generator ──────────────────────────────────────────────────────
+
+function generateChecklist(
+  result: InsertResult,
+  config: Config,
+  accessToken: string,
+  assistantToken: string,
+): void {
+  const timestamp = new Date().toISOString();
+  const slug      = config.business.slug;
+
+  const waPhoneProvided = config.whatsapp?.phone_number
+    ? `${config.whatsapp.phone_number} (modelo: ${config.whatsapp.number_model})`
+    : null;
+
+  const waStep2Detail = waPhoneProvided
+    ? `  Número registrado en config: ${waPhoneProvided}\n  ⚠️ Aún debes obtener el \`phone_number_id\` de Meta Business Manager.`
+    : `  ⚠️ PENDIENTE — número no configurado todavía.`;
+
+  const staffLines = result.staffRows
+    .map((r) => `  - ${r.name.padEnd(25)} PIN \`${r.pin}\`   ID: \`${r.id}\``)
+    .join('\n');
+
+  const md = [
+    `# Checklist de onboarding: ${config.business.name} (${slug})`,
+    ``,
+    `Generado: ${timestamp}`,
+    `Estado del onboarding: 60% completo`,
+    ``,
+    `## ✅ Hecho automáticamente`,
+    `- [x] Business creado: \`business_id=${result.businessId}\``,
+    `- [x] Staff creados: ${result.staffRows.length} miembro(s) de staff`,
+    `- [x] Services creados: ${result.serviceCount} servicio(s)`,
+    `- [x] Access tokens generados`,
+    ``,
+    `## ⚠️ Pasos manuales pendientes`,
+    ``,
+    `### 1. Registrar webhook en Meta Business Manager`,
+    `- URL: \`{NEXT_PUBLIC_APP_URL}/api/bot\``,
+    `- Verify token: usar \`WHATSAPP_WEBHOOK_VERIFY_TOKEN\` actual`,
+    `- Suscribir a campo: \`messages\``,
+    ``,
+    `### 2. Obtener phone_number_id de Meta y conectar WhatsApp`,
+    waStep2Detail,
+    `- Entrar a Meta Business → WhatsApp → Phone Numbers`,
+    `- Copiar el Phone Number ID del número del negocio`,
+    `- Ejecutar en Supabase SQL Editor:`,
+    `  \`\`\`sql`,
+    `  UPDATE businesses`,
+    `  SET whatsapp_phone_number_id = '<PHONE_NUMBER_ID>',`,
+    `      whatsapp_number = '<NUMERO_E164_SIN_PLUS>'`,
+    `  WHERE slug = '${slug}';`,
+    `  \`\`\``,
+    ``,
+    `### 3. Configurar crons de Supabase`,
+    `- Edge Function: \`dispatch-lifestyle-notifications\` → schedule: \`* * * * *\``,
+    `- Edge Function: \`dispatch-auto-cancel\` → schedule: \`* * * * *\``,
+    `- Edge Function: \`dispatch-weekly-report\` → schedule: \`0 10 * * 1\``,
+    ``,
+    `### 4. Entregar credenciales al cliente`,
+    `- URL admin:  \`{NEXT_PUBLIC_APP_URL}/dashboard?token=${accessToken}\``,
+    `- URL staff:  \`{NEXT_PUBLIC_APP_URL}/dashboard?token=${assistantToken}\``,
+    `- PINs:`,
+    staffLines,
+    `- ⚠️ Guardar en 1Password antes de enviar al cliente`,
+    ``,
+    `### 5. Probar`,
+    `- [ ] Mandar mensaje de prueba al WhatsApp del negocio`,
+    `- [ ] Verificar que el bot responde`,
+    `- [ ] Crear cita de prueba desde el panel`,
+    `- [ ] Verificar que aparece en el dashboard`,
+    `- [ ] Confirmar que el reminder de 24h llega al cliente`,
+    ``,
+    `---`,
+    ``,
+    `Una vez todos los pasos arriba estén ✓, marcar este checklist como done y cerrar onboarding.`,
+    ``,
+  ].join('\n');
+
+  const onboardingDir = path.join(process.cwd(), 'onboarding');
+  fs.mkdirSync(onboardingDir, { recursive: true });
+
+  const checklistPath = path.join(onboardingDir, `${slug}-checklist.md`);
+  fs.writeFileSync(checklistPath, md, 'utf-8');
+
+  console.log(`\n✅ Onboarding 60% completo.`);
+  console.log(`📋 Checklist en: onboarding/${slug}-checklist.md`);
+  console.log(`➡️  Sigue los pasos 1-5 del checklist para completar.\n`);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -855,6 +945,10 @@ async function main(): Promise<void> {
   // ── Resumen ───────────────────────────────────────────────────────────────
 
   printSummary(insertResult, config, accessToken, assistantToken);
+
+  // ── Generar checklist ─────────────────────────────────────────────────────
+
+  generateChecklist(insertResult, config, accessToken, assistantToken);
 }
 
 main().catch((err: unknown) => {

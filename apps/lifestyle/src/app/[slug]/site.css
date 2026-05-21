@@ -916,3 +916,27 @@
     display: none;
   }
 }
+
+/* ─── Footer soporte ───────────────────────────────────────────────────────── */
+.site-footer__support {
+  max-width: 1280px;
+  margin: 0.75rem auto 0;
+  text-align: center;
+  font-size: 0.625rem;
+  color: var(--muted);
+  opacity: 0.35;
+}
+
+.site-footer__support-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.site-footer__support-link:hover {
+  opacity: 0.7;
+  text-decoration: underline;
+}
+
+.site-footer__support-sep {
+  opacity: 0.5;
+}

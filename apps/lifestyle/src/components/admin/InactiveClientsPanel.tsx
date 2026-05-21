@@ -74,12 +74,12 @@ function ReactivationModal({
   const [message, setMessage] = useState(modal.message);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
-
-  // Re-sincronizar si cambia el cliente seleccionado
-  useEffect(() => {
+  const [prevModalMessage, setPrevModalMessage] = useState(modal.message);
+  if (prevModalMessage !== modal.message) {
+    setPrevModalMessage(modal.message);
     setMessage(modal.message);
     setSent(false);
-  }, [modal.message]);
+  }
 
   async function handleConfirm() {
     if (sending || sent) return;

@@ -10,6 +10,8 @@ import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
 import { getDayAppointments } from '@/lib/dashboard.types';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
+import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
+import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -71,7 +73,7 @@ export async function cancelAppointment(
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
-    .select('id, business_id, status')
+    .select('id, business_id, status, starts_at, customer_id, staff_id')
     .eq('id', appointmentId)
     .eq('business_id', session.business_id)
     .maybeSingle();
@@ -91,6 +93,88 @@ export async function cancelAppointment(
     .eq('business_id', session.business_id);
 
   if (error) throw new Error(`cancelAppointment failed: ${error.message}`);
+
+  // Cancelar recordatorios pendientes — best-effort, no interrumpe el flujo
+  await supabase
+    .from('scheduled_notifications')
+    .update({ failed_at: new Date().toISOString() })
+    .eq('appointment_id', appointmentId)
+    .is('sent_at', null)
+    .is('failed_at', null);
+
+  // ── Notificar al cliente por WhatsApp — best-effort ────────────────────
+  try {
+    const apptRow = existing as unknown as {
+      id: string;
+      business_id: string;
+      status: string;
+      starts_at: string;
+      customer_id: string | null;
+      staff_id: string | null;
+    };
+
+    let customerPhone: string | null = null;
+    let customerName:  string | null = null;
+    if (apptRow.customer_id) {
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('phone, name')
+        .eq('id', apptRow.customer_id)
+        .maybeSingle();
+      const c = cust as { phone: string | null; name: string } | null;
+      customerPhone = c?.phone ?? null;
+      customerName  = c?.name  ?? null;
+    }
+
+    if (customerPhone) {
+      const { data: biz } = await supabase
+        .from('businesses')
+        .select('timezone, whatsapp_phone_number_id')
+        .eq('id', session.business_id)
+        .maybeSingle();
+      const b           = biz as { timezone: string; whatsapp_phone_number_id: string } | null;
+      const tz          = b?.timezone ?? 'America/Mexico_City';
+      const phoneNumberId = b?.whatsapp_phone_number_id;
+      const accessToken   = process.env['WHATSAPP_ACCESS_TOKEN'];
+
+      if (phoneNumberId && accessToken) {
+        const dateStr  = formatApptDate(apptRow.starts_at, tz);
+        const timeStr  = formatApptTime(apptRow.starts_at, tz);
+        const greeting = customerName ? `Hola ${customerName.split(' ')[0]},` : 'Hola,';
+        const body =
+          `${greeting} tu cita del ${dateStr} a las ${timeStr} fue cancelada por la barbería. ` +
+          `Si deseas reagendar, responde a este mensaje.`;
+
+        await sendWhatsAppMeta(
+          { to: customerPhone, body },
+          { accessToken, phoneNumberId },
+        );
+
+        const now = new Date().toISOString();
+        await supabase
+          .from('scheduled_notifications')
+          .insert({
+            business_id:    session.business_id,
+            appointment_id: appointmentId,
+            customer_phone: customerPhone,
+            type:           'cancellation_notice',
+            scheduled_for:  now,
+            sent_at:        now,
+            message_body:   body,
+          });
+      }
+    }
+  } catch {
+    // best-effort — la cancelación ya fue exitosa
+  }
+
+  // ── Notificar waitlist si hay clientes en espera para ese slot — best-effort
+  try {
+    const row = existing as unknown as { starts_at: string; staff_id: string | null };
+    await notifyWaitlistOnCancel(supabase, session.business_id, row.starts_at, row.staff_id ?? null);
+  } catch {
+    // best-effort — la cancelación ya fue exitosa
+  }
 }
 
 // ─── Actualizar notas inline ──────────────────────────────────────────────────
@@ -196,15 +280,17 @@ type CreateAppointmentInput = {
  * · Si customerPhone: busca customer por (business_id, phone); si no existe, lo crea.
  * · Si solo customerName: busca por nombre exacto (ILIKE); si no existe, crea sin teléfono.
  * · Registra created_by_staff_id cuando la sesión es de barbero.
+ * · Si el cliente tiene is_flagged=true, retorna warning con conteo de no-shows.
  */
 export async function createAssistantAppointment(
   input: CreateAppointmentInput,
-): Promise<{ id: string }> {
+): Promise<{ id: string; warning?: string }> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
 
   // ── Customer lookup / create ─────────────────────────────────────────────
   let customerId: string | null = null;
+  let customerWarning: string | undefined;
   const name  = input.customerName.trim();
   const phone = input.customerPhone?.trim() || null;
 
@@ -213,17 +299,27 @@ export async function createAssistantAppointment(
       // Buscar por teléfono — identificador canónico
       const { data: existing } = await supabase
         .from('customers')
-        .select('id')
+        .select('id, noshow_count, is_flagged')
         .eq('business_id', session.business_id)
         .eq('phone', phone)
         .maybeSingle();
 
       if (existing) {
-        customerId = (existing as { id: string }).id;
+        const row = existing as { id: string; noshow_count: number; is_flagged: boolean };
+        customerId = row.id;
+        if (row.is_flagged) {
+          customerWarning = `Este cliente tiene ${row.noshow_count} no-show${row.noshow_count !== 1 ? 's' : ''} registrado${row.noshow_count !== 1 ? 's' : ''}`;
+        }
       } else {
         const { data: created } = await supabase
           .from('customers')
-          .insert({ business_id: session.business_id, name, phone })
+          .insert({
+            business_id:   session.business_id,
+            name,
+            phone,
+            consent_at:    new Date().toISOString(),
+            consented_via: 'manual_registration',
+          })
           .select('id')
           .single();
         customerId = (created as { id: string } | null)?.id ?? null;
@@ -232,19 +328,29 @@ export async function createAssistantAppointment(
       // Solo nombre: buscar por nombre exacto (less reliable)
       const { data: existing } = await supabase
         .from('customers')
-        .select('id')
+        .select('id, noshow_count, is_flagged')
         .eq('business_id', session.business_id)
         .ilike('name', name)
         .limit(1)
         .maybeSingle();
 
       if (existing) {
-        customerId = (existing as { id: string }).id;
+        const row = existing as { id: string; noshow_count: number; is_flagged: boolean };
+        customerId = row.id;
+        if (row.is_flagged) {
+          customerWarning = `Este cliente tiene ${row.noshow_count} no-show${row.noshow_count !== 1 ? 's' : ''} registrado${row.noshow_count !== 1 ? 's' : ''}`;
+        }
       } else {
         // Crear sin teléfono (phone es nullable desde migration 023)
         const { data: created } = await supabase
           .from('customers')
-          .insert({ business_id: session.business_id, name, phone: null })
+          .insert({
+            business_id:   session.business_id,
+            name,
+            phone:         null,
+            consent_at:    new Date().toISOString(),
+            consented_via: 'manual_registration',
+          })
           .select('id')
           .single();
         customerId = (created as { id: string } | null)?.id ?? null;
@@ -272,7 +378,7 @@ export async function createAssistantAppointment(
 
   if (error) throw new Error(`createAssistantAppointment failed: ${error.message}`);
 
-  return { id: (data as { id: string }).id };
+  return { id: (data as { id: string }).id, warning: customerWarning };
 }
 
 // ─── Reagendar cita ───────────────────────────────────────────────────────────
@@ -297,7 +403,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
   // Verificar que la cita pertenece al negocio y obtener datos necesarios
   const { data: raw, error: fetchErr } = await supabase
     .from('appointments')
-    .select('id, business_id, staff_id, status, service:service_id(duration_minutes)')
+    .select('id, business_id, staff_id, status, starts_at, customer_id, service:service_id(duration_minutes)')
     .eq('id', input.appointmentId)
     .eq('business_id', session.business_id)
     .maybeSingle();
@@ -309,6 +415,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
     business_id: string;
     staff_id: string;
     status: string;
+    starts_at: string;
+    customer_id: string | null;
     service: { duration_minutes: number };
   };
 
@@ -355,6 +463,124 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
     .eq('business_id', session.business_id);
 
   if (error) throw new Error(`rescheduleAppointment failed: ${error.message}`);
+
+  // Cancelar recordatorios obsoletos del horario anterior — best-effort
+  await supabase
+    .from('scheduled_notifications')
+    .update({ failed_at: new Date().toISOString() })
+    .eq('appointment_id', input.appointmentId)
+    .is('sent_at', null)
+    .is('failed_at', null);
+
+  // ── Notificar al cliente y programar nuevos reminders — best-effort ───
+  try {
+    let customerPhone: string | null = null;
+    let customerName:  string | null = null;
+    if (appt.customer_id) {
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('phone, name')
+        .eq('id', appt.customer_id)
+        .maybeSingle();
+      const c = cust as { phone: string | null; name: string } | null;
+      customerPhone = c?.phone ?? null;
+      customerName  = c?.name  ?? null;
+    }
+
+    if (customerPhone) {
+      const { data: biz } = await supabase
+        .from('businesses')
+        .select('timezone, whatsapp_phone_number_id')
+        .eq('id', session.business_id)
+        .maybeSingle();
+      const b             = biz as { timezone: string; whatsapp_phone_number_id: string } | null;
+      const tz            = b?.timezone ?? 'America/Mexico_City';
+      const phoneNumberId = b?.whatsapp_phone_number_id;
+      const accessToken   = process.env['WHATSAPP_ACCESS_TOKEN'];
+
+      if (phoneNumberId && accessToken) {
+        const oldDateStr = formatApptDate(appt.starts_at, tz);
+        const oldTimeStr = formatApptTime(appt.starts_at, tz);
+        const newDateStr = formatApptDate(newStartsAt, tz);
+        const newTimeStr = formatApptTime(newStartsAt, tz);
+        const greeting   = customerName ? `Hola ${customerName.split(' ')[0]},` : 'Hola,';
+        const body =
+          `${greeting} tu cita del ${oldDateStr} a las ${oldTimeStr} fue movida al ` +
+          `${newDateStr} a las ${newTimeStr}. Si necesitas reagendar, responde a este mensaje.`;
+
+        await sendWhatsAppMeta(
+          { to: customerPhone, body },
+          { accessToken, phoneNumberId },
+        );
+
+        const nowIso = new Date().toISOString();
+        const nowMs  = Date.now();
+        const newStart = new Date(newStartsAt);
+
+        // Log del envío
+        const rows: {
+          business_id:    string;
+          appointment_id: string;
+          customer_phone: string;
+          type:           string;
+          scheduled_for:  string;
+          sent_at?:       string;
+          message_body:   string;
+        }[] = [
+          {
+            business_id:    session.business_id,
+            appointment_id: input.appointmentId,
+            customer_phone: customerPhone,
+            type:           'reschedule_notice',
+            scheduled_for:  nowIso,
+            sent_at:        nowIso,
+            message_body:   body,
+          },
+        ];
+
+        // Nuevos reminders para la nueva fecha (solo si quedan en el futuro)
+        const at24h = new Date(newStart.getTime() - 24 * 60 * 60_000);
+        if (at24h.getTime() > nowMs) {
+          rows.push({
+            business_id:    session.business_id,
+            appointment_id: input.appointmentId,
+            customer_phone: customerPhone,
+            type:           'reminder_24h',
+            scheduled_for:  at24h.toISOString(),
+            message_body:   `Hola, mañana tienes tu cita a las ${newTimeStr}. ¡Te esperamos!`,
+          });
+        }
+
+        const at2h = new Date(newStart.getTime() - 2 * 60 * 60_000);
+        if (at2h.getTime() > nowMs) {
+          rows.push({
+            business_id:    session.business_id,
+            appointment_id: input.appointmentId,
+            customer_phone: customerPhone,
+            type:           'reminder_2h',
+            scheduled_for:  at2h.toISOString(),
+            message_body:   `Hola, en 2 horas tienes tu cita a las ${newTimeStr}. ¡Te esperamos!`,
+          });
+        }
+
+        const at1h = new Date(newStart.getTime() - 1 * 60 * 60_000);
+        if (at1h.getTime() > nowMs) {
+          rows.push({
+            business_id:    session.business_id,
+            appointment_id: input.appointmentId,
+            customer_phone: customerPhone,
+            type:           'reminder_1h',
+            scheduled_for:  at1h.toISOString(),
+            message_body:   `Hola, te recordamos tu cita hoy a las ${newTimeStr}.`,
+          });
+        }
+
+        await supabase.from('scheduled_notifications').insert(rows);
+      }
+    }
+  } catch {
+    // best-effort — la reagenda ya fue exitosa
+  }
 }
 
 // ─── Staff blocks del día (para AvailabilityTimeline) ────────────────────────
@@ -480,4 +706,450 @@ export async function searchCustomers(
   );
 
   return results;
+}
+
+// ─── Handoff: tomar control de conversación ───────────────────────────────────
+
+/**
+ * Transfiere el control de una conversación del bot al staff.
+ * Los mensajes entrantes del cliente se persistirán en conversation_messages
+ * pero NO pasarán al FSM mientras session_mode = 'human'.
+ * El auto-release ocurre si taken_at supera 30 min sin actividad del staff.
+ */
+export async function takeoverConversation(customerPhone: string): Promise<void> {
+  const session = await requireAssistantSession();
+  if (!session.staff_id) throw new Error('Se requiere identificación de staff para tomar control');
+  const supabase = getServiceClient();
+
+  const { error } = await supabase
+    .from('bot_conversations')
+    .update({
+      session_mode: 'human',
+      taken_by:     session.staff_id,
+      taken_at:     new Date().toISOString(),
+    })
+    .eq('business_id', session.business_id)
+    .eq('customer_phone', customerPhone);
+
+  if (error) throw new Error(`takeoverConversation failed: ${error.message}`);
+}
+
+// ─── Handoff: devolver control al bot ────────────────────────────────────────
+
+/**
+ * Devuelve el control de la conversación al bot FSM.
+ * Idempotente: si ya está en modo 'bot', no falla.
+ */
+export async function releaseConversation(customerPhone: string): Promise<void> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  const { error } = await supabase
+    .from('bot_conversations')
+    .update({
+      session_mode: 'bot',
+      taken_by:     null,
+      taken_at:     null,
+    })
+    .eq('business_id', session.business_id)
+    .eq('customer_phone', customerPhone);
+
+  if (error) throw new Error(`releaseConversation failed: ${error.message}`);
+}
+
+// ─── Handoff: enviar mensaje desde el panel ───────────────────────────────────
+
+/**
+ * Envía un mensaje de WhatsApp directo al cliente desde el panel del staff.
+ * Solo disponible cuando session_mode = 'human' — el staff debe haber tomado
+ * control con takeoverConversation() antes de poder enviar.
+ *
+ * Cada envío exitoso resetea taken_at en bot_conversations, renovando los
+ * 30 minutos de auto-release mientras el staff esté activamente chateando.
+ */
+export async function sendMessageFromPanel(
+  customerPhone: string,
+  message: string,
+): Promise<{ sent: boolean }> {
+  const session = await requireAssistantSession();
+  if (!session.staff_id) throw new Error('Se requiere identificación de staff para enviar mensajes');
+  const supabase = getServiceClient();
+
+  // ── Verificar que la conversación está bajo control humano ────────────────
+  const { data: conv } = await supabase
+    .from('bot_conversations')
+    .select('session_mode')
+    .eq('business_id', session.business_id)
+    .eq('customer_phone', customerPhone)
+    .maybeSingle();
+
+  if (!conv || (conv as { session_mode: string }).session_mode !== 'human') {
+    throw new Error('Toma control de la conversación antes de enviar mensajes directos');
+  }
+
+  // ── Obtener whatsapp_phone_number_id del negocio ──────────────────────────
+  const { data: biz } = await supabase
+    .from('businesses')
+    .select('whatsapp_phone_number_id')
+    .eq('id', session.business_id)
+    .maybeSingle();
+
+  const phoneNumberId = (biz as { whatsapp_phone_number_id: string } | null)?.whatsapp_phone_number_id;
+  if (!phoneNumberId) throw new Error('No se encontró configuración de WhatsApp para este negocio');
+
+  // ── Enviar vía Meta Cloud API — best-effort ───────────────────────────────
+  let sent = false;
+  try {
+    const accessToken = process.env['WHATSAPP_ACCESS_TOKEN'];
+    if (!accessToken) throw new Error('WHATSAPP_ACCESS_TOKEN no configurado');
+    const result = await sendWhatsAppMeta(
+      { to: customerPhone, body: message },
+      { accessToken, phoneNumberId },
+    );
+    sent = result.success;
+  } catch {
+    // best-effort — persistir de todos modos para trazabilidad
+  }
+
+  // ── Persistir en conversation_messages ────────────────────────────────────
+  await supabase
+    .from('conversation_messages')
+    .insert({
+      business_id:    session.business_id,
+      customer_phone: customerPhone,
+      direction:      'outbound',
+      body:           message,
+      sent_by:        'human',
+      staff_id:       session.staff_id,
+    })
+    .then(() => {/* best-effort */}, () => {/* best-effort */});
+
+  // ── Resetear timer de auto-release ────────────────────────────────────────
+  // Cada mensaje del staff renueva los 30 min del takeover, evitando
+  // que se pierda el control en medio de una conversación activa.
+  await supabase
+    .from('bot_conversations')
+    .update({ taken_at: new Date().toISOString() })
+    .eq('business_id', session.business_id)
+    .eq('customer_phone', customerPhone)
+    .eq('session_mode', 'human'); // guard: solo si sigue en modo humano
+
+  return { sent };
+}
+
+// ─── Gestión de horario semanal ───────────────────────────────────────────────
+
+type AvailabilitySlot = {
+  day_of_week: number;
+  start_time:  string;
+  end_time:    string;
+  break_start?: string | null;
+  break_end?:   string | null;
+  is_active?:   boolean;
+};
+
+/**
+ * Reemplaza el horario semanal recurrente de un barbero.
+ * DELETE existing + INSERT new. Array vacío = descanso total.
+ * Admite los campos de migration 025: break_start, break_end, is_active.
+ */
+export async function updateStaffSchedule(
+  staffId: string,
+  availability: AvailabilitySlot[],
+): Promise<void> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  // Verificar que el staff pertenece al negocio de la sesión
+  const { data: existing, error: fetchErr } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+
+  if (fetchErr || !existing) throw new Error('Staff no encontrado');
+
+  const { error: deleteError } = await supabase
+    .from('staff_availability')
+    .delete()
+    .eq('staff_id', staffId);
+
+  if (deleteError) throw new Error(`updateStaffSchedule delete failed: ${deleteError.message}`);
+
+  if (availability.length > 0) {
+    const rows = availability.map((slot) => ({
+      staff_id:    staffId,
+      day_of_week: slot.day_of_week,
+      start_time:  slot.start_time,
+      end_time:    slot.end_time,
+      break_start: slot.break_start ?? null,
+      break_end:   slot.break_end   ?? null,
+      is_active:   slot.is_active   ?? true,
+    }));
+
+    const { error: insertError } = await supabase
+      .from('staff_availability')
+      .insert(rows);
+
+    if (insertError) throw new Error(`updateStaffSchedule insert failed: ${insertError.message}`);
+  }
+}
+
+// ─── Gestión de excepciones de horario ───────────────────────────────────────
+
+type ScheduleExceptionInput = {
+  staffId:        string;
+  exceptionDate:  string;  // 'YYYY-MM-DD'
+  available:      boolean;
+  startTime?:     string | null;  // 'HH:MM' — solo si available=true + horario especial
+  endTime?:       string | null;
+  reason?:        string | null;
+};
+
+export type ScheduleException = {
+  id:             string;
+  staff_id:       string;
+  business_id:    string;
+  exception_date: string;
+  available:      boolean;
+  start_time:     string | null;
+  end_time:       string | null;
+  reason:         string | null;
+  created_at:     string;
+};
+
+/**
+ * Crea o actualiza una excepción de horario para una fecha específica.
+ * UPSERT por (staff_id, exception_date) — respeta la UNIQUE constraint.
+ */
+export async function createScheduleException(
+  data: ScheduleExceptionInput,
+): Promise<ScheduleException> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  // Verificar que el staff pertenece al negocio de la sesión
+  const { data: existing, error: fetchErr } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', data.staffId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+
+  if (fetchErr || !existing) throw new Error('Staff no encontrado');
+
+  const { data: result, error } = await supabase
+    .from('staff_schedule_exceptions')
+    .upsert(
+      {
+        staff_id:       data.staffId,
+        business_id:    session.business_id,
+        exception_date: data.exceptionDate,
+        available:      data.available,
+        start_time:     data.startTime  ?? null,
+        end_time:       data.endTime    ?? null,
+        reason:         data.reason     ?? null,
+      },
+      { onConflict: 'staff_id,exception_date' },
+    )
+    .select('id, staff_id, business_id, exception_date, available, start_time, end_time, reason, created_at')
+    .single();
+
+  if (error) throw new Error(`createScheduleException failed: ${error.message}`);
+
+  return result as ScheduleException;
+}
+
+/**
+ * Elimina una excepción de horario.
+ * El AND business_id garantiza que solo se puede borrar del negocio propio.
+ */
+export async function deleteScheduleException(exceptionId: string): Promise<void> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  const { error } = await supabase
+    .from('staff_schedule_exceptions')
+    .delete()
+    .eq('id', exceptionId)
+    .eq('business_id', session.business_id);
+
+  if (error) throw new Error(`deleteScheduleException failed: ${error.message}`);
+}
+
+/**
+ * Obtiene las excepciones de horario de un barbero.
+ * Si se pasa month ('YYYY-MM'), filtra ese mes.
+ * Si no, retorna todas las excepciones futuras (exception_date >= hoy).
+ */
+export async function getScheduleExceptions(
+  staffId: string,
+  month?: string,
+): Promise<ScheduleException[]> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  // Verificar que el staff pertenece al negocio de la sesión
+  const { data: staffRow, error: fetchErr } = await supabase
+    .from('staff')
+    .select('id')
+    .eq('id', staffId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+
+  if (fetchErr || !staffRow) throw new Error('Staff no encontrado');
+
+  let query = supabase
+    .from('staff_schedule_exceptions')
+    .select('id, staff_id, business_id, exception_date, available, start_time, end_time, reason, created_at')
+    .eq('staff_id', staffId)
+    .eq('business_id', session.business_id)
+    .order('exception_date', { ascending: true });
+
+  if (month) {
+    // Rango del mes: 'YYYY-MM' → primer día y primer día del mes siguiente
+    const [year, mon] = month.split('-').map(Number);
+    const from = `${year}-${String(mon).padStart(2, '0')}-01`;
+    const nextMonth = mon === 12 ? 1 : mon + 1;
+    const nextYear  = mon === 12 ? year + 1 : year;
+    const to = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+    query = query.gte('exception_date', from).lt('exception_date', to);
+  } else {
+    const today = new Date().toISOString().slice(0, 10);
+    query = query.gte('exception_date', today);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`getScheduleExceptions failed: ${error.message}`);
+
+  return (data ?? []) as ScheduleException[];
+}
+
+// ─── Chat panel: conversaciones activas ───────────────────────────────────────
+
+export type ConversationSummary = {
+  customerPhone: string;
+  sessionMode:   'bot' | 'human' | 'paused';
+  state:         string;
+  takenByName:   string | null;
+  lastMessage:   string;  // ISO timestamptz
+};
+
+/**
+ * Retorna las conversaciones activas del negocio, ordenadas:
+ *   human → paused → bot. Dentro de cada grupo, por last_message DESC.
+ */
+export async function getActiveConversations(): Promise<ConversationSummary[]> {
+  const { business_id } = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  const { data, error } = await supabase
+    .from('bot_conversations')
+    .select(`
+      customer_phone,
+      session_mode,
+      state,
+      last_message,
+      taken_by_staff:taken_by(name)
+    `)
+    .eq('business_id', business_id)
+    .order('last_message', { ascending: false })
+    .limit(50);
+
+  if (error) throw new Error(`getActiveConversations failed: ${error.message}`);
+
+  const rows = (data ?? []) as unknown as Array<{
+    customer_phone:  string;
+    session_mode:    string;
+    state:           string;
+    last_message:    string;
+    taken_by_staff:  { name: string } | null;
+  }>;
+
+  // Ordenar: human primero, paused segundo, bot al final
+  const ORDER: Record<string, number> = { human: 0, paused: 1, bot: 2 };
+  rows.sort((a, b) => (ORDER[a.session_mode] ?? 3) - (ORDER[b.session_mode] ?? 3));
+
+  return rows.map((r) => ({
+    customerPhone: r.customer_phone,
+    sessionMode:   r.session_mode as 'bot' | 'human' | 'paused',
+    state:         r.state,
+    takenByName:   r.taken_by_staff?.name ?? null,
+    lastMessage:   r.last_message,
+  }));
+}
+
+// ─── Chat panel: historial de mensajes ────────────────────────────────────────
+
+export type ConversationMessage = {
+  id:        string;
+  direction: 'inbound' | 'outbound';
+  body:      string;
+  sentBy:    'bot' | 'human' | 'customer';
+  staffId:   string | null;
+  createdAt: string;  // ISO timestamptz
+};
+
+/**
+ * Retorna los últimos 100 mensajes de una conversación específica,
+ * ordenados por created_at ASC (cronológico).
+ */
+export async function getConversationMessages(
+  customerPhone: string,
+): Promise<ConversationMessage[]> {
+  const { business_id } = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  const { data, error } = await supabase
+    .from('conversation_messages')
+    .select('id, direction, body, sent_by, staff_id, created_at')
+    .eq('business_id', business_id)
+    .eq('customer_phone', customerPhone)
+    .order('created_at', { ascending: true })
+    .limit(100);
+
+  if (error) throw new Error(`getConversationMessages failed: ${error.message}`);
+
+  return ((data ?? []) as Array<{
+    id:         string;
+    direction:  string;
+    body:       string;
+    sent_by:    string;
+    staff_id:   string | null;
+    created_at: string;
+  }>).map((r) => ({
+    id:        r.id,
+    direction: r.direction as 'inbound' | 'outbound',
+    body:      r.body,
+    sentBy:    r.sent_by as 'bot' | 'human' | 'customer',
+    staffId:   r.staff_id,
+    createdAt: r.created_at,
+  }));
+}
+
+// ─── Helpers de formato para notificaciones del panel ─────────────────────────
+
+const DAYS_ES_PANEL   = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MONTHS_ES_PANEL = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+function formatApptDate(isoStr: string, tz: string): string {
+  const localDateStr = new Date(isoStr).toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+  const [, monthStr, dayStr] = localDateStr.split('-');
+  const dayNum    = parseInt(dayStr!, 10);
+  const dayOfWeek = new Date(localDateStr + 'T12:00:00Z').getDay();
+  const monthIdx  = parseInt(monthStr!, 10) - 1;
+  return `${DAYS_ES_PANEL[dayOfWeek]} ${dayNum} de ${MONTHS_ES_PANEL[monthIdx]}`;
+}
+
+function formatApptTime(isoStr: string, tz: string): string {
+  return new Date(isoStr).toLocaleTimeString('es-MX', {
+    timeZone: tz,
+    hour:     'numeric',
+    minute:   '2-digit',
+    hour12:   true,
+  });
 }

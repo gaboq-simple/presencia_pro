@@ -56,9 +56,16 @@ export default function RecurringAvailability({ availability }: Props) {
                 {short}
               </span>
               {slot ? (
-                <span className="text-xs tabular-nums text-gray-800">
-                  {trimSeconds(slot.start_time)} – {trimSeconds(slot.end_time)}
-                </span>
+                <div className="text-right">
+                  <span className="text-xs tabular-nums text-gray-800">
+                    {trimSeconds(slot.start_time)} – {trimSeconds(slot.end_time)}
+                  </span>
+                  {slot.break_start && slot.break_end && (
+                    <p className="mt-0.5 text-[10px] tabular-nums text-gray-400">
+                      Descanso: {trimSeconds(slot.break_start)} – {trimSeconds(slot.break_end)}
+                    </p>
+                  )}
+                </div>
               ) : (
                 <span className="text-xs text-gray-300">Descanso</span>
               )}

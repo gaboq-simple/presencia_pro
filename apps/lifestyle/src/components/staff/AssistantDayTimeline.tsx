@@ -454,12 +454,17 @@ export default function AssistantDayTimeline({
 }: Props) {
   // Hora actual (actualiza cada minuto) — solo se usa cuando date === hoy
   const [nowTime, setNowTime] = useState<string | null>(null);
-
-  useEffect(() => {
+  const [prevDateTz, setPrevDateTz] = useState(`${date}|${timezone}`);
+  const dateTz = `${date}|${timezone}`;
+  if (prevDateTz !== dateTz) {
+    setPrevDateTz(dateTz);
     if (!isLocalToday(date, timezone)) {
       setNowTime(null);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!isLocalToday(date, timezone)) return;
     const update = () => setNowTime(getNowLocalTime(timezone));
     update();
     const interval = setInterval(update, 60_000);

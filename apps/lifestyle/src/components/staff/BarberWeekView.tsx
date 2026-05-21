@@ -172,7 +172,7 @@ export default function BarberWeekView({ anchorDate, todayAppointments }: Props)
         setLoading(false);
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [anchorDate]);
 
   const selectedAppts = weekData[selected] ?? [];
