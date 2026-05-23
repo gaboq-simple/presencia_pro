@@ -247,6 +247,33 @@ que es 10pm del dia anterior en Mexico — incorrecto.
 Verificar que `dispatch-lifestyle-notifications` convierte correctamente a la
 timezone del negocio antes de hacer el INSERT en `scheduled_notifications`.
 
+### G-03 Timezone en notificaciones — RESUELTO PARCIALMENTE (2026-05-23)
+
+**Auditoria completa del manejo de timezones:**
+
+**Correcto:**
+- `confirmed.ts` calcula `scheduled_for = startsAt.getTime() - Nh * 3600000` en UTC puro.
+  `startsAt` viene de un ISO string de PostgreSQL (siempre UTC). El calculo matematico es correcto.
+- `confirmed.ts` construye `message_body` con `formatTimeHumanFromDate(startsAt, business.timezone)`.
+  Las horas que VE el cliente estan en su timezone local. Correcto.
+- El dispatcher compara `scheduled_for <= new Date().toISOString()`. Ambos lados son UTC. Correcto.
+- `notifyWaitlistOnCancel.ts` usa `formatWlDate(isoStr, tz)` y `formatWlTime(isoStr, tz)` que
+  reciben el timezone. Correcto.
+
+**Bug encontrado e implementado el fix:**
+- `dispatch-lifestyle-notifications/index.ts` — `handleWaitlistExpiry` construia el mensaje
+  para el siguiente cliente en waitlist usando `d.getDay()`, `d.getDate()`, `d.getHours()` etc.
+  sin timezone. Para un negocio en `America/Mexico_City` (UTC-6), cualquier slot entre las 6pm
+  y medianoche local producia fecha/hora incorrecta (un dia adelante, hora UTC del servidor).
+
+  **Fix aplicado:** `formatDateSpanish(d, tz)` y `formatTimeHHMM(d, tz)` ahora usan
+  `d.toLocaleDateString('en-CA', { timeZone: tz })` y `d.toLocaleTimeString('es-MX', { timeZone: tz })`
+  igual que `notifyWaitlistOnCancel.ts`. El campo `timezone` se agrego al SELECT del JOIN
+  con `businesses` y al tipo `WaitlistNotifRow`.
+
+**Concluion:** No hay bug de timezone en el scheduling ni en el dispatch de recordatorios.
+El unico bug era en la construccion del mensaje de texto de `waitlist_expiry` — ya corregido.
+
 ### G-04 Rate limiting — env vars no en Vercel
 
 `UPSTASH_REDIS_REST_URL` y `UPSTASH_REDIS_REST_TOKEN` deben estar configurados

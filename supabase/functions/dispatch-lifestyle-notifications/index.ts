@@ -106,12 +106,22 @@ const MONTHS_ES = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ] as const;
 
-function formatDateSpanish(d: Date): string {
-  return `${DAYS_ES[d.getDay()]} ${d.getDate()} de ${MONTHS_ES[d.getMonth()]}`;
+function formatDateSpanish(d: Date, tz: string): string {
+  const localDate = d.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+  const [, monthStr, dayStr] = localDate.split('-');
+  const dayNum    = parseInt(dayStr!, 10);
+  const dayOfWeek = new Date(localDate + 'T12:00:00Z').getDay();
+  const monthIdx  = parseInt(monthStr!, 10) - 1;
+  return `${DAYS_ES[dayOfWeek]} ${dayNum} de ${MONTHS_ES[monthIdx]}`;
 }
 
-function formatTimeHHMM(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+function formatTimeHHMM(d: Date, tz: string): string {
+  return d.toLocaleTimeString('es-MX', {
+    timeZone: tz,
+    hour:     '2-digit',
+    minute:   '2-digit',
+    hour12:   false,
+  });
 }
 
 // ─── handleWaitlistExpiry ─────────────────────────────────────────────────────
@@ -123,7 +133,7 @@ type WaitlistNotifRow = {
   id:          string;
   business_id: string;
   metadata:    Record<string, string> | null;
-  businesses:  { whatsapp_phone_number_id: string } | null;
+  businesses:  { whatsapp_phone_number_id: string; timezone: string } | null;
 };
 
 async function handleWaitlistExpiry(
@@ -218,13 +228,14 @@ async function handleWaitlistExpiry(
   // ── 6. Enviar WhatsApp al siguiente — best-effort ─────────────────────────
 
   const phoneNumberId = row.businesses?.whatsapp_phone_number_id;
+  const tz            = row.businesses?.timezone ?? 'America/Mexico_City';
   if (!phoneNumberId) return;
 
   try {
     const slotDate    = new Date(metadata?.slot_starts_at ?? '');
     const validDate   = !isNaN(slotDate.getTime());
-    const dateStr     = validDate ? formatDateSpanish(slotDate) : entry.requested_date;
-    const timeStr     = validDate ? ` a las ${formatTimeHHMM(slotDate)}` : '';
+    const dateStr     = validDate ? formatDateSpanish(slotDate, tz) : entry.requested_date;
+    const timeStr     = validDate ? ` a las ${formatTimeHHMM(slotDate, tz)}` : '';
     const staffName   = metadata?.slot_staff_name ?? 'tu barbero';
     const serviceName = next.service?.name ?? metadata?.service_name ?? 'tu servicio';
 
@@ -260,6 +271,7 @@ Deno.serve(async (_req) => {
       businesses (
         whatsapp_phone_number_id,
         name,
+        timezone,
         review_url
       )
     `)
@@ -286,6 +298,7 @@ Deno.serve(async (_req) => {
     businesses: {
       whatsapp_phone_number_id: string;
       name:                     string;
+      timezone:                 string;
       review_url:               string | null;
     } | null;
   }>;
@@ -315,7 +328,10 @@ Deno.serve(async (_req) => {
           business_id: row.business_id,
           metadata:    row.metadata,
           businesses:  row.businesses
-            ? { whatsapp_phone_number_id: row.businesses.whatsapp_phone_number_id }
+            ? {
+                whatsapp_phone_number_id: row.businesses.whatsapp_phone_number_id,
+                timezone:                 row.businesses.timezone,
+              }
             : null,
         });
         summary.dispatched++;
