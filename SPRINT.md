@@ -532,6 +532,26 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 - type-check: 0 errores.
 **Prompt:** Ad-hoc solicitado por Gabriel (2026-05-23)
 
+#### S4-BOT-03 — Rewrite completo del system prompt del bot 🟢 done (2026-05-23)
+**Origen:** Ad-hoc solicitado por Gabriel
+**Por qué:** El prompt anterior era funcional pero genérico. El nuevo introduce espejeo de estilo, detección emocional, manejo de flujo avanzado (mensajes concatenados, emojis como respuesta, múltiples citas), reglas de negocio explícitas alineadas con el FSM, soporte bilingüe, y tags XML para segmentación clara.
+**Archivos:**
+- `packages/engine/src/bot/lifestyle/prompt.ts` (rewrite del body de `buildSystemPrompt`, `buildCatalogSection`, `buildSideQuestionSection`)
+- `packages/engine/src/bot/lifestyle/types.ts` (añadido `businessType?: string` a `LifestyleBusinessConfig`)
+- `apps/lifestyle/src/app/api/bot/route.ts` (mapeo de `business_type`, handler no-texto por tipo: audio/image/video/sticker/document/location)
+**Criterios de aceptación:**
+- [x] Firma de `buildSystemPrompt(business, context?, catalog?)` sin cambios — ningún caller afectado
+- [x] `businessType` mapeado desde `businesses.business_type`; fallback `'negocio'` si no está poblado (TODO en type doc)
+- [x] Catálogo inyectado dentro de `<catalogo_servicios>` con el mismo formato de líneas
+- [x] `buildSideQuestionSection` genera bloque `<pregunta_lateral_pendiente>` (formato XML)
+- [x] No-texto Meta: audio/image/video/sticker/document/location → respuestas estáticas por tipo; sticker → silencio; location → query ligero por `phone_number_id`
+- [x] Razón documentada en `sendNonTextResponseMeta` por qué business no está disponible en ese punto del flujo
+**Notas de ejecución:**
+- `business_type` ya existe en el schema DB (`businesses` tabla). No se requiere migración.
+- El query de location en `sendNonTextResponseMeta` es necesario porque el non-text path retorna antes del bloque `after()` que llama `processMetaMessage` (donde se resuelve el negocio). Ambas rutas son mutuamente excluyentes.
+- Twilio (dev-only) mantiene `NON_TEXT_MESSAGE` como fallback genérico — no tiene granularidad de tipo en el mismo formato.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-05-23)
+
 ---
 
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
@@ -604,6 +624,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-21 | S4-OPS-01, S4-OPS-04 | done | Dry-run con dummy-barberia-test.json (--dry-run y --validate funcionan). 6 fricciones + 4 gaps de go-live en ONBOARDING-FRICTION.md. Gap crítico: Template Approvals WhatsApp (notificaciones proactivas fallarán sin templates aprobados). 7 env vars faltantes en .env.local.example. Endpoint GET /api/reports/usage creado en src/app/api/reports/usage/route.ts. type-check limpio. |
 | 2026-05-23 | S4-BOT-01 | done | Debounce buffer Redis para mensajes WhatsApp consecutivos. message-buffer.ts (nuevo): bufferAndWait() con SET NX como lock owner. route.ts: after() usa buffer, messageId ahora se pasa correctamente al engine. Orphan recovery built-in. Fail-open en Redis caído. |
 | 2026-05-23 | S4-BOT-02 | done | Historial multi-turno centralizado en handler.ts. MAX_HISTORY_TURNS=6 (12 msgs). TODO(MEDIO-2) resuelto. greeting.ts corregido (ya no sobreescribía messages con array parcial). Transiciones silenciosas y resets implícitos funcionan correctamente. type-check limpio. 2 archivos, ~20 líneas. |
+| 2026-05-23 | S4-BOT-03 | done | Rewrite completo del system prompt. Nuevo prompt con tags XML: identidad, analisis_estilo, deteccion_emocional, deteccion_flujo, reglas_negocio, idioma, formato_whatsapp, catalogo_servicios. businessType mapeado desde DB con fallback 'negocio'. Non-text Meta ahora responde por tipo (audio/image/video/sticker/document/location). Firma de buildSystemPrompt sin cambios. 3 archivos. |
 ---
 
 ## Métricas del sprint

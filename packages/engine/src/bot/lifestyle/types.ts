@@ -49,6 +49,9 @@ export type LifestyleBusinessConfig = {
   readonly address: string;
   /** IANA timezone del negocio. Ej: 'America/Mexico_City'. */
   readonly timezone: string;
+  /** Tipo de negocio (ej: 'barbería', 'salón de belleza'). Usado en el system prompt.
+   * TODO: poblar desde businesses.business_type en todos los tenants. */
+  readonly businessType?: string;
 };
 
 // ─── Catalog rows ─────────────────────────────────────────────────────────────
