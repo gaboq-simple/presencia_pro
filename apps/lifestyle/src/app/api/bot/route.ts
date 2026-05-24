@@ -24,6 +24,7 @@ import { parseTwilioPayload, buildLifestyleMessage as buildTwilioMessage } from 
 import { parseMetaPayload, buildLifestyleMessage as buildMetaMessage } from '@presenciapro/engine/bot/lifestyle/adapters/metaAdapter';
 import { maskPhone } from '@presenciapro/engine/utils';
 import { rateLimit } from '@/lib/rate-limit';
+import { bufferAndWait } from '@/lib/message-buffer';
 
 // ─── Supabase admin client ────────────────────────────────────────────────────
 
@@ -286,7 +287,43 @@ async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  after(() => processMetaMessage(normalized.phoneNumberId, normalized.customerPhone, normalized.body, normalized.customerName));
+  after(async () => {
+    // ── Debounce buffer — acumula mensajes rápidos del mismo número ───────
+    // bufferAndWait retorna null si otra instancia ya tiene el lock (esta
+    // invocación solo empujó al buffer). Retorna FlushedBuffer cuando la
+    // ventana expiró y hay mensajes para procesar (puede ser 1 o N).
+    const flushed = await bufferAndWait(
+      normalized.phoneNumberId,
+      normalized.customerPhone,
+      {
+        text:          normalized.body,
+        timestamp:     Date.now(),
+        message_id:    normalized.messageId,
+        customer_name: normalized.customerName,
+      },
+    );
+
+    if (!flushed) return; // otra instancia es el lock owner
+
+    if (flushed.count > 1) {
+      console.log(JSON.stringify({
+        ts:             new Date().toISOString(),
+        service:        'bot',
+        event:          'buffer_flushed',
+        customer_phone: maskPhone(normalized.customerPhone),
+        message_count:  flushed.count,
+        info:           `Buffered ${flushed.count} messages from ${maskPhone(normalized.customerPhone)}, processing as single block`,
+      }));
+    }
+
+    await processMetaMessage(
+      normalized.phoneNumberId,
+      normalized.customerPhone,
+      flushed.combinedText,
+      flushed.customerName,
+      flushed.lastMessageId,
+    );
+  });
 
   return NextResponse.json({ status: 'ok' });
 }
@@ -595,6 +632,7 @@ async function processMetaMessage(
   customerPhone: string,
   messageBody: string,
   customerName: string | null,
+  messageId: string | null = null,
 ): Promise<void> {
   const supabase = getServiceClient();
 
@@ -645,7 +683,7 @@ async function processMetaMessage(
     const anthropicKey = process.env['ANTHROPIC_API_KEY'] ?? '';
 
     const msg = buildMetaMessage(
-      { phoneNumberId, customerPhone, body: messageBody, customerName, messageId: null },
+      { phoneNumberId, customerPhone, body: messageBody, customerName, messageId },
       business.id,
     );
 

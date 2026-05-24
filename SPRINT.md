@@ -483,6 +483,34 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-01 — Debounce buffer para mensajes WhatsApp consecutivos 🟢 done (2026-05-23)
+**Origen:** Ad-hoc solicitado por Gabriel (fuera del sprint original)
+**Por qué:** Cuando un usuario envía 3 mensajes rápidos ("Hola" / "quiero un corte" / "para mañana"), el bot respondía 3 veces de forma encimada y caótica.
+**Archivos:**
+- `apps/lifestyle/src/lib/message-buffer.ts` (nuevo)
+- `apps/lifestyle/src/app/api/bot/route.ts` (modificado)
+**Criterios de aceptación:**
+- [x] Buffer en Redis con ventana configurable (`MESSAGE_BUFFER_WINDOW_MS`, default 2500ms)
+- [x] Key: `presenciapro:msgbuf:{phoneNumberId}:{phone}` — lista Redis, TTL 10s
+- [x] Lock: `presenciapro:msglock:{phoneNumberId}:{phone}` — SET NX, TTL = WINDOW_MS
+- [x] Primer mensaje adquiere lock, duerme la ventana, flushea buffer, concatena con '\n'
+- [x] Mensajes subsecuentes solo pushean al buffer; el lock owner los recoge
+- [x] Logging claro: `"Buffered N messages from +52XXX..., processing as single block"` (solo si N > 1)
+- [x] Sin Redis configurado (dev local): procesa directamente sin delay (fail-open)
+- [x] En error de Redis: fail-open, procesa mensaje original
+- [x] Mensajes interactive/audio/image/document: no bufferean (parseMetaPayload ya los filtra — sin cambio)
+- [x] Sin breaking changes al rate limiting, dedup, router, handlers, ni envío de respuestas
+- [x] Bonus: `messageId` ahora se pasa correctamente al engine (era `null` hardcodeado — fix colateral)
+- [x] Orphan recovery: si lock owner muere, el siguiente mensaje del usuario (dentro de 10s) adquiere el lock y procesa todos los mensajes acumulados
+- [x] type-check pasa sin errores
+**Notas de ejecución:**
+- Decisión de arquitectura: Redis SET NX como coordinador de instancias (Opción C — sin QStash, sin setTimeout crudo). El sleep vive en after() que Vercel Fluid Compute mantiene vivo.
+- Twilio handler no modificado (dev-only, no requiere buffer).
+- Tests: no implementados — respeta decisión cerrada del sprint. Validar manualmente via WhatsApp + logs de Vercel (`event: buffer_flushed`).
+- Edge case aceptado: si lock owner muere Y no llega otro mensaje en 10s, los mensajes bufferados expiran silenciosamente. El usuario reenvía.
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -551,6 +579,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-20 | S3-QA-01 | done | Fix 9 errores lint (react-hooks/refs, set-state-in-effect, purity, entities) + 3 errores TS (casts Supabase). lint y type-check pasan 0 errores. CI listo para verde. |
 | 2026-05-21 | S1-OPS-01 | done | scripts/backup-supabase.sh (dump→gzip→gpg→R2→retención 30d), scripts/restore-supabase.sh (R2→descifra→descomprime→imprime psql command), .github/workflows/backup-weekly.yml (cron domingos 3am UTC + manual), scripts/README.md, RUNBOOK.md sección 6 actualizada. PITR queda como recomendación para upgrade a Pro. |
 | 2026-05-21 | S4-OPS-01, S4-OPS-04 | done | Dry-run con dummy-barberia-test.json (--dry-run y --validate funcionan). 6 fricciones + 4 gaps de go-live en ONBOARDING-FRICTION.md. Gap crítico: Template Approvals WhatsApp (notificaciones proactivas fallarán sin templates aprobados). 7 env vars faltantes en .env.local.example. Endpoint GET /api/reports/usage creado en src/app/api/reports/usage/route.ts. type-check limpio. |
+| 2026-05-23 | S4-BOT-01 | done | Debounce buffer Redis para mensajes WhatsApp consecutivos. message-buffer.ts (nuevo): bufferAndWait() con SET NX como lock owner. route.ts: after() usa buffer, messageId ahora se pasa correctamente al engine. Orphan recovery built-in. Fail-open en Redis caído. |
 ---
 
 ## Métricas del sprint
