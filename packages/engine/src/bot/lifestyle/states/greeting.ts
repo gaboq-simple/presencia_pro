@@ -329,26 +329,13 @@ export async function handleGreeting(
 
   // ── Ensamblar resultado ────────────────────────────────────────────────────
 
-  // TODO(MEDIO-2): Historial de conversación — el array `messages` solo incluye
-  // la respuesta del bot del saludo. Para que el clasificador tenga contexto real,
-  // cada state handler debería añadir [userMsg, botResponse] al array antes de
-  // retornar newContext. Implementar en:
-  //   - states/qualifyingService.ts   (handleQualifyingService)
-  //   - states/qualifyingStaff.ts     (handleQualifyingStaff)
-  //   - states/qualifyingDatetime.ts  (handleQualifyingDatetime)
-  //   - states/presentingSlots.ts     (handleShowingSlots)
-  //   - states/confirmingAppointment.ts (handleConfirmingAppointment)
-  //   - states/awaitingConfirmation.ts  (handleAwaitingConfirmation)
-  //   - states/awaitingBookingName.ts   (handleAwaitingBookingName)
-  // Patrón sugerido en newContext de cada handler:
-  //   messages: [...(context.messages ?? []),
-  //     { role: 'user', content: msg.body },
-  //     { role: 'assistant', content: responseText }
-  //   ].slice(-6),  // limitar a 6 mensajes (3 turnos)
+  // El historial de mensajes lo gestiona handler.ts de forma centralizada después
+  // de cada dispatch: acumula [user, assistant] por turno con ventana de 6 turnos.
+  // greeting.ts no lo setea — el handler lo construye partiendo de currentContext
+  // vacío (conversación nueva o reseteada por inactividad/estado terminal).
 
   const newContext: LifestyleBotContext = {
     ...baseContext,
-    messages: [{ role: 'assistant', content: responseText }],
   };
 
   return {

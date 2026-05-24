@@ -511,6 +511,29 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-02 — Historial multi-turno en el FSM del bot 🟢 done (2026-05-23)
+**Origen:** TODO(MEDIO-2) documentado en greeting.ts:332-347
+**Por qué:** El clasificador recibía `recentHistory` casi siempre vacío o con 1 elemento. Cuando el cliente dice "el 2", el clasificador no tenía contexto de qué opciones se presentaron.
+**Archivos:**
+- `packages/engine/src/bot/lifestyle/handler.ts` (modificado)
+- `packages/engine/src/bot/lifestyle/states/greeting.ts` (modificado)
+**Criterios de aceptación:**
+- [x] Constante `MAX_HISTORY_TURNS = 6` en handler.ts (12 mensajes máx)
+- [x] Después de `dispatch()`, si `responseText` no es vacío: acumular `[...prevMessages, userMsg, botMsg].slice(-12)` en `result.newContext.messages`
+- [x] `greeting.ts` no sobrescribe `messages` con array parcial (deja la acumulación al handler)
+- [x] El reset por inactividad/estado terminal ya vacía `currentContext = {}` → `messages` se limpia implícitamente
+- [x] Transiciones silenciosas (`responseText === ''`) no generan entradas en el historial
+- [x] type-check pasa sin errores
+**Notas de ejecución:**
+- Implementación centralizada en handler.ts (~+20 líneas después del dispatch) en lugar de los 9 handlers individuales — mismo resultado, sin duplicación.
+- TODO(MEDIO-2) eliminado de greeting.ts. El campo `messages: [{ role: 'assistant', ... }]` incorrecto (que omitía el mensaje del usuario) fue reemplazado.
+- Transiciones silenciosas (responseText = '', ej. QUALIFYING_DATETIME fast-path) no generan entrada en el historial — el `if (dispatchedResult.responseText)` las filtra.
+- El buffer de debounce (S4-BOT-01) concatena mensajes con '\n' antes de llegar aquí — entra como un único turno `user`, correcto.
+- type-check: 0 errores.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-05-23)
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -580,6 +603,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-21 | S1-OPS-01 | done | scripts/backup-supabase.sh (dump→gzip→gpg→R2→retención 30d), scripts/restore-supabase.sh (R2→descifra→descomprime→imprime psql command), .github/workflows/backup-weekly.yml (cron domingos 3am UTC + manual), scripts/README.md, RUNBOOK.md sección 6 actualizada. PITR queda como recomendación para upgrade a Pro. |
 | 2026-05-21 | S4-OPS-01, S4-OPS-04 | done | Dry-run con dummy-barberia-test.json (--dry-run y --validate funcionan). 6 fricciones + 4 gaps de go-live en ONBOARDING-FRICTION.md. Gap crítico: Template Approvals WhatsApp (notificaciones proactivas fallarán sin templates aprobados). 7 env vars faltantes en .env.local.example. Endpoint GET /api/reports/usage creado en src/app/api/reports/usage/route.ts. type-check limpio. |
 | 2026-05-23 | S4-BOT-01 | done | Debounce buffer Redis para mensajes WhatsApp consecutivos. message-buffer.ts (nuevo): bufferAndWait() con SET NX como lock owner. route.ts: after() usa buffer, messageId ahora se pasa correctamente al engine. Orphan recovery built-in. Fail-open en Redis caído. |
+| 2026-05-23 | S4-BOT-02 | done | Historial multi-turno centralizado en handler.ts. MAX_HISTORY_TURNS=6 (12 msgs). TODO(MEDIO-2) resuelto. greeting.ts corregido (ya no sobreescribía messages con array parcial). Transiciones silenciosas y resets implícitos funcionan correctamente. type-check limpio. 2 archivos, ~20 líneas. |
 ---
 
 ## Métricas del sprint
