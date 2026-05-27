@@ -9,7 +9,7 @@
 // directamente sin bundling.
 
 import { createClient } from '@supabase/supabase-js';
-import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
+import { sendWaitlistOffer, type MetaConfig } from '@/lib/whatsapp-templates';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseClient = ReturnType<typeof createClient<any>>;
@@ -45,7 +45,7 @@ function formatWlTime(isoStr: string, tz: string): string {
  * Efectos:
  *   1. UPDATE waitlist SET status='notified', notified_at, expires_at (now+30min)
  *   2. INSERT scheduled_notifications type='waitlist_expiry'
- *   3. sendWhatsAppMeta al cliente — best-effort interno
+ *   3. sendWaitlistOffer (template + fallback) al cliente — best-effort interno
  *
  * No lanza — el llamador debe envolver en try/catch best-effort.
  */
@@ -128,24 +128,24 @@ export async function notifyWaitlistOnCancel(
     },
   });
 
-  // ── 3. Enviar WhatsApp — best-effort ──────────────────────────────────────
+  // ── 3. Enviar WhatsApp via template — best-effort ────────────────────────
 
   const accessToken = process.env['WHATSAPP_ACCESS_TOKEN'];
   if (!phoneNumberId || !accessToken) return;
 
-  const serviceName = entry.service?.name ?? 'tu servicio';
-  const dateStr     = formatWlDate(slotStartsAt, tz);
-  const timeStr     = formatWlTime(slotStartsAt, tz);
-  const staffLabel  = staffName ? ` con ${staffName}` : '';
+  const config: MetaConfig = { phoneNumberId, accessToken };
+  const serviceName   = entry.service?.name ?? 'tu servicio';
+  const dateStr       = formatWlDate(slotStartsAt, tz);
+  const timeStr       = formatWlTime(slotStartsAt, tz);
+  const customerName  = entry.customer.name.trim().split(/\s+/)[0] ?? entry.customer.name;
 
-  await sendWhatsAppMeta(
-    {
-      to:   entry.customer.phone,
-      body:
-        `Buenas noticias! Se libero un lugar para ${serviceName} ` +
-        `el ${dateStr} a las ${timeStr}${staffLabel}. ` +
-        `Lo tomamos? Responde SI en los proximos 30 minutos o el lugar se liberara.`,
-    },
-    { accessToken, phoneNumberId },
+  await sendWaitlistOffer(
+    config,
+    entry.customer.phone,
+    customerName,
+    serviceName,
+    dateStr,
+    timeStr,
+    staffName || 'tu barbero',
   );
 }

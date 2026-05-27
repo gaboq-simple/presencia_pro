@@ -178,6 +178,16 @@ export async function handleConfirmed(
 
   const staffLabel = staffMemberForAppt ? ` con ${staffMemberForAppt.name}` : '';
   const timeLabel  = formatTimeHumanFromDate(startsAt, business.timezone);
+  const customerFirstName = context.bookingName?.trim().split(/\s+/)[0] ?? '';
+
+  // Metadata for template-based sending in the dispatcher
+  const reminderMeta: Record<string, string> = {
+    customer_name: customerFirstName,
+    service_name:  service.name,
+    staff_name:    staffMemberForAppt?.name ?? '',
+    time_str:      timeLabel,
+    business_name: business.name,
+  };
 
   const now = Date.now();
 
@@ -188,6 +198,7 @@ export async function handleConfirmed(
     type:           string;
     scheduled_for:  string;
     message_body:   string;
+    metadata?:      Record<string, string>;
   };
 
   const remindersToInsert: NotifRow[] = [];
@@ -203,6 +214,7 @@ export async function handleConfirmed(
       message_body:
         `Hola, mañana tienes cita de ${service.name}${staffLabel}` +
         ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
+      metadata:       reminderMeta,
     });
   }
 
@@ -217,6 +229,7 @@ export async function handleConfirmed(
       message_body:
         `Hola, en 2 horas tienes cita de ${service.name}${staffLabel}` +
         ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
+      metadata:       reminderMeta,
     });
   }
 
@@ -231,6 +244,7 @@ export async function handleConfirmed(
       message_body:
         `Hola, te recordamos tu cita de ${service.name}${staffLabel}` +
         ` hoy a las ${timeLabel} en ${business.name}.`,
+      metadata:       reminderMeta,
     });
   }
 

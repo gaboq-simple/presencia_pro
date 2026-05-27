@@ -12,6 +12,11 @@ import { getDayAppointments } from '@/lib/dashboard.types';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
+import {
+  sendCancellationNotice,
+  sendRescheduleNotice,
+  type MetaConfig,
+} from '@/lib/whatsapp-templates';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -129,25 +134,28 @@ export async function cancelAppointment(
     if (customerPhone) {
       const { data: biz } = await supabase
         .from('businesses')
-        .select('timezone, whatsapp_phone_number_id')
+        .select('timezone, whatsapp_phone_number_id, name')
         .eq('id', session.business_id)
         .maybeSingle();
-      const b           = biz as { timezone: string; whatsapp_phone_number_id: string } | null;
-      const tz          = b?.timezone ?? 'America/Mexico_City';
+      const b             = biz as { timezone: string; whatsapp_phone_number_id: string; name: string } | null;
+      const tz            = b?.timezone ?? 'America/Mexico_City';
       const phoneNumberId = b?.whatsapp_phone_number_id;
       const accessToken   = process.env['WHATSAPP_ACCESS_TOKEN'];
+      const businessName  = b?.name ?? '';
 
       if (phoneNumberId && accessToken) {
+        const config: MetaConfig = { phoneNumberId, accessToken };
         const dateStr  = formatApptDate(apptRow.starts_at, tz);
         const timeStr  = formatApptTime(apptRow.starts_at, tz);
-        const greeting = customerName ? `Hola ${customerName.split(' ')[0]},` : 'Hola,';
-        const body =
-          `${greeting} tu cita del ${dateStr} a las ${timeStr} fue cancelada por la barbería. ` +
-          `Si deseas reagendar, responde a este mensaje.`;
+        const firstName = customerName ? customerName.split(' ')[0]! : '';
 
-        await sendWhatsAppMeta(
-          { to: customerPhone, body },
-          { accessToken, phoneNumberId },
+        await sendCancellationNotice(
+          config,
+          customerPhone,
+          firstName,
+          dateStr,
+          timeStr,
+          businessName,
         );
 
         const now = new Date().toISOString();
@@ -160,7 +168,6 @@ export async function cancelAppointment(
             type:           'cancellation_notice',
             scheduled_for:  now,
             sent_at:        now,
-            message_body:   body,
           });
       }
     }
@@ -403,7 +410,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
   // Verificar que la cita pertenece al negocio y obtener datos necesarios
   const { data: raw, error: fetchErr } = await supabase
     .from('appointments')
-    .select('id, business_id, staff_id, status, starts_at, customer_id, service:service_id(duration_minutes)')
+    .select('id, business_id, staff_id, status, starts_at, customer_id, service:service_id(duration_minutes, name)')
     .eq('id', input.appointmentId)
     .eq('business_id', session.business_id)
     .maybeSingle();
@@ -417,7 +424,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
     status: string;
     starts_at: string;
     customer_id: string | null;
-    service: { duration_minutes: number };
+    service: { duration_minutes: number; name: string };
   };
 
   if (!['pending', 'confirmed'].includes(appt.status)) {
@@ -488,37 +495,59 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
     }
 
     if (customerPhone) {
-      const { data: biz } = await supabase
-        .from('businesses')
-        .select('timezone, whatsapp_phone_number_id')
-        .eq('id', session.business_id)
-        .maybeSingle();
-      const b             = biz as { timezone: string; whatsapp_phone_number_id: string } | null;
+      const [bizResult, staffResult] = await Promise.all([
+        supabase
+          .from('businesses')
+          .select('timezone, whatsapp_phone_number_id, name')
+          .eq('id', session.business_id)
+          .maybeSingle(),
+        supabase
+          .from('staff')
+          .select('name')
+          .eq('id', newStaffId)
+          .maybeSingle(),
+      ]);
+      const b             = bizResult.data as { timezone: string; whatsapp_phone_number_id: string; name: string } | null;
       const tz            = b?.timezone ?? 'America/Mexico_City';
       const phoneNumberId = b?.whatsapp_phone_number_id;
       const accessToken   = process.env['WHATSAPP_ACCESS_TOKEN'];
+      const businessName  = b?.name ?? '';
+      const staffName     = (staffResult.data as { name: string } | null)?.name ?? '';
 
       if (phoneNumberId && accessToken) {
+        const config: MetaConfig = { phoneNumberId, accessToken };
         const oldDateStr = formatApptDate(appt.starts_at, tz);
         const oldTimeStr = formatApptTime(appt.starts_at, tz);
         const newDateStr = formatApptDate(newStartsAt, tz);
         const newTimeStr = formatApptTime(newStartsAt, tz);
-        const greeting   = customerName ? `Hola ${customerName.split(' ')[0]},` : 'Hola,';
-        const body =
-          `${greeting} tu cita del ${oldDateStr} a las ${oldTimeStr} fue movida al ` +
-          `${newDateStr} a las ${newTimeStr}. Si necesitas reagendar, responde a este mensaje.`;
+        const firstName  = customerName ? customerName.split(' ')[0]! : '';
 
-        await sendWhatsAppMeta(
-          { to: customerPhone, body },
-          { accessToken, phoneNumberId },
+        await sendRescheduleNotice(
+          config,
+          customerPhone,
+          firstName,
+          oldDateStr,
+          oldTimeStr,
+          newDateStr,
+          newTimeStr,
+          businessName,
         );
 
         const nowIso = new Date().toISOString();
         const nowMs  = Date.now();
         const newStart = new Date(newStartsAt);
 
-        // Log del envío
-        const rows: {
+        // Metadata for template-based sending in the dispatcher
+        const reminderMeta: Record<string, string> = {
+          customer_name: firstName,
+          service_name:  appt.service?.name ?? '',
+          staff_name:    staffName,
+          time_str:      newTimeStr,
+          business_name: businessName,
+        };
+
+        // Log del envio + nuevos reminders
+        type NotifRow = {
           business_id:    string;
           appointment_id: string;
           customer_phone: string;
@@ -526,7 +555,10 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
           scheduled_for:  string;
           sent_at?:       string;
           message_body:   string;
-        }[] = [
+          metadata?:      Record<string, string>;
+        };
+
+        const notifRows: NotifRow[] = [
           {
             business_id:    session.business_id,
             appointment_id: input.appointmentId,
@@ -534,48 +566,51 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
             type:           'reschedule_notice',
             scheduled_for:  nowIso,
             sent_at:        nowIso,
-            message_body:   body,
+            message_body:   `Hola ${firstName}, tu cita del ${oldDateStr} a las ${oldTimeStr} fue movida al ${newDateStr} a las ${newTimeStr} en ${businessName}. Si necesitas cambios, responde a este mensaje.`,
           },
         ];
 
         // Nuevos reminders para la nueva fecha (solo si quedan en el futuro)
         const at24h = new Date(newStart.getTime() - 24 * 60 * 60_000);
         if (at24h.getTime() > nowMs) {
-          rows.push({
+          notifRows.push({
             business_id:    session.business_id,
             appointment_id: input.appointmentId,
             customer_phone: customerPhone,
             type:           'reminder_24h',
             scheduled_for:  at24h.toISOString(),
-            message_body:   `Hola, mañana tienes tu cita a las ${newTimeStr}. ¡Te esperamos!`,
+            message_body:   `Hola, manana tienes tu cita a las ${newTimeStr}. Te esperamos!`,
+            metadata:       reminderMeta,
           });
         }
 
         const at2h = new Date(newStart.getTime() - 2 * 60 * 60_000);
         if (at2h.getTime() > nowMs) {
-          rows.push({
+          notifRows.push({
             business_id:    session.business_id,
             appointment_id: input.appointmentId,
             customer_phone: customerPhone,
             type:           'reminder_2h',
             scheduled_for:  at2h.toISOString(),
-            message_body:   `Hola, en 2 horas tienes tu cita a las ${newTimeStr}. ¡Te esperamos!`,
+            message_body:   `Hola, en 2 horas tienes tu cita a las ${newTimeStr}. Te esperamos!`,
+            metadata:       reminderMeta,
           });
         }
 
         const at1h = new Date(newStart.getTime() - 1 * 60 * 60_000);
         if (at1h.getTime() > nowMs) {
-          rows.push({
+          notifRows.push({
             business_id:    session.business_id,
             appointment_id: input.appointmentId,
             customer_phone: customerPhone,
             type:           'reminder_1h',
             scheduled_for:  at1h.toISOString(),
             message_body:   `Hola, te recordamos tu cita hoy a las ${newTimeStr}.`,
+            metadata:       reminderMeta,
           });
         }
 
-        await supabase.from('scheduled_notifications').insert(rows);
+        await supabase.from('scheduled_notifications').insert(notifRows);
       }
     }
   } catch {
