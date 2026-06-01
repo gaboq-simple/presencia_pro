@@ -756,6 +756,15 @@ export async function takeoverConversation(customerPhone: string): Promise<void>
   if (!session.staff_id) throw new Error('Se requiere identificación de staff para tomar control');
   const supabase = getServiceClient();
 
+  // Leer estado previo para no enviar aviso si ya estaba en modo humano
+  const { data: prevConv } = await supabase
+    .from('bot_conversations')
+    .select('session_mode')
+    .eq('business_id', session.business_id)
+    .eq('customer_phone', customerPhone)
+    .maybeSingle();
+  const prevMode = (prevConv as { session_mode: string } | null)?.session_mode;
+
   const { error } = await supabase
     .from('bot_conversations')
     .update({
@@ -767,6 +776,47 @@ export async function takeoverConversation(customerPhone: string): Promise<void>
     .eq('customer_phone', customerPhone);
 
   if (error) throw new Error(`takeoverConversation failed: ${error.message}`);
+
+  console.log(JSON.stringify({
+    ts:             new Date().toISOString(),
+    service:        'handoff',
+    event:          'handoff_entered_human_mode',
+    business_id:    session.business_id,
+    customer_phone: customerPhone,
+    trigger:        'staff_takeover',
+    staff_id:       session.staff_id,
+  }));
+
+  // Enviar aviso al cliente solo la primera vez que entra en modo humano
+  if (prevMode !== 'human') {
+    try {
+      const { data: biz } = await supabase
+        .from('businesses')
+        .select('whatsapp_phone_number_id')
+        .eq('id', session.business_id)
+        .maybeSingle();
+      const phoneNumberId = (biz as { whatsapp_phone_number_id: string } | null)?.whatsapp_phone_number_id;
+      const accessToken   = process.env['WHATSAPP_ACCESS_TOKEN'];
+      if (phoneNumberId && accessToken) {
+        const TAKEOVER_MSG = 'Un momento, te comunico con nuestro equipo.';
+        await sendWhatsAppMeta(
+          { to: customerPhone, body: TAKEOVER_MSG },
+          { accessToken, phoneNumberId },
+        );
+        await supabase
+          .from('conversation_messages')
+          .insert({
+            business_id:    session.business_id,
+            customer_phone: customerPhone,
+            direction:      'outbound',
+            body:           TAKEOVER_MSG,
+            sent_by:        'bot',
+            staff_id:       null,
+          })
+          .then(() => {/* best-effort */}, () => {/* best-effort */});
+      }
+    } catch { /* best-effort — no bloquear el takeover si falla el envío */ }
+  }
 }
 
 // ─── Handoff: devolver control al bot ────────────────────────────────────────

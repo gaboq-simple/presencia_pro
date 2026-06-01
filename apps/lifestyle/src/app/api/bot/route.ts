@@ -437,7 +437,7 @@ async function processTwilioMessage(
   if (!business) return; // ya logueado en resolveBusinessByTwilio
 
   // ── Handoff gate — verificar modo de sesión antes de pasar al FSM ─────────
-  const shouldProcess = await handoffGate(supabase, business.id, customerPhone, messageBody);
+  const shouldProcess = await handoffGate(supabase, business, customerPhone, messageBody);
   if (!shouldProcess) return;
 
   // ── 2. Procesar y enviar — fallback garantizado si falla ─────────────────
@@ -537,25 +537,28 @@ async function sendNonTextResponseMeta(phoneNumberId: string, fromPhone: string)
 // al bot automáticamente (evita que una conversación quede en limbo).
 // 'paused' no tiene auto-release — es una pausa intencional.
 
-const HANDOFF_TIMEOUT_MS = 30 * 60 * 1_000; // 30 minutos
+const HANDOFF_TIMEOUT_MINUTES = 30; // TODO: leer de businesses.handoff_timeout_minutes
+const HANDOFF_TIMEOUT_MS      = HANDOFF_TIMEOUT_MINUTES * 60 * 1_000;
+const HANDOFF_AUTO_RELEASE_MSG =
+  'Gracias por tu paciencia. Puedo seguir ayudándote — escríbeme qué necesitas y te asisto.';
 
 async function handoffGate(
   supabase: ReturnType<typeof getServiceClient>,
-  businessId: string,
+  business: LifestyleBusinessConfig,
   customerPhone: string,
   messageBody: string,
 ): Promise<boolean> {
   const { data: conv } = await supabase
     .from('bot_conversations')
-    .select('session_mode, taken_at')
-    .eq('business_id', businessId)
+    .select('id, session_mode, taken_at')
+    .eq('business_id', business.id)
     .eq('customer_phone', customerPhone)
     .maybeSingle();
 
   // Sin conversación previa o bot en control → flujo normal
   if (!conv) return true;
 
-  const row = conv as { session_mode: string; taken_at: string | null };
+  const row = conv as { id: string; session_mode: string; taken_at: string | null };
 
   if (row.session_mode === 'bot') return true;
 
@@ -563,27 +566,54 @@ async function handoffGate(
   if (row.session_mode === 'human' && row.taken_at) {
     const elapsed = Date.now() - new Date(row.taken_at).getTime();
     if (elapsed > HANDOFF_TIMEOUT_MS) {
+      const minutesInHuman = Math.round(elapsed / 60_000);
       await supabase
         .from('bot_conversations')
         .update({ session_mode: 'bot', taken_by: null, taken_at: null })
-        .eq('business_id', businessId)
+        .eq('business_id', business.id)
         .eq('customer_phone', customerPhone);
+      console.log(JSON.stringify({
+        ts:               new Date().toISOString(),
+        service:          'bot',
+        event:            'handoff_auto_released',
+        conversation_id:  row.id,
+        customer_phone:   maskPhone(customerPhone),
+        minutes_in_human: minutesInHuman,
+      }));
+      try {
+        await sendMessage({
+          to:      customerPhone,
+          message: HANDOFF_AUTO_RELEASE_MSG,
+          from:    business.whatsappPhoneNumberId,
+        });
+      } catch { /* best-effort */ }
       return true; // auto-released → FSM retoma control
     }
   }
 
   // Modo 'human' (dentro del timeout) o 'paused': interceptar y persistir
-  await supabase
+  const { data: insertedMsg } = await supabase
     .from('conversation_messages')
     .insert({
-      business_id:    businessId,
+      business_id:    business.id,
       customer_phone: customerPhone,
       direction:      'inbound',
       body:           messageBody,
       sent_by:        'customer',
       staff_id:       null,
     })
-    .then(() => {/* best-effort */}, () => {/* best-effort */});
+    .select('id')
+    .single()
+    .then((r) => r, () => ({ data: null }));
+
+  console.log(JSON.stringify({
+    ts:              new Date().toISOString(),
+    service:         'bot',
+    event:           'handoff_message_persisted',
+    conversation_id: row.id,
+    customer_phone:  maskPhone(customerPhone),
+    message_id:      (insertedMsg as { id?: string } | null)?.id ?? null,
+  }));
 
   return false; // interceptado — no pasar al FSM
 }
@@ -636,7 +666,7 @@ async function processMetaMessage(
   const business = rowToBusiness(businessData as unknown as BusinessRow);
 
   // ── Handoff gate — verificar modo de sesión antes de pasar al FSM ─────────
-  const shouldProcess = await handoffGate(supabase, business.id, customerPhone, messageBody);
+  const shouldProcess = await handoffGate(supabase, business, customerPhone, messageBody);
   if (!shouldProcess) return;
 
   // ── 2. Procesar y enviar — HUECO 2: fallback garantizado si falla ─────────
