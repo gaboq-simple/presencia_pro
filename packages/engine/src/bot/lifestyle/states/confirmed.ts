@@ -213,7 +213,7 @@ export async function handleConfirmed(
       scheduled_for:  at24h.toISOString(),
       message_body:
         `Hola, mañana tienes cita de ${service.name}${staffLabel}` +
-        ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
+        ` a las ${timeLabel} en ${business.name}. Te esperamos!`,
       metadata:       reminderMeta,
     });
   }
@@ -228,7 +228,7 @@ export async function handleConfirmed(
       scheduled_for:  at2h.toISOString(),
       message_body:
         `Hola, en 2 horas tienes cita de ${service.name}${staffLabel}` +
-        ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
+        ` a las ${timeLabel} en ${business.name}. Te esperamos!`,
       metadata:       reminderMeta,
     });
   }

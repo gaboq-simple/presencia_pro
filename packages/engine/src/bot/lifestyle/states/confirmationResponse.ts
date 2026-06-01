@@ -190,8 +190,8 @@ export async function handleConfirmationResponse(
     if (!result.feasible) {
       const isOverlap = result.reason.includes('traslape');
       const responseText = isOverlap
-        ? `Un retraso de ${delayMinutes} minutos se traslaparía con la siguiente cita de ${staffName}. ¿Quieres que te busque otro horario?`
-        : `${result.reason}. ¿Quieres reagendar tu cita para otro horario?`;
+        ? `Un retraso de ${delayMinutes} minutos se traslaparía con la siguiente cita de ${staffName}. Quieres que te busque otro horario?`
+        : `${result.reason}. Quieres reagendar tu cita para otro horario?`;
 
       return {
         newState:     'CONFIRMED',

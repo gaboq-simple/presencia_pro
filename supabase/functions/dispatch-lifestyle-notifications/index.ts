@@ -428,9 +428,19 @@ Deno.serve(async (_req) => {
     } | null;
   }>;
 
-  const summary = { dispatched: 0, failed: 0, skipped: 0 };
+  const summary = {
+    function:  'dispatch-lifestyle-notifications',
+    timestamp: new Date().toISOString(),
+    total:     0,
+    sent:      0,
+    failed:    0,
+    skipped:   0,
+    errors:    [] as string[],
+  };
 
+  try {
   for (const row of notifications) {
+    summary.total++;
     // ── Claim atomico — idempotencia ────────────────────────────────────────
     const { data: claimed } = await supabase
       .from('scheduled_notifications')
@@ -456,10 +466,12 @@ Deno.serve(async (_req) => {
             ? { whatsapp_phone_number_id: row.businesses.whatsapp_phone_number_id, name: row.businesses.name }
             : null,
         });
-        summary.dispatched++;
+        summary.sent++;
       } catch (err) {
-        console.error('[waitlist_expiry] unhandled error', err instanceof Error ? err.message : String(err));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('[waitlist_expiry] unhandled error', errMsg);
         summary.failed++;
+        if (summary.errors.length < 5) summary.errors.push(errMsg);
       }
       continue;
     }
@@ -478,6 +490,7 @@ Deno.serve(async (_req) => {
         })
         .eq('id', row.id);
       summary.failed++;
+      if (summary.errors.length < 5) summary.errors.push(`missing_phone_or_id:${row.id}`);
       console.warn('[dispatch-lifestyle-notifications] missing phone or phoneNumberId', { id: row.id });
       continue;
     }
@@ -498,7 +511,7 @@ Deno.serve(async (_req) => {
         type:        row.type,
         business_id: row.business_id,
       });
-      summary.dispatched++;
+      summary.sent++;
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -518,6 +531,7 @@ Deno.serve(async (_req) => {
         errorMessage,
       });
       summary.failed++;
+      if (summary.errors.length < 5) summary.errors.push(errorMessage);
     }
   }
 
@@ -525,4 +539,10 @@ Deno.serve(async (_req) => {
   return new Response(JSON.stringify(summary), {
     headers: { 'Content-Type': 'application/json' },
   });
+  } finally {
+    console.log(`[CRON-SUMMARY] ${JSON.stringify(summary)}`);
+    if (summary.failed > 0) {
+      console.error(`[CRON-ALERT] ${summary.function}: ${summary.failed}/${summary.total} fallos`);
+    }
+  }
 });
