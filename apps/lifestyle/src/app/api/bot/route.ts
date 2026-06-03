@@ -44,6 +44,7 @@ function getServiceClient() {
 type BusinessRow = {
   id: string;
   name: string;
+  slug: string;
   whatsapp_number: string;
   whatsapp_phone_number_id: string;
   bot_name: string;
@@ -54,12 +55,16 @@ type BusinessRow = {
   address: string;
   timezone: string;
   business_type?: string;
+  review_url?: string | null;
+  map_url?: string | null;
+  attributes?: Record<string, boolean> | null;
 };
 
 function rowToBusiness(row: BusinessRow): LifestyleBusinessConfig {
   return {
     id:                    row.id,
     name:                  row.name,
+    slug:                  row.slug,
     whatsappNumber:        row.whatsapp_number,
     whatsappPhoneNumberId: row.whatsapp_phone_number_id,
     botName:               row.bot_name,
@@ -70,13 +75,17 @@ function rowToBusiness(row: BusinessRow): LifestyleBusinessConfig {
     address:               row.address,
     timezone:              row.timezone,
     businessType:          row.business_type,
+    reviewUrl:             row.review_url ?? null,
+    mapUrl:                row.map_url ?? null,
+    attributes:            row.attributes ?? null,
   };
 }
 
 const BUSINESS_SELECT =
-  'id, name, whatsapp_number, whatsapp_phone_number_id, ' +
+  'id, name, slug, whatsapp_number, whatsapp_phone_number_id, ' +
   'bot_name, away_message, fallback_message, office_hours, ' +
-  'walk_in_buffer_minutes, address, timezone, business_type';
+  'walk_in_buffer_minutes, address, timezone, business_type, ' +
+  'review_url, map_url, attributes';
 
 const NON_TEXT_MESSAGE =
   'Por ahora solo puedo leer mensajes de texto. Escribeme lo que necesitas y con gusto te ayudo.';

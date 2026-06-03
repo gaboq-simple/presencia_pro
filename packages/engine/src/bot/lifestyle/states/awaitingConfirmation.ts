@@ -16,6 +16,7 @@ import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { classifyIntent } from '../classifier';
 import { buildSideQuestionResponse } from '../clarification';
 import { getCatalog } from '../catalog';
+import { buildBusinessContext } from '../businessContext';
 import { logBotError } from '../utils/logger';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -95,7 +96,10 @@ export async function handleAwaitingConfirmation(
 
   // ── Slow path: clasificador ───────────────────────────────────────────────
 
-  const businessContext = `Negocio: ${deps.business.name}`;
+  const catalog         = await getCatalog(deps.business.id, deps.supabase);
+  const businessContext = buildBusinessContext(deps.business, catalog, {
+    appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '',
+  });
   const recentHistory   = (context.messages ?? []).slice(-2);
 
   const classification = await classifyIntent({

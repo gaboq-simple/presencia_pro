@@ -22,6 +22,7 @@ import {
   buildSideQuestionResponse,
 } from '../clarification';
 import { buildSystemPrompt } from '../prompt';
+import { buildBusinessContext } from '../businessContext';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
@@ -73,7 +74,9 @@ export async function handleQualifyingService(
   const displayServices = servicesForClassifier.slice(0, MAX_SERVICES_PER_MESSAGE);
   const optionNames     = displayServices.map((s) => s.name);
 
-  const businessContext = buildBusinessContext(business.name, displayServices);
+  const businessContext = buildBusinessContext(business, displayServices, {
+    appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '',
+  });
   const recentHistory   = (context.messages ?? []).slice(-2);
   const attempts        = context.clarification_attempts ?? 0;
 
@@ -218,13 +221,6 @@ function buildFlowQuestion(services: ServiceRow[]): string {
   const displayServices = services.slice(0, MAX_SERVICES_PER_MESSAGE);
   const lines = buildServiceOptions(displayServices, services.length > MAX_SERVICES_PER_MESSAGE);
   return `${FLOW_QUESTION}\n\n${lines.map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
-}
-
-function buildBusinessContext(businessName: string, services: ServiceRow[]): string {
-  const list = services
-    .map((s) => `- ${s.name}: ${s.duration_minutes} min, $${formatPrice(s.price)} ${s.currency}${s.description ? `, ${s.description}` : ''}`)
-    .join('\n');
-  return `Negocio: ${businessName}\nServicios disponibles:\n${list}`;
 }
 
 /**

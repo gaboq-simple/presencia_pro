@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.scripts.json",
+  "ts-node": {
+    "transpileOnly": true,
+    "moduleTypes": {
+      "apps/lifestyle/scripts/**/*.ts": "cjs"
+    }
+  }
+}

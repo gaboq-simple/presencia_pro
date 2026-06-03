@@ -26,6 +26,8 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+// Esquemas Zod en módulo sin efectos secundarios (testeable con node:test).
+import { ConfigSchema, OfficeHoursSchema, type Config } from './onboard-schema';
 
 // ─── Env loader ───────────────────────────────────────────────────────────────
 
@@ -87,157 +89,6 @@ function parseArgs(): Flags {
     force:    args.includes('--force'),
   };
 }
-
-// ─── Zod schemas ──────────────────────────────────────────────────────────────
-
-const TimeSchema = z.string().regex(/^\d{2}:\d{2}$/, 'Formato HH:MM requerido');
-
-// F-05: Validación IANA timezone
-function isValidIANATimezone(tz: string): boolean {
-  try {
-    Intl.DateTimeFormat(undefined, { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const DayHoursOpenCloseSchema = z.object({
-  open:  TimeSchema,
-  close: TimeSchema,
-});
-
-const OfficeHoursSchema = z.object({
-  mon: DayHoursOpenCloseSchema.nullable().optional(),
-  tue: DayHoursOpenCloseSchema.nullable().optional(),
-  wed: DayHoursOpenCloseSchema.nullable().optional(),
-  thu: DayHoursOpenCloseSchema.nullable().optional(),
-  fri: DayHoursOpenCloseSchema.nullable().optional(),
-  sat: DayHoursOpenCloseSchema.nullable().optional(),
-  sun: DayHoursOpenCloseSchema.nullable().optional(),
-});
-
-const DayAvailabilitySchema = z.object({
-  start:       TimeSchema,
-  end:         TimeSchema,
-  break_start: TimeSchema.optional(),  // F-03
-  break_end:   TimeSchema.optional(),  // F-03
-});
-
-const StaffAvailabilityMapSchema = z.object({
-  mon: DayAvailabilitySchema.nullable().optional(),
-  tue: DayAvailabilitySchema.nullable().optional(),
-  wed: DayAvailabilitySchema.nullable().optional(),
-  thu: DayAvailabilitySchema.nullable().optional(),
-  fri: DayAvailabilitySchema.nullable().optional(),
-  sat: DayAvailabilitySchema.nullable().optional(),
-  sun: DayAvailabilitySchema.nullable().optional(),
-});
-
-const BusinessSchema = z.object({
-  name:                      z.string().min(1, 'name requerido'),
-  slug:                      z.string().min(1).regex(/^[a-z0-9-]+$/, 'Slug: solo minúsculas, números y guiones'),
-  business_type:             z.string().min(1, 'business_type requerido'),
-  description:               z.string().nullable().optional(),
-  tagline:                   z.string().nullable().optional(),
-  address:                   z.string().min(1, 'address requerido'),
-  timezone:                  z.string().min(1, 'timezone requerido').refine(
-    isValidIANATimezone,
-    { message: 'Timezone IANA inválida. Ejemplo válido: America/Mexico_City' },
-  ),  // F-05
-  palette:                   z.enum(['obsidian', 'humo', 'cuero', 'bronce', 'blanco', 'arena']).optional().default('arena'),
-  walk_in_buffer_minutes:    z.number().int().min(0).optional().default(15),
-  // F-04: campos operativos configurables
-  max_late_minutes:          z.number().int().min(0).max(30).optional().default(15),
-  auto_cancel_after_minutes: z.number().int().positive().optional().default(20),
-  max_noshows_before_flag:   z.number().int().positive().optional().default(3),
-  office_hours:              OfficeHoursSchema.optional(),
-  social: z.object({
-    instagram_url: z.string().url().nullable().optional(),
-    tiktok_url:    z.string().url().nullable().optional(),
-  }).optional(),
-});
-
-const BotSchema = z.object({
-  assistant_name:    z.string().min(1, 'assistant_name requerido'),
-  greeting:          z.string().min(1, 'greeting requerido'),
-  fallback_message:  z.string().min(1, 'fallback_message requerido'),
-  away_message:      z.string().min(1, 'away_message requerido'),
-  followup_message:  z.string().optional(),
-  whatsapp_message:  z.string().nullable().optional(),
-});
-
-const StaffMemberSchema = z.object({
-  name:         z.string().min(1, 'name del staff requerido'),
-  role:         z.enum(['admin', 'barber', 'assistant']),
-  phone:        z.string().nullable().optional(),        // F-06: opcional en config
-  whatsapp_id:  z.string().nullable().optional(),        // F-06: opcional en config
-  photo_url:    z.string().url().nullable().optional(),
-  availability: StaffAvailabilityMapSchema.optional(),
-  services:     z.array(z.string().min(1)).optional().default([]),
-});
-
-const ServiceSchema = z.object({
-  id:               z.string().min(1, 'id del servicio requerido'),
-  name:             z.string().min(1, 'name del servicio requerido'),
-  description:      z.string().nullable().optional(),
-  price:            z.number().min(0, 'price >= 0'),
-  currency:         z.string().default('MXN'),
-  duration_minutes: z.number().int().positive('duration_minutes > 0'),
-});
-
-const WhatsappSchema = z.object({
-  _comment:        z.string().optional(),
-  number_model:    z.enum(['own', 'provided']),
-  phone_number:    z.string().nullable().optional(),
-  business_profile: z.object({
-    display_name:       z.string().optional(),
-    category:           z.string().optional(),
-    description_short:  z.string().optional(),
-    email:              z.string().email().optional(),
-    logo_url:           z.string().url().nullable().optional(),
-  }).optional(),
-  verification: z.object({
-    legal_name:      z.string().optional(),
-    rfc:             z.string().optional(),
-    fiscal_address:  z.string().optional(),
-    owner_name:      z.string().optional(),
-    owner_email:     z.string().email().optional(),
-    owner_phone:     z.string().optional(),
-  }).optional(),
-});
-
-const OwnerContactSchema = z.object({
-  _comment: z.string().optional(),
-  name:     z.string().min(1),
-  phone:    z.string().min(1),
-  email:    z.string().email(),
-});
-
-const OrganizationSchema = z.object({
-  name:        z.string().min(1, 'name de organizacion requerido'),
-  slug:        z.string().min(1).regex(/^[a-z0-9-]+$/, 'Slug de org: solo minusculas, numeros y guiones'),
-  owner_name:  z.string().optional(),
-  owner_email: z.string().email().optional(),
-  owner_phone: z.string().optional(),
-});
-
-const ConfigSchema = z.object({
-  _meta: z.object({
-    version:    z.string().optional(),
-    created_by: z.string().optional(),
-    created_at: z.string().optional(),
-  }).optional(),
-  organization:  OrganizationSchema.optional(),
-  business:      BusinessSchema,
-  bot:           BotSchema,
-  staff:         z.array(StaffMemberSchema).min(1, 'Se requiere al menos 1 miembro del staff'),
-  services:      z.array(ServiceSchema).min(1, 'Se requiere al menos 1 servicio'),
-  whatsapp:      WhatsappSchema.optional(),
-  owner_contact: OwnerContactSchema.optional(),
-});
-
-type Config = z.infer<typeof ConfigSchema>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -529,6 +380,10 @@ async function insertAll(
     auto_cancel_after_minutes: config.business.auto_cancel_after_minutes,
     max_noshows_before_flag:   config.business.max_noshows_before_flag,
     office_hours:              officeHours,
+    // S4-BOT-04: datos cableados al bot (todos opcionales en config)
+    review_url:                config.business.review_url ?? null,
+    map_url:                   config.business.map_url ?? null,
+    attributes:                config.business.attributes ?? {},
     instagram_url:             config.business.social?.instagram_url ?? null,
     tiktok_url:                config.business.social?.tiktok_url ?? null,
     bot_name:                  config.bot.assistant_name,
@@ -606,6 +461,10 @@ async function insertAll(
         name:             svc.name,
         description:      svc.description ?? null,
         price:            svc.price,
+        // S4-BOT-04: rango opcional. Si null, `price` es el exacto.
+        price_min:        svc.price_min ?? null,
+        price_max:        svc.price_max ?? null,
+        price_note:       svc.price_note ?? null,
         currency:         svc.currency,
         duration_minutes: svc.duration_minutes,
         active:           true,

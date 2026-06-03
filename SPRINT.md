@@ -554,6 +554,41 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-04 — Business context wiring 🟢 done (2026-06-03)
+**Origen:** Solicitado por Gabriel (2026-06-03). Acordado agregar al sprint como tarea nueva (Opción 1).
+**Por qué:** El classifier ya detecta side-questions (precio, horarios, ubicación, duración) como `SIDE_QUESTION + topic`, pero la respuesta se genera desde texto hardcodeado ("negocio de bienestar y estética") que NO inyecta los datos reales del negocio. Los datos ya existen en el schema (`services.price/duration`, `businesses.address/office_hours`, `businesses.review_url`). El gap es de CABLEADO, no de schema. El minisite `/[slug]` siempre existe como link [DERIVA].
+**Alcance ESTRICTO:** No tocar FSM, debounce, ni lógica de agendamiento. Solo cablear datos reales del negocio a las respuestas de side-questions + migraciones additive-only + onboarding retrocompatible + tests con `node:test`.
+**Archivos (previstos):**
+- Migraciones additive-only en `apps/lifestyle/supabase/migrations/` (039+)
+- `apps/lifestyle/scripts/onboard-business.ts` (schemas opcionales, retrocompatible)
+- `packages/engine/src/bot/lifestyle/` (función pura `buildBusinessContext` + integración en prompt/side-question)
+- Tests `node:test` (sin red, sin Supabase, sin Anthropic)
+**Criterios de aceptación:**
+- [x] Migraciones additive-only (ADD COLUMN nullable/default): `services.price_min/price_max/price_note` (039), `businesses.attributes JSONB` (040), `businesses.map_url` (041). `website` OMITIDA (sin valor de negocio aún — ver "Fuera de alcance")
+- [x] `onboard-business.ts` captura `review_url`, `price_min/max/note`, `attributes`, `map_url` (todos opcionales; configs viejos siguen validando — test de retrocompat verde)
+- [x] `buildBusinessContext(business, services, opts)` pura, determinista, testeable sin red: horarios, dirección+map_url, catálogo con precio (rango/exacto) y duración, review_url, link minisite. `appUrl` se pasa por parámetro (no lee env adentro)
+- [x] Reemplazo del hardcode "negocio de bienestar y estética" por contexto construido en `prompt.ts`; usa `business_type` real
+- [x] Topic del side-question cableado al dato correcto (`answerSideQuestion`); topic=other o dato ausente → [DERIVA] con link minisite (o derivación al equipo si no hay slug/appUrl)
+- [x] Formato natural de precios ("desde $X", "$X a $Y", "$X" exacto, nota como sufijo, "precio a consultar")
+- [x] Tests `node:test` (24 casos) cubren buildBusinessContext, formato precios, fallback [DERIVA], retrocompat onboarding schema. `npm test` desde la raíz
+- [x] Test anti-regresión: prompt construido para fixture CONTIENE precio, horario, review_url, link minisite y business_type; verifica que el hardcode quedó eliminado
+- [x] type-check/lint limpios; rama `feat/business-context-wiring`; sin merge a main
+**Notas de ejecución (2026-06-03):**
+- Migraciones 039/040/041 creadas (solo .sql, NO aplicadas a prod). `price` se conserva como exacto/fallback; semántica del rango documentada en el SQL de 039.
+- Núcleo en `packages/engine/src/bot/lifestyle/businessContext.ts` (módulo puro, solo imports de tipos → seguro de importar en tests sin arrastrar SDKs). `prompt.ts` reescrito para inyectarlo.
+- Classifier enriquecido con `buildBusinessContext` en `qualifyingService.ts`, `awaitingConfirmation.ts` y `confirmationResponse.ts` (catálogo vía `getCatalog`, que está cacheado). `router.ts` usa `answerSideQuestion('other', …)` como fallback [DERIVA].
+- `route.ts`, `types.ts`, `catalog.ts` ampliados con `slug/review_url/map_url/attributes` y `price_min/max/note`.
+- Schemas Zod extraídos a `apps/lifestyle/scripts/onboard-schema.ts` (sin efectos secundarios) para testear retrocompat sin disparar `main()`.
+- Runner de tests: `node --test` + `ts-node/register` con `tsconfig.test.json` (override `moduleTypes` a cjs para `apps/lifestyle/scripts/**` porque ese paquete es `type: module` y el harness de `node --test` choca con el loader ESM en Node 20.20).
+- **Fuera de alcance / sugerencias (NO implementado):**
+  1. `businesses.website`: migración omitida; sin dato de negocio aún. El link al minisite cubre el caso [DERIVA]. Proponer cuando exista necesidad real.
+  2. `qualifyingStaff.ts` y `qualifyingDatetime.ts` siguen pasando `Negocio: {name}` al classifier (no enriquecidos) para limitar el blast radius. Bajo impacto: en esos estados el side-question es menos frecuente. Candidato a unificar después.
+  3. `prompt.ts` es la versión markdown previa, NO el "System Prompt v2" con tags XML mencionado en S4-BOT-03. Posible reescritura perdida sin tests que la protegieran — el test anti-regresión ahora cubre el cableado de datos, pero no la estructura v2. Revisar si v2 debe restaurarse (tarea aparte).
+  4. Routing de cancelar/reagendar fuera de flujo y tono/idioma del classifier quedan para Módulo 2 (no tocados).
+**Prompt:** Ad-hoc/módulo solicitado por Gabriel (2026-06-03)
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -625,6 +660,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-23 | S4-BOT-01 | done | Debounce buffer Redis para mensajes WhatsApp consecutivos. message-buffer.ts (nuevo): bufferAndWait() con SET NX como lock owner. route.ts: after() usa buffer, messageId ahora se pasa correctamente al engine. Orphan recovery built-in. Fail-open en Redis caído. |
 | 2026-05-23 | S4-BOT-02 | done | Historial multi-turno centralizado en handler.ts. MAX_HISTORY_TURNS=6 (12 msgs). TODO(MEDIO-2) resuelto. greeting.ts corregido (ya no sobreescribía messages con array parcial). Transiciones silenciosas y resets implícitos funcionan correctamente. type-check limpio. 2 archivos, ~20 líneas. |
 | 2026-05-23 | S4-BOT-03 | done | Rewrite completo del system prompt. Nuevo prompt con tags XML: identidad, analisis_estilo, deteccion_emocional, deteccion_flujo, reglas_negocio, idioma, formato_whatsapp, catalogo_servicios. businessType mapeado desde DB con fallback 'negocio'. Non-text Meta ahora responde por tipo (audio/image/video/sticker/document/location). Firma de buildSystemPrompt sin cambios. 3 archivos. |
+| 2026-06-03 | S4-BOT-04 | done | Cableado de datos reales del negocio al bot. businessContext.ts (módulo puro) + prompt.ts inyecta contexto real (reemplaza hardcode "bienestar y estética"). answerSideQuestion por topic con fallback [DERIVA]→minisite. Classifier enriquecido en qualifyingService/awaitingConfirmation/confirmationResponse. Migraciones 039/040/041 (no aplicadas). onboard-business retrocompatible + schemas extraídos a onboard-schema.ts. 24 tests node:test (`npm test`) verdes; type-check/lint limpios. Rama feat/business-context-wiring (sin merge). Observación: prompt.ts es markdown, NO el "System Prompt v2" XML de S4-BOT-03 → posible rewrite perdido. |
 ---
 
 ## Métricas del sprint
