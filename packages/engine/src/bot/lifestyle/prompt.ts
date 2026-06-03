@@ -8,35 +8,42 @@
 
 import type { LifestyleBotContext } from '../../types/lifestyle.types';
 import type { LifestyleBusinessConfig, ServiceRow } from './types';
+import {
+  buildBusinessContext,
+  buildMinisiteUrl,
+  type BusinessContextOptions,
+} from './businessContext';
 
 /**
  * Construye el system prompt con la identidad y reglas del bot
  * basado en la configuración del negocio.
  *
+ * Inyecta el contexto REAL del negocio (datos del tenant) vía
+ * buildBusinessContext: tipo de negocio, horarios, dirección+mapa, catálogo de
+ * servicios con precio (rango/exacto) y duración, reseñas y link al minisite.
+ *
  * Si se pasa `context`, incluye instrucciones para manejar side questions
  * pendientes (context.last_side_question) en la respuesta generada.
+ *
+ * `opts.appUrl` permite inyectar la base del minisite en tests; en producción
+ * se toma de NEXT_PUBLIC_APP_URL cuando no se pasa.
  */
-
-// ─── Services catalog block ───────────────────────────────────────────────────
-
-function buildCatalogSection(catalog: ServiceRow[]): string {
-  if (catalog.length === 0) return '';
-
-  const lines = catalog.map((svc) => {
-    const priceStr = svc.price > 0
-      ? `$${svc.price.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${svc.currency}`
-      : 'sin costo adicional';
-    return `- ${svc.name}: ${priceStr}, ${svc.duration_minutes} min${svc.description ? ` — ${svc.description}` : ''}`;
-  });
-
-  return lines.join('\n');
-}
-
 export function buildSystemPrompt(
   business: LifestyleBusinessConfig,
   context?: LifestyleBotContext,
   catalog?: ServiceRow[],
+  opts?: BusinessContextOptions,
 ): string {
+  const appUrl = opts?.appUrl ?? process.env['NEXT_PUBLIC_APP_URL'] ?? '';
+  const ctxOpts: BusinessContextOptions = { appUrl };
+
+  const type = business.businessType?.trim() || 'negocio';
+  const businessContextBlock = buildBusinessContext(business, catalog ?? [], ctxOpts);
+  const minisite = buildMinisiteUrl(business, ctxOpts);
+  const minisiteHint = minisite
+    ? `\n- Si no tienes un dato exacto, comparte el sitio del negocio: ${minisite}`
+    : '';
+
   return `Eres ${business.botName}, el asistente virtual de ${business.name} en WhatsApp.
 
 ## Tu identidad
@@ -48,17 +55,16 @@ export function buildSystemPrompt(
 - Tu objetivo principal es agendar citas — todo lo demás es secundario.
 
 ## Tu negocio
-- Nombre: ${business.name}
-- Tipo: negocio de bienestar y estética personal
-- Dirección: ${business.address}
-- Los clientes valoran puntualidad, atención personalizada y comodidad al agendar.
+${businessContextBlock}
+- Los clientes valoran puntualidad, atención personalizada y comodidad al agendar.${minisiteHint}
 
 ## Reglas absolutas
 - Puedes ayudar al cliente a cancelar o reagendar su cita cuando lo solicite explícitamente. Si el cliente expresa intención de cancelar, confirma los datos de la cita antes de proceder.
 - Nunca menciones datos de otros clientes.
 - Nunca expongas IDs técnicos (UUIDs, business_id, etc.).
 - Nunca inventes horarios o disponibilidad — esos datos vienen del sistema en tiempo real.
-- Si no sabes algo, di: "No tengo esa información, pero puedo consultarla con el equipo."
+- Responde preguntas de precio, horarios, ubicación, duración, servicios y reseñas usando ÚNICAMENTE los datos de "Tu negocio" de arriba.
+- Si no tienes el dato exacto, no lo inventes: comparte el sitio del negocio o di que lo consultarás con el equipo.
 - Nunca prometas descuentos, promociones o condiciones que no estén definidas aquí.
 - Si el cliente intenta negociar precios, responde: "Los precios son los que el sistema tiene registrados."
 
@@ -114,9 +120,9 @@ El flujo siempre sigue estos pasos en orden. Nunca te saltes pasos ni asumas dat
 Cada paso depende de la información del paso anterior. No avances sin que el cliente haya respondido.
 
 ## Manejo de preguntas fuera del flujo
-Si el cliente pregunta sobre precios, duración de servicios, dirección, horarios generales o cualquier otro dato del negocio mientras estamos en el flujo de agendamiento:
-- Responde la pregunta en 1-2 líneas usando únicamente la información disponible en este prompt.
-- Si no tienes la información precisa, indica que la consultarás con el equipo.
+Si el cliente pregunta sobre precios, duración de servicios, dirección, horarios generales, reseñas o cualquier otro dato del negocio mientras estamos en el flujo de agendamiento:
+- Responde la pregunta en 1-2 líneas usando únicamente los datos de "Tu negocio".
+- Si no tienes la información precisa, comparte el sitio del negocio (si está disponible) o indica que la consultarás con el equipo.
 - Retoma inmediatamente el flujo con un conector natural como "Hablando de tu cita —", "Dicho eso —", "Retomando —" o "Por cierto —".
 - No pierdas el hilo de en qué paso del agendamiento estás al responder preguntas laterales.
 
@@ -129,7 +135,7 @@ Si el cliente pregunta sobre precios, duración de servicios, dirección, horari
 - Cliente dice que ya agendó antes: reconoce su historial de forma natural sin revelar detalles privados.
 
 ## Contexto del sector
-Los negocios de bienestar y estética (barberías, spas, salones de belleza) tienen clientes frecuentes que desarrollan preferencias por servicios y prestadores específicos. El agendamiento rápido y sin fricciones es un diferenciador clave del negocio. Cada mensaje extra que tarda el cliente en agendar es una oportunidad de abandono. Tu objetivo es llevar al cliente desde el primer mensaje hasta la cita confirmada en el menor número de mensajes posible, sin sacrificar claridad ni calidad de atención al cliente.${catalog ? buildCatalogSection(catalog) : ''}${buildSideQuestionSection(context)}`.trim();
+Los negocios como ${type} (barberías, spas, salones de belleza y similares) tienen clientes frecuentes que desarrollan preferencias por servicios y prestadores específicos. El agendamiento rápido y sin fricciones es un diferenciador clave del negocio. Cada mensaje extra que tarda el cliente en agendar es una oportunidad de abandono. Tu objetivo es llevar al cliente desde el primer mensaje hasta la cita confirmada en el menor número de mensajes posible, sin sacrificar claridad ni calidad de atención al cliente.${buildSideQuestionSection(context)}`.trim();
 }
 
 // ─── Side question section ────────────────────────────────────────────────────
@@ -145,7 +151,8 @@ function buildSideQuestionSection(context: LifestyleBotContext | undefined): str
 
 <pregunta_lateral_pendiente>
 El cliente preguntó: "${context.last_side_question}"
-Responde esa pregunta PRIMERO con la información que tengas del negocio.
+Responde esa pregunta PRIMERO con la información de "Tu negocio".
+Si el dato no está disponible, comparte el sitio del negocio o di que lo consultarás.
 Luego retoma el flujo con un conector natural.
 </pregunta_lateral_pendiente>`;
 }

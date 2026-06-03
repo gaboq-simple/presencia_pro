@@ -15,6 +15,8 @@ import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { sendWhatsAppMeta }         from '../../../notifications/whatsapp';
 import { notifyWaitlist }           from '../scheduling';
 import { classifyIntent }           from '../classifier';
+import { getCatalog }               from '../catalog';
+import { buildBusinessContext }     from '../businessContext';
 import { formatTimeHumanFromDate }  from '../utils';
 import type {
   LifestyleIncomingMessage,
@@ -258,7 +260,10 @@ export async function handleConfirmationResponse(
   // Si el clasificador no tiene alta confianza → return null al router normal.
 
   if (!isNegative && !isPositive) {
-    const businessContext = `Negocio: ${business.name}`;
+    const catalog         = await getCatalog(business.id, supabase);
+    const businessContext = buildBusinessContext(business, catalog, {
+      appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '',
+    });
     const recentHistory   = (context.messages ?? []).slice(-2);
 
     const classification = await classifyIntent({

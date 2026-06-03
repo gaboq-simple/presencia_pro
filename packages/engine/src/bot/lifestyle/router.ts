@@ -25,6 +25,7 @@ import { handleQualifyingStaff }       from './states/qualifyingStaff';
 import { handleShowingSlots }          from './states/presentingSlots';
 import { getCatalog }                  from './catalog';
 import { buildSystemPrompt }           from './prompt';
+import { answerSideQuestion as buildDerivaAnswer } from './businessContext';
 import { formatTimeHumanFromDate }     from './utils';
 import type { LifestyleIncomingMessage, ServiceRow, StateHandlerDeps, StateHandlerResult } from './types';
 
@@ -274,7 +275,11 @@ async function answerSideQuestion(
   catalog:  ServiceRow[],
   deps:     StateHandlerDeps,
 ): Promise<string> {
-  const fallback = 'No tengo esa informacion, pero puedes consultarla directamente con el negocio.';
+  // Fallback determinista [DERIVA]: comparte el link al minisite si existe,
+  // o deriva al equipo. Cubre topic=other y datos ausentes sin inventar info.
+  const fallback = buildDerivaAnswer('other', deps.business, catalog, {
+    appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '',
+  });
   try {
     const client = new Anthropic({ apiKey: deps.anthropicKey });
     const system = buildSystemPrompt(deps.business, context, catalog);

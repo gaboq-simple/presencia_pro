@@ -52,6 +52,14 @@ export type LifestyleBusinessConfig = {
   /** Tipo de negocio (ej: 'barbería', 'salón de belleza'). Usado en el system prompt.
    * TODO: poblar desde businesses.business_type en todos los tenants. */
   readonly businessType?: string;
+  /** slug del minisite (/[slug]). Usado para construir el link [DERIVA]. */
+  readonly slug?: string;
+  /** URL de reseñas (Google Reviews u otra). NULL/undefined si no configurado. */
+  readonly reviewUrl?: string | null;
+  /** Link de mapa (Google/Apple Maps) para ubicación. NULL/undefined si no configurado. */
+  readonly mapUrl?: string | null;
+  /** Amenities/banderas del negocio (pays_card, parking, kids_friendly, …). Default {}. */
+  readonly attributes?: Record<string, boolean> | null;
 };
 
 // ─── Catalog rows ─────────────────────────────────────────────────────────────
@@ -63,6 +71,12 @@ export type ServiceRow = {
   readonly duration_minutes: number;
   readonly price: number;
   readonly currency: string;
+  /** Precio mínimo aproximado (migración 039). NULL = usar `price` exacto. */
+  readonly price_min?: number | null;
+  /** Precio máximo del rango (migración 039). Requiere price_min. */
+  readonly price_max?: number | null;
+  /** Nota libre del precio ("aprox", "según largo", …) (migración 039). */
+  readonly price_note?: string | null;
 };
 
 export type StaffRow = {

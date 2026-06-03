@@ -39,7 +39,7 @@ export async function getCatalog(
 
   const { data, error } = await supabase
     .from('services')
-    .select('id, name, description, duration_minutes, price, currency')
+    .select('id, name, description, duration_minutes, price, currency, price_min, price_max, price_note')
     .eq('business_id', businessId)
     .eq('active', true)
     .order('name');
