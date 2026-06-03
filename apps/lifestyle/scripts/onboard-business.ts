@@ -92,6 +92,16 @@ function parseArgs(): Flags {
 
 const TimeSchema = z.string().regex(/^\d{2}:\d{2}$/, 'Formato HH:MM requerido');
 
+// F-05: Validación IANA timezone
+function isValidIANATimezone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const DayHoursOpenCloseSchema = z.object({
   open:  TimeSchema,
   close: TimeSchema,
@@ -108,8 +118,10 @@ const OfficeHoursSchema = z.object({
 });
 
 const DayAvailabilitySchema = z.object({
-  start: TimeSchema,
-  end:   TimeSchema,
+  start:       TimeSchema,
+  end:         TimeSchema,
+  break_start: TimeSchema.optional(),  // F-03
+  break_end:   TimeSchema.optional(),  // F-03
 });
 
 const StaffAvailabilityMapSchema = z.object({
@@ -123,16 +135,23 @@ const StaffAvailabilityMapSchema = z.object({
 });
 
 const BusinessSchema = z.object({
-  name:                   z.string().min(1, 'name requerido'),
-  slug:                   z.string().min(1).regex(/^[a-z0-9-]+$/, 'Slug: solo minúsculas, números y guiones'),
-  business_type:          z.string().min(1, 'business_type requerido'),
-  description:            z.string().nullable().optional(),
-  tagline:                z.string().nullable().optional(),
-  address:                z.string().min(1, 'address requerido'),
-  timezone:               z.string().min(1, 'timezone requerido'),
-  palette:                z.enum(['obsidian', 'humo', 'cuero', 'bronce', 'blanco', 'arena']).optional().default('arena'),
-  walk_in_buffer_minutes: z.number().int().min(0).optional().default(15),
-  office_hours:           OfficeHoursSchema.optional(),
+  name:                      z.string().min(1, 'name requerido'),
+  slug:                      z.string().min(1).regex(/^[a-z0-9-]+$/, 'Slug: solo minúsculas, números y guiones'),
+  business_type:             z.string().min(1, 'business_type requerido'),
+  description:               z.string().nullable().optional(),
+  tagline:                   z.string().nullable().optional(),
+  address:                   z.string().min(1, 'address requerido'),
+  timezone:                  z.string().min(1, 'timezone requerido').refine(
+    isValidIANATimezone,
+    { message: 'Timezone IANA inválida. Ejemplo válido: America/Mexico_City' },
+  ),  // F-05
+  palette:                   z.enum(['obsidian', 'humo', 'cuero', 'bronce', 'blanco', 'arena']).optional().default('arena'),
+  walk_in_buffer_minutes:    z.number().int().min(0).optional().default(15),
+  // F-04: campos operativos configurables
+  max_late_minutes:          z.number().int().min(0).max(30).optional().default(15),
+  auto_cancel_after_minutes: z.number().int().positive().optional().default(20),
+  max_noshows_before_flag:   z.number().int().positive().optional().default(3),
+  office_hours:              OfficeHoursSchema.optional(),
   social: z.object({
     instagram_url: z.string().url().nullable().optional(),
     tiktok_url:    z.string().url().nullable().optional(),
@@ -151,6 +170,8 @@ const BotSchema = z.object({
 const StaffMemberSchema = z.object({
   name:         z.string().min(1, 'name del staff requerido'),
   role:         z.enum(['admin', 'barber', 'assistant']),
+  phone:        z.string().nullable().optional(),        // F-06: opcional en config
+  whatsapp_id:  z.string().nullable().optional(),        // F-06: opcional en config
   photo_url:    z.string().url().nullable().optional(),
   availability: StaffAvailabilityMapSchema.optional(),
   services:     z.array(z.string().min(1)).optional().default([]),
@@ -348,7 +369,10 @@ function printDryRun(config: Config, accessToken: string, assistantToken: string
     if (!member.availability) continue;
     for (const [day, hours] of Object.entries(member.availability)) {
       if (!hours) continue;
-      console.log(`  ${member.name} — ${day} (${DAY_NUM[day]}): ${hours.start}–${hours.end}`);
+      const breakStr = hours.break_start && hours.break_end
+        ? `  [descanso ${hours.break_start}–${hours.break_end}]`
+        : '';
+      console.log(`  ${member.name} — ${day} (${DAY_NUM[day]}): ${hours.start}–${hours.end}${breakStr}`);
     }
   }
 
@@ -491,33 +515,37 @@ async function insertAll(
   const hasOnboardingData = Object.keys(onboardingData).length > 0;
 
   const businessRow = {
-    name:                    config.business.name,
-    slug:                    config.business.slug,
-    business_type:           config.business.business_type,
-    description:             config.business.description ?? null,
-    tagline:                 config.business.tagline ?? null,
-    address:                 config.business.address,
-    timezone:                config.business.timezone,
-    palette:                 config.business.palette,
-    walk_in_buffer_minutes:  config.business.walk_in_buffer_minutes,
-    office_hours:            officeHours,
-    instagram_url:           config.business.social?.instagram_url ?? null,
-    tiktok_url:              config.business.social?.tiktok_url ?? null,
-    bot_name:                config.bot.assistant_name,
-    fallback_message:        config.bot.fallback_message,
-    away_message:            config.bot.away_message,
-    whatsapp_message:        config.bot.whatsapp_message ?? null,
+    name:                      config.business.name,
+    slug:                      config.business.slug,
+    business_type:             config.business.business_type,
+    description:               config.business.description ?? null,
+    tagline:                   config.business.tagline ?? null,
+    address:                   config.business.address,
+    timezone:                  config.business.timezone,
+    palette:                   config.business.palette,
+    walk_in_buffer_minutes:    config.business.walk_in_buffer_minutes,
+    // F-04: campos operativos configurables
+    max_late_minutes:          config.business.max_late_minutes,
+    auto_cancel_after_minutes: config.business.auto_cancel_after_minutes,
+    max_noshows_before_flag:   config.business.max_noshows_before_flag,
+    office_hours:              officeHours,
+    instagram_url:             config.business.social?.instagram_url ?? null,
+    tiktok_url:                config.business.social?.tiktok_url ?? null,
+    bot_name:                  config.bot.assistant_name,
+    fallback_message:          config.bot.fallback_message,
+    away_message:              config.bot.away_message,
+    whatsapp_message:          config.bot.whatsapp_message ?? null,
     // Placeholders Fase 1 — se actualizan al conectar WhatsApp
-    whatsapp_number:          '',
-    whatsapp_phone_number_id: '',
+    whatsapp_number:           '',
+    whatsapp_phone_number_id:  '',
     // Tokens de acceso generados
-    access_token:             accessToken,
-    assistant_token:          assistantToken,
+    access_token:              accessToken,
+    assistant_token:           assistantToken,
     // Multi-sucursal: FK a organizations (null si standalone)
-    organization_id:          organization?.id ?? null,
+    organization_id:           organization?.id ?? null,
     // Datos Fase 2
-    onboarding_data:          hasOnboardingData ? onboardingData : null,
-    active:                   true,
+    onboarding_data:           hasOnboardingData ? onboardingData : null,
+    active:                    true,
   };
 
   let businessId: string;
@@ -601,6 +629,11 @@ async function insertAll(
     const member = config.staff[i]!;
     const pin    = pins[i]!;
 
+    // F-06: advertir si staff no tiene teléfono/whatsapp_id
+    if (!member.phone) {
+      console.warn(`  ⚠️  Staff '${member.name}' sin teléfono/WhatsApp — no recibirá notificaciones del sistema.`);
+    }
+
     const { data, error } = await supabase
       .from('staff')
       .insert({
@@ -609,9 +642,8 @@ async function insertAll(
         role:        member.role,
         photo_url:   member.photo_url ?? null,
         pin,
-        // Placeholders — no hay phone/whatsapp_id en Fase 1
-        phone:       '',
-        whatsapp_id: '',
+        phone:       member.phone ?? '',
+        whatsapp_id: member.whatsapp_id ?? '',
         active:      true,
       })
       .select('id')
@@ -640,6 +672,9 @@ async function insertAll(
             day_of_week: dayOfWeek,
             start_time:  hours.start,
             end_time:    hours.end,
+            // F-03: soporte de descanso
+            break_start: hours.break_start ?? null,
+            break_end:   hours.break_end ?? null,
           });
 
         if (availError) {
@@ -676,7 +711,7 @@ async function insertAll(
 async function verifyInsert(supabase: SupabaseClient, businessId: string, config: Config): Promise<void> {
   const { data: biz } = await supabase
     .from('businesses')
-    .select('id, slug, active')
+    .select('id, slug, active, whatsapp_phone_number_id, whatsapp_number')
     .eq('id', businessId)
     .single();
 
@@ -690,11 +725,19 @@ async function verifyInsert(supabase: SupabaseClient, businessId: string, config
     .select('id', { count: 'exact', head: true })
     .eq('business_id', businessId);
 
-  const ok = biz && staffCount === config.staff.length && svcCount === config.services.length;
+  const bizRow = biz as { id: string; slug: string; active: boolean; whatsapp_phone_number_id: string; whatsapp_number: string } | null;
+  const ok = bizRow && staffCount === config.staff.length && svcCount === config.services.length;
 
   if (!ok) {
     console.error('❌ Verificación post-insert falló. Revisa la DB manualmente.');
     process.exit(1);
+  }
+
+  // F-01: advertir si WhatsApp no está configurado
+  if (!bizRow?.whatsapp_phone_number_id || !bizRow?.whatsapp_number) {
+    console.warn('\n⚠️  WHATSAPP NO CONFIGURADO: whatsapp_phone_number_id está vacío.');
+    console.warn('   El bot NO responderá mensajes hasta que se configure.');
+    console.warn('   Ejecuta el SQL del paso 2 del checklist cuando tengas el número.\n');
   }
 }
 
@@ -767,6 +810,9 @@ function generateChecklist(
   const timestamp = new Date().toISOString();
   const slug      = config.business.slug;
 
+  // F-02: resolver URL real del env
+  const appUrl = process.env['NEXT_PUBLIC_APP_URL'] ?? 'https://tu-dominio.com';
+
   const waPhoneProvided = config.whatsapp?.phone_number
     ? `${config.whatsapp.phone_number} (modelo: ${config.whatsapp.number_model})`
     : null;
@@ -779,12 +825,21 @@ function generateChecklist(
     .map((r) => `  - ${r.name.padEnd(25)} PIN \`${r.pin}\`   ID: \`${r.id}\``)
     .join('\n');
 
+  // F-01: nota de advertencia si WhatsApp no está configurado
+  const whatsappWarning = [
+    `> [!WARNING]`,
+    `> **WHATSAPP NO CONFIGURADO** — El bot NO responderá mensajes hasta completar el paso 2.`,
+    `> Ejecuta el SQL de ese paso en cuanto tengas el \`phone_number_id\` de Meta.`,
+    ``,
+  ].join('\n');
+
   const md = [
     `# Checklist de onboarding: ${config.business.name} (${slug})`,
     ``,
     `Generado: ${timestamp}`,
     `Estado del onboarding: 60% completo`,
     ``,
+    whatsappWarning,
     `## ✅ Hecho automáticamente`,
     `- [x] Business creado: \`business_id=${result.businessId}\``,
     `- [x] Staff creados: ${result.staffRows.length} miembro(s) de staff`,
@@ -794,9 +849,10 @@ function generateChecklist(
     `## ⚠️ Pasos manuales pendientes`,
     ``,
     `### 1. Registrar webhook en Meta Business Manager`,
-    `- URL: \`{NEXT_PUBLIC_APP_URL}/api/bot\``,
+    `- URL: \`${appUrl}/api/bot\``,
     `- Verify token: usar \`WHATSAPP_WEBHOOK_VERIFY_TOKEN\` actual`,
     `- Suscribir a campo: \`messages\``,
+    `- Verificar que \`META_APP_SECRET\` está configurado en Vercel → Settings → Environment Variables`,
     ``,
     `### 2. Obtener phone_number_id de Meta y conectar WhatsApp`,
     waStep2Detail,
@@ -816,8 +872,8 @@ function generateChecklist(
     `- Edge Function: \`dispatch-weekly-report\` → schedule: \`0 10 * * 1\``,
     ``,
     `### 4. Entregar credenciales al cliente`,
-    `- URL admin:  \`{NEXT_PUBLIC_APP_URL}/dashboard?token=${accessToken}\``,
-    `- URL staff:  \`{NEXT_PUBLIC_APP_URL}/dashboard?token=${assistantToken}\``,
+    `- URL admin:  \`${appUrl}/dashboard?token=${accessToken}\``,
+    `- URL staff:  \`${appUrl}/dashboard?token=${assistantToken}\``,
     `- PINs:`,
     staffLines,
     `- ⚠️ Guardar en 1Password antes de enviar al cliente`,
@@ -828,6 +884,7 @@ function generateChecklist(
     `- [ ] Crear cita de prueba desde el panel`,
     `- [ ] Verificar que aparece en el dashboard`,
     `- [ ] Confirmar que el reminder de 24h llega al cliente`,
+    `- [ ] Confirmar que el reminder de 2h llega al cliente`,
     ``,
     `---`,
     ``,
