@@ -7,14 +7,15 @@
 //
 // Tipos manejados:
 //   reminder_1h     — recordatorio 1h antes de la cita
-//   reminder_2h     — recordatorio 2h antes (futuro)
-//   reminder_24h    — recordatorio 24h antes (futuro)
-//   follow_up       — seguimiento post-cita (futuro)
-//   review_request  — solicitud de reseña 24h después de la visita
-//   waitlist_expiry — expiración de notificación de lista de espera (30 min)
+//   reminder_2h     — recordatorio 2h antes
+//   reminder_24h    — recordatorio 24h antes
+//   follow_up       — seguimiento post-cita
+//   review_request  — solicitud de resena 24h despues de la visita
+//   waitlist_expiry — expiracion de notificacion de lista de espera (30 min)
 //
-// Envío: Meta WhatsApp Business Cloud API (no Twilio).
-// Credenciales resueltas desde businesses.whatsapp_phone_number_id.
+// Envio: Meta WhatsApp Business Cloud API.
+// Usa Message Templates aprobados para envios proactivos fuera de la ventana
+// de 24h de conversacion, con fallback a texto libre (message_body).
 //
 // Variables de entorno requeridas (Supabase Secrets):
 //   SUPABASE_URL              — URL del proyecto Supabase
@@ -29,37 +30,88 @@ const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')              ?? '
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const WHATSAPP_ACCESS_TOKEN     = Deno.env.get('WHATSAPP_ACCESS_TOKEN')     ?? '';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Template name registry (mirrors whatsapp-templates.ts) ─────────────────
 
-interface NotificationRow {
-  id:             string;
-  business_id:    string;
-  appointment_id: string | null;
-  customer_phone: string | null;
-  customer_id:    string | null;
-  type:           string;
-  message_body:   string | null;
-  metadata:       Record<string, string> | null;
-  // Joined:
-  whatsapp_phone_number_id: string | null;
-  business_name:            string | null;
-  review_url:               string | null;
+const TEMPLATE_NAMES: Record<string, string> = {
+  reminder_24h:   'appointment_reminder_24h',
+  reminder_2h:    'appointment_reminder_2h',
+  reminder_1h:    'appointment_reminder_1h',
+  follow_up:      'appointment_follow_up',
+  review_request: 'appointment_review_request',
+};
+
+// ─── Meta WhatsApp Cloud API — Template send ────────────────────────────────
+
+interface TemplateTextParameter {
+  type: 'text';
+  text: string;
 }
 
-// ─── Meta WhatsApp Cloud API ──────────────────────────────────────────────────
+interface TemplateComponent {
+  type: 'body';
+  parameters: TemplateTextParameter[];
+}
 
-async function sendWhatsAppMeta(
+interface MetaResponse {
+  messages?: Array<{ id: string }>;
+  error?: { message: string; code?: number };
+}
+
+/**
+ * Envia un mensaje usando un Meta Message Template aprobado.
+ * Retorna true si el envio fue exitoso.
+ */
+async function sendTemplateMessage(
   to:            string,
-  body:          string,
   phoneNumberId: string,
-): Promise<string> {
+  templateName:  string,
+  components:    TemplateComponent[],
+): Promise<boolean> {
   const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
 
   const res = await fetch(url, {
     method:  'POST',
     headers: {
-      'Authorization': `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-      'Content-Type':  'application/json',
+      Authorization:  `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'template',
+      template: {
+        name:     templateName,
+        language: { code: 'es_MX' },
+        components,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json() as MetaResponse;
+    console.warn(`[template] '${templateName}' failed: ${data.error?.message ?? `HTTP ${res.status}`}`);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Envia un mensaje de texto libre (type: 'text').
+ * Funciona dentro de la ventana de 24h. Falla con 131026 si >24h.
+ */
+async function sendFreeText(
+  to:            string,
+  body:          string,
+  phoneNumberId: string,
+): Promise<void> {
+  const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
+
+  const res = await fetch(url, {
+    method:  'POST',
+    headers: {
+      Authorization:  `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
@@ -73,9 +125,58 @@ async function sendWhatsAppMeta(
     const err = await res.text();
     throw new Error(`Meta WA ${res.status}: ${err}`);
   }
+}
 
-  const data = await res.json() as { messages?: Array<{ id: string }> };
-  return data.messages?.[0]?.id ?? '';
+// ─── Template param builder ─────────────────────────────────────────────────
+
+function params(...values: string[]): TemplateComponent {
+  return {
+    type:       'body',
+    parameters: values.map((text) => ({ type: 'text' as const, text })),
+  };
+}
+
+// ─── Build template components by notification type ─────────────────────────
+
+/**
+ * Construye los componentes del template a partir de metadata y datos del row.
+ * Retorna null si no hay suficientes datos para el template.
+ */
+function buildTemplateComponents(
+  type:         string,
+  meta:         Record<string, string> | null,
+  businessName: string,
+  reviewUrl:    string | null,
+): { templateName: string; components: TemplateComponent[] } | null {
+  const templateName = TEMPLATE_NAMES[type];
+  if (!templateName) return null;
+
+  const customerName = meta?.customer_name || '';
+  const serviceName  = meta?.service_name  || '';
+  const staffName    = meta?.staff_name    || '';
+  const timeStr      = meta?.time_str      || '';
+
+  switch (type) {
+    case 'reminder_24h':
+    case 'reminder_2h':
+    case 'reminder_1h':
+      // Template: Hola {{1}}, ... cita de {{2}} con {{3}} a las {{4}} en {{5}}.
+      if (!customerName || !serviceName || !staffName || !timeStr || !businessName) return null;
+      return { templateName, components: [params(customerName, serviceName, staffName, timeStr, businessName)] };
+
+    case 'follow_up':
+      // Template: Hola {{1}}, gracias por tu visita a {{2}}. ...
+      if (!customerName || !businessName) return null;
+      return { templateName, components: [params(customerName, businessName)] };
+
+    case 'review_request':
+      // Template: Hola {{1}}, gracias por visitarnos en {{2}}. ... {{3}}
+      if (!customerName || !businessName || !reviewUrl) return null;
+      return { templateName, components: [params(customerName, businessName, reviewUrl)] };
+
+    default:
+      return null;
+  }
 }
 
 // ─── Fallback message builder ─────────────────────────────────────────────────
@@ -88,11 +189,11 @@ function buildFallbackMessage(
     case 'reminder_1h':
     case 'reminder_2h':
     case 'reminder_24h':
-      return `Hola, te recordamos tu próxima cita${businessName ? ` en ${businessName}` : ''}. ¡Te esperamos! 💈`;
+      return `Hola, te recordamos tu proxima cita${businessName ? ` en ${businessName}` : ''}. Te esperamos!`;
     case 'follow_up':
-      return `Hola, gracias por tu visita. ¿Cómo te fue?`;
+      return `Hola, gracias por tu visita. Como te fue?`;
     case 'review_request':
-      return `Hola, ¿nos regalas tu opinión sobre tu cita?`;
+      return `Hola, nos regalas tu opinion sobre tu cita?`;
     default:
       return `Tienes un mensaje de ${businessName ?? 'tu negocio'}.`;
   }
@@ -100,7 +201,7 @@ function buildFallbackMessage(
 
 // ─── Helpers de formato ───────────────────────────────────────────────────────
 
-const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
+const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'] as const;
 const MONTHS_ES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
@@ -125,15 +226,12 @@ function formatTimeHHMM(d: Date, tz: string): string {
 }
 
 // ─── handleWaitlistExpiry ─────────────────────────────────────────────────────
-// Expira la entrada notificada, busca el siguiente en lista de espera y
-// le envía una notificación si existe.
-// Best-effort: errores no afectan otras notificaciones del mismo ciclo.
 
 type WaitlistNotifRow = {
   id:          string;
   business_id: string;
   metadata:    Record<string, string> | null;
-  businesses:  { whatsapp_phone_number_id: string; timezone: string } | null;
+  businesses:  { whatsapp_phone_number_id: string; name: string } | null;
 };
 
 async function handleWaitlistExpiry(
@@ -157,7 +255,7 @@ async function handleWaitlistExpiry(
     .eq('status', 'notified')
     .maybeSingle();
 
-  if (!wlData) return; // ya confirmado o expirado
+  if (!wlData) return;
 
   const entry = wlData as { id: string; business_id: string; requested_date: string };
 
@@ -184,7 +282,7 @@ async function handleWaitlistExpiry(
     .limit(1)
     .maybeSingle();
 
-  if (!nextData) return; // no hay más en lista de espera — slot libre para el bot
+  if (!nextData) return;
 
   const next = nextData as {
     id:       string;
@@ -208,7 +306,7 @@ async function handleWaitlistExpiry(
     })
     .eq('id', next.id);
 
-  // ── 5. Programar nueva expiración heredando datos del slot ────────────────
+  // ── 5. Programar nueva expiracion heredando datos del slot ────────────────
 
   await supabase.from('scheduled_notifications').insert({
     business_id:    entry.business_id,
@@ -225,29 +323,68 @@ async function handleWaitlistExpiry(
     },
   });
 
-  // ── 6. Enviar WhatsApp al siguiente — best-effort ─────────────────────────
+  // ── 6. Enviar WhatsApp al siguiente — template primero, fallback texto ───
 
   const phoneNumberId = row.businesses?.whatsapp_phone_number_id;
-  const tz            = row.businesses?.timezone ?? 'America/Mexico_City';
+  const businessName  = row.businesses?.name ?? '';
   if (!phoneNumberId) return;
 
   try {
     const slotDate    = new Date(metadata?.slot_starts_at ?? '');
     const validDate   = !isNaN(slotDate.getTime());
-    const dateStr     = validDate ? formatDateSpanish(slotDate, tz) : entry.requested_date;
-    const timeStr     = validDate ? ` a las ${formatTimeHHMM(slotDate, tz)}` : '';
+    const dateStr     = validDate ? formatDateSpanish(slotDate) : entry.requested_date;
+    const timeStr     = validDate ? formatTimeHHMM(slotDate) : '';
     const staffName   = metadata?.slot_staff_name ?? 'tu barbero';
     const serviceName = next.service?.name ?? metadata?.service_name ?? 'tu servicio';
+    const customerName = next.customer.name.trim().split(/\s+/)[0] ?? next.customer.name;
 
-    const message =
-      `¡Buenas noticias! Se liberó un lugar para ${serviceName} ` +
-      `el ${dateStr}${timeStr} con ${staffName} 💈\n` +
-      `¿Lo tomamos? Responde SÍ en los próximos 30 minutos o el lugar se liberará.`;
+    // Intentar template primero
+    const templateSent = await sendTemplateMessage(
+      next.customer.phone,
+      phoneNumberId,
+      'waitlist_slot_available',
+      [params(customerName, serviceName, dateStr, timeStr || '(por confirmar)', staffName)],
+    );
 
-    await sendWhatsAppMeta(next.customer.phone, message, phoneNumberId);
+    if (!templateSent) {
+      // Fallback a texto libre
+      const fallbackMsg =
+        `Buenas noticias, ${customerName}! Se libero un lugar para ${serviceName} ` +
+        `el ${dateStr}${timeStr ? ` a las ${timeStr}` : ''} con ${staffName}.\n` +
+        `Lo tomamos? Responde SI en los proximos 30 minutos o el lugar se liberara.`;
+      await sendFreeText(next.customer.phone, fallbackMsg, phoneNumberId);
+    }
   } catch (err) {
     console.error('[waitlist_expiry] WA send failed', err instanceof Error ? err.message : String(err));
   }
+}
+
+// ─── Send with template-first strategy ──────────────────────────────────────
+
+/**
+ * Intenta enviar via template aprobado. Si falla (template no aprobado o
+ * faltan datos de metadata), cae al texto libre (message_body o fallback).
+ */
+async function sendWithTemplateFallback(
+  customerPhone: string,
+  phoneNumberId: string,
+  type:          string,
+  messageBody:   string | null,
+  metadata:      Record<string, string> | null,
+  businessName:  string,
+  reviewUrl:     string | null,
+): Promise<void> {
+  // 1. Intentar template si hay datos suficientes
+  const tmpl = buildTemplateComponents(type, metadata, businessName, reviewUrl);
+  if (tmpl) {
+    const sent = await sendTemplateMessage(customerPhone, phoneNumberId, tmpl.templateName, tmpl.components);
+    if (sent) return; // exito con template
+    console.warn(`[dispatch] template '${tmpl.templateName}' failed, falling back to free-text`);
+  }
+
+  // 2. Fallback a texto libre (message_body pre-construido o generico)
+  const fallback = messageBody ?? buildFallbackMessage(type, businessName);
+  await sendFreeText(customerPhone, fallback, phoneNumberId);
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -303,10 +440,20 @@ Deno.serve(async (_req) => {
     } | null;
   }>;
 
-  const summary = { dispatched: 0, failed: 0, skipped: 0 };
+  const summary = {
+    function:  'dispatch-lifestyle-notifications',
+    timestamp: new Date().toISOString(),
+    total:     0,
+    sent:      0,
+    failed:    0,
+    skipped:   0,
+    errors:    [] as string[],
+  };
 
+  try {
   for (const row of notifications) {
-    // ── Claim atómico — idempotencia ────────────────────────────────────────
+    summary.total++;
+    // ── Claim atomico — idempotencia ────────────────────────────────────────
     const { data: claimed } = await supabase
       .from('scheduled_notifications')
       .update({ sent_at: new Date().toISOString() })
@@ -320,7 +467,7 @@ Deno.serve(async (_req) => {
       continue;
     }
 
-    // ── waitlist_expiry — lógica de expiración y re-notificación ─────────
+    // ── waitlist_expiry — logica de expiracion y re-notificacion ─────────
     if (row.type === 'waitlist_expiry') {
       try {
         await handleWaitlistExpiry(supabase, {
@@ -328,25 +475,24 @@ Deno.serve(async (_req) => {
           business_id: row.business_id,
           metadata:    row.metadata,
           businesses:  row.businesses
-            ? {
-                whatsapp_phone_number_id: row.businesses.whatsapp_phone_number_id,
-                timezone:                 row.businesses.timezone,
-              }
+            ? { whatsapp_phone_number_id: row.businesses.whatsapp_phone_number_id, name: row.businesses.name }
             : null,
         });
-        summary.dispatched++;
+        summary.sent++;
       } catch (err) {
-        console.error('[waitlist_expiry] unhandled error', err instanceof Error ? err.message : String(err));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('[waitlist_expiry] unhandled error', errMsg);
         summary.failed++;
+        if (summary.errors.length < 5) summary.errors.push(errMsg);
       }
       continue;
     }
 
     const phoneNumberId  = row.businesses?.whatsapp_phone_number_id ?? null;
-    const businessName   = row.businesses?.name ?? null;
+    const businessName   = row.businesses?.name ?? '';
     const customerPhone  = row.customer_phone;
 
-    // Sin teléfono destino o sin credenciales → fallo sin reintentar
+    // Sin telefono destino o sin credenciales -> fallo sin reintentar
     if (!customerPhone || !phoneNumberId) {
       await supabase
         .from('scheduled_notifications')
@@ -356,22 +502,28 @@ Deno.serve(async (_req) => {
         })
         .eq('id', row.id);
       summary.failed++;
+      if (summary.errors.length < 5) summary.errors.push(`missing_phone_or_id:${row.id}`);
       console.warn('[dispatch-lifestyle-notifications] missing phone or phoneNumberId', { id: row.id });
       continue;
     }
 
-    // Usar message_body pre-construido si está disponible
-    const message = row.message_body ?? buildFallbackMessage(row.type, businessName);
-
     try {
-      await sendWhatsAppMeta(customerPhone, message, phoneNumberId);
+      await sendWithTemplateFallback(
+        customerPhone,
+        phoneNumberId,
+        row.type,
+        row.message_body,
+        row.metadata,
+        businessName,
+        row.businesses?.review_url ?? null,
+      );
 
       console.log('[dispatch-lifestyle-notifications] sent', {
         id:          row.id,
         type:        row.type,
         business_id: row.business_id,
       });
-      summary.dispatched++;
+      summary.sent++;
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -391,6 +543,7 @@ Deno.serve(async (_req) => {
         errorMessage,
       });
       summary.failed++;
+      if (summary.errors.length < 5) summary.errors.push(errorMessage);
     }
   }
 
@@ -398,4 +551,10 @@ Deno.serve(async (_req) => {
   return new Response(JSON.stringify(summary), {
     headers: { 'Content-Type': 'application/json' },
   });
+  } finally {
+    console.log(`[CRON-SUMMARY] ${JSON.stringify(summary)}`);
+    if (summary.failed > 0) {
+      console.error(`[CRON-ALERT] ${summary.function}: ${summary.failed}/${summary.total} fallos`);
+    }
+  }
 });

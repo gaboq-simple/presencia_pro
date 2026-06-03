@@ -320,11 +320,12 @@ export async function handleGreeting(
     plan.nextState,
   );
 
-  // Para clientes nuevos: prepend aviso de privacidad (LFPDPPP Art. 8).
+  // Para clientes nuevos: append aviso de privacidad al final (LFPDPPP Art. 8).
   // Consentimiento tácito: el cliente sigue interactuando tras el aviso.
   const privacyUrl = process.env['PRIVACY_POLICY_URL'] ?? 'https://zentriq.mx/aviso-de-privacidad';
+  const privacyNotice = `Al continuar, aceptas nuestro aviso de privacidad: ${privacyUrl}`;
   const responseText = !isReturning
-    ? `Para brindarte un mejor servicio, almacenamos tu nombre y número de teléfono. Puedes consultar nuestro aviso de privacidad en ${privacyUrl} o ejercer tus derechos ARCO escribiendo "mis datos". Al continuar, aceptas el tratamiento de tus datos.\n\n${greetingText}`
+    ? `${greetingText}\n\n${privacyNotice}`
     : greetingText;
 
   // ── Ensamblar resultado ────────────────────────────────────────────────────

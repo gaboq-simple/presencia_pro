@@ -52,6 +52,7 @@ export const TEMPLATE_NAMES = {
   waitlistSlotAvailable: 'waitlist_slot_available',
   cancellationNotice:   'appointment_cancellation_notice',
   rescheduleNotice:     'appointment_reschedule_notice',
+  staffNoshowAlert:     'staff_noshow_alert',
 } as const;
 
 export type TemplateName = (typeof TEMPLATE_NAMES)[keyof typeof TEMPLATE_NAMES];
@@ -341,6 +342,33 @@ export async function sendCancellationNotice(
     TEMPLATE_NAMES.cancellationNotice,
     [params(customerName, dateStr, timeStr, businessName)],
     `Hola ${customerName}, tu cita del ${dateStr} a las ${timeStr} en ${businessName} fue cancelada. Si deseas reagendar, responde a este mensaje.`,
+  );
+}
+
+/**
+ * staff_noshow_alert — "{{1}} no se presentó a su cita de {{2}} a las {{3}}."
+ * Destinatario: teléfono del barbero/staff (staff.whatsapp_id).
+ *
+ * Registrar en Meta Business Manager antes del go-live:
+ *   Nombre:    staff_noshow_alert
+ *   Idioma:    Español (México) — es_MX
+ *   Categoría: UTILITY
+ *   Cuerpo:    "{{1}} no se presentó a su cita de {{2}} a las {{3}}."
+ *   Variables: {{1}} nombre del cliente | {{2}} nombre del servicio | {{3}} hora de la cita
+ */
+export async function sendStaffNoshowAlert(
+  config:       MetaConfig,
+  staffPhone:   string,
+  customerName: string,
+  serviceName:  string,
+  timeStr:      string,
+): Promise<TemplateSendResult> {
+  return sendWithFallback(
+    config,
+    staffPhone,
+    TEMPLATE_NAMES.staffNoshowAlert,
+    [params(customerName, serviceName, timeStr)],
+    `${customerName} no se presento a su cita de ${serviceName} a las ${timeStr}.`,
   );
 }
 

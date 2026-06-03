@@ -70,6 +70,83 @@ async function sendWhatsAppMeta(
   }
 }
 
+// ─── Template sending ─────────────────────────────────────────────────────────
+// Replica el patrón de whatsapp-templates.ts para uso en Deno (sin imports Next.js).
+//
+// ⚠️  Registrar en Meta Business Manager antes del go-live:
+//
+// Template: staff_noshow_alert
+//   Idioma:    Español (México) — es_MX | Categoría: UTILITY
+//   Cuerpo:    "{{1}} no se presentó a su cita de {{2}} a las {{3}}."
+//   Variables: {{1}} nombre del cliente | {{2}} nombre del servicio | {{3}} hora de la cita
+//
+// Template: waitlist_slot_available  (ya documentado en WHATSAPP-TEMPLATES.md)
+
+const TEMPLATE_WAITLIST_SLOT_AVAILABLE = 'waitlist_slot_available';
+const TEMPLATE_STAFF_NOSHOW_ALERT      = 'staff_noshow_alert';
+
+async function sendMetaTemplate(
+  phoneNumberId: string,
+  to:            string,
+  templateName:  string,
+  bodyParams:    string[],
+): Promise<{ success: boolean; error?: string }> {
+  const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: {
+          name:       templateName,
+          language:   { code: 'es_MX' },
+          components: [{ type: 'body', parameters: bodyParams.map((text) => ({ type: 'text', text })) }],
+        },
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      return { success: false, error: `Meta ${res.status}: ${errText}` };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function sendWithFallback(
+  phoneNumberId: string,
+  to:            string,
+  templateName:  string,
+  bodyParams:    string[],
+  fallbackText:  string,
+): Promise<{ success: boolean; usedFallback?: boolean; error?: string }> {
+  const tmpl = await sendMetaTemplate(phoneNumberId, to, templateName, bodyParams);
+  if (tmpl.success) return tmpl;
+
+  console.warn(
+    `[dispatch-auto-cancel] template '${templateName}' failed (${tmpl.error}), trying free-text fallback`,
+  );
+
+  try {
+    const res = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: fallbackText } }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      return { success: false, usedFallback: true, error: `Fallback Meta ${res.status}: ${errText}` };
+    }
+    return { success: true, usedFallback: true };
+  } catch (err) {
+    return { success: false, usedFallback: true, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // ─── Helpers de formato ───────────────────────────────────────────────────────
 
 const DAYS_ES   = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'] as const;
@@ -183,13 +260,22 @@ async function notifyWaitlist(
   const timeStr     = formatTimeSpanish(slotStartsAt, appt.timezone);
   const staffLabel  = staffName ? ` con ${staffName}` : '';
 
-  await sendWhatsAppMeta(
+  const wlResult = await sendWithFallback(
+    phoneNumberId,
     entry.customer.phone,
-    `Buenas noticias! Se libero un lugar para ${serviceName} ` +
+    TEMPLATE_WAITLIST_SLOT_AVAILABLE,
+    [entry.customer.name, serviceName, dateStr, timeStr, staffName || 'disponible'],
+    `Buenas noticias, ${entry.customer.name}! Se libero un lugar para ${serviceName} ` +
     `el ${dateStr} a las ${timeStr}${staffLabel}. ` +
     `Lo tomamos? Responde SI en los proximos 30 minutos o el lugar se liberara.`,
-    phoneNumberId,
   );
+  if (!wlResult.success) {
+    console.error('[dispatch-auto-cancel] notifyWaitlist WA send failed', {
+      appointment_id: appt.id,
+      customer_phone: entry.customer.phone,
+      error:          wlResult.error,
+    });
+  }
 }
 
 // ─── processAppointment ───────────────────────────────────────────────────────
@@ -230,6 +316,55 @@ async function processAppointment(
       appointment_id: appt.id,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+
+  // ── 4. Notificar al staff — no-show alert (best-effort) ───────────────────
+
+  if (appt.whatsapp_phone_number_id && WHATSAPP_ACCESS_TOKEN) {
+    try {
+      const { data: apptDetails } = await supabase
+        .from('appointments')
+        .select(`
+          staff:staff_id(name, whatsapp_id),
+          customer:customer_id(name),
+          service:service_id(name)
+        `)
+        .eq('id', appt.id)
+        .maybeSingle();
+
+      const details = apptDetails as {
+        staff:    { name: string; whatsapp_id: string } | null;
+        customer: { name: string } | null;
+        service:  { name: string } | null;
+      } | null;
+
+      const staffPhone   = details?.staff?.whatsapp_id;
+      const customerName = details?.customer?.name ?? 'El cliente';
+      const serviceName  = details?.service?.name  ?? 'la cita';
+      const apptTime     = formatTimeSpanish(appt.adjusted_starts_at ?? appt.starts_at, appt.timezone);
+
+      if (staffPhone) {
+        const result = await sendWithFallback(
+          appt.whatsapp_phone_number_id,
+          staffPhone,
+          TEMPLATE_STAFF_NOSHOW_ALERT,
+          [customerName, serviceName, apptTime],
+          `${customerName} no se presento a su cita de ${serviceName} a las ${apptTime}.`,
+        );
+        if (!result.success) {
+          console.error('[dispatch-auto-cancel] staff noshow alert failed', {
+            appointment_id: appt.id,
+            staff_phone:    staffPhone,
+            error:          result.error,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[dispatch-auto-cancel] staff noshow alert error', {
+        appointment_id: appt.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   return true;
@@ -318,13 +453,23 @@ Deno.serve(async (_req) => {
     }
   }
 
-  const summary = { marked_no_show: 0, skipped: 0, errors: 0 };
+  const summary = {
+    function:  'dispatch-auto-cancel',
+    timestamp: new Date().toISOString(),
+    total:     0,
+    sent:      0,
+    failed:    0,
+    skipped:   0,
+    errors:    [] as string[],
+  };
 
+  try {
   for (const appt of overdue) {
+    summary.total++;
     try {
       const marked = await processAppointment(supabase, appt);
       if (marked) {
-        summary.marked_no_show++;
+        summary.sent++;
         console.log('[dispatch-auto-cancel] marked no_show', {
           appointment_id: appt.id,
           business_id:    appt.business_id,
@@ -333,10 +478,12 @@ Deno.serve(async (_req) => {
         summary.skipped++;
       }
     } catch (err) {
-      summary.errors++;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      summary.failed++;
+      if (summary.errors.length < 5) summary.errors.push(errMsg);
       console.error('[dispatch-auto-cancel] processAppointment error', {
         appointment_id: appt.id,
-        error: err instanceof Error ? err.message : String(err),
+        error:          errMsg,
       });
     }
   }
@@ -345,4 +492,10 @@ Deno.serve(async (_req) => {
   return new Response(JSON.stringify(summary), {
     headers: { 'Content-Type': 'application/json' },
   });
+  } finally {
+    console.log(`[CRON-SUMMARY] ${JSON.stringify(summary)}`);
+    if (summary.failed > 0) {
+      console.error(`[CRON-ALERT] ${summary.function}: ${summary.failed}/${summary.total} fallos`);
+    }
+  }
 });
