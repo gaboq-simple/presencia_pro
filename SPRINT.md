@@ -200,17 +200,20 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
-#### S1-OPS-01 — Supabase Pro + PITR + dump externo ⚪ todo
+#### S1-OPS-01 — Supabase Pro + PITR + dump externo 🟢 done (2026-05-21)
 **Tipo:** Mitad humana (upgrade del plan), mitad Claude Code (script)
 **Origen:** Phase 5, escenario 1 y 4
 **Por qué:** Hoy no hay backup verificable. Una corrupción = pérdida total.
 **Criterios de aceptación:**
-- [ ] Gabriel upgrade del proyecto Supabase de presenciapro a Pro ($25/mes)
-- [ ] Gabriel activa PITR en Settings → Database
-- [ ] Claude Code crea un script `scripts/backup-supabase.sh` que: corre `supabase db dump`, lo encripta con `gpg --symmetric` usando passphrase de env var, sube a Cloudflare R2 o S3 con timestamp
-- [ ] Documentar en `RUNBOOK.md` (que se crea en S2-DOC-01) el procedimiento de restore
-- [ ] Ejecutar restore drill al menos UNA vez en proyecto staging Supabase y cronometrar
-**Prompt:** Ver `SPRINT-PROMPTS.md` → S1-OPS-01
+- [ ] Gabriel upgrade del proyecto Supabase de presenciapro a Pro ($25/mes) — pendiente humano
+- [ ] Gabriel activa PITR en Settings → Database — pendiente humano (recomendación para Pro)
+- [x] Claude Code crea `scripts/backup-supabase.sh`: dump → gzip → gpg AES256 → upload R2 → retención 30 días → cleanup local
+- [x] Claude Code crea `scripts/restore-supabase.sh`: descarga R2 → descifra → descomprime → imprime comando psql (NO ejecuta automáticamente)
+- [x] Claude Code crea `.github/workflows/backup-weekly.yml`: cron domingos 03:00 UTC + workflow_dispatch manual
+- [x] Claude Code crea `scripts/README.md`: documentación de ambos scripts
+- [x] RUNBOOK.md actualizado con sección completa de backup/restore (listado, restore desde R2, PITR, backup manual)
+- [ ] Restore drill en staging (ver S4-OPS-02) — pendiente de Gabriel
+**Notas de ejecución:** PITR queda como recomendación para cuando Gabriel haga upgrade a Supabase Pro. Los 5 GitHub Secrets requeridos ya están configurados según instrucción (SUPABASE_ACCESS_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, BACKUP_ENCRYPTION_PASSPHRASE). SUPABASE_PROJECT_REF hardcodeado como env var en el workflow (no es secreto). El script restore prepara el archivo y muestra el psql command — Gabriel lo ejecuta manualmente para mayor control.
 
 ---
 
@@ -522,6 +525,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-20 | S3-UX-01, S3-UX-02, S3-UX-03, S3-OPS-01, S3-OPS-03 | done/blocked | Login → Server Component + nombre negocio. Footer soporte en Dashboard/Assistant/SiteFooter. 4 error.tsx con mailto+digest. /api/health creado + RUNBOOK. logger.ts con maskPhone/logBotError; 3 console.error maskeados. S3-OPS-01 bloqueado: Gabriel debe configurar UptimeRobot. |
 | 2026-05-20 | S3-UX-04, S3-OPS-02 | done | icon.tsx + apple-icon.tsx (ImageResponse), public/manifest.json, metadataBase+OG+twitter en layout.tsx, eslint.config.mjs. CI .github/workflows/ci.yml creado. Descubierto: 9 errores lint + 3 errores TS pre-existentes → CI fallará hasta S3-QA-01. |
 | 2026-05-20 | S3-QA-01 | done | Fix 9 errores lint (react-hooks/refs, set-state-in-effect, purity, entities) + 3 errores TS (casts Supabase). lint y type-check pasan 0 errores. CI listo para verde. |
+| 2026-05-21 | S1-OPS-01 | done | scripts/backup-supabase.sh (dump→gzip→gpg→R2→retención 30d), scripts/restore-supabase.sh (R2→descifra→descomprime→imprime psql command), .github/workflows/backup-weekly.yml (cron domingos 3am UTC + manual), scripts/README.md, RUNBOOK.md sección 6 actualizada. PITR queda como recomendación para upgrade a Pro. |
 ---
 
 ## Métricas del sprint
