@@ -24,6 +24,7 @@ import { parseTwilioPayload, buildLifestyleMessage as buildTwilioMessage } from 
 import { parseMetaPayload, buildLifestyleMessage as buildMetaMessage } from '@presenciapro/engine/bot/lifestyle/adapters/metaAdapter';
 import { maskPhone } from '@presenciapro/engine/utils';
 import { rateLimit } from '@/lib/rate-limit';
+import { bufferAndWait } from '@/lib/message-buffer';
 
 // ─── Supabase admin client ────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ type BusinessRow = {
   walk_in_buffer_minutes: number;
   address: string;
   timezone: string;
+  business_type?: string;
 };
 
 function rowToBusiness(row: BusinessRow): LifestyleBusinessConfig {
@@ -67,13 +69,14 @@ function rowToBusiness(row: BusinessRow): LifestyleBusinessConfig {
     walkInBufferMinutes:   row.walk_in_buffer_minutes,
     address:               row.address,
     timezone:              row.timezone,
+    businessType:          row.business_type,
   };
 }
 
 const BUSINESS_SELECT =
   'id, name, whatsapp_number, whatsapp_phone_number_id, ' +
   'bot_name, away_message, fallback_message, office_hours, ' +
-  'walk_in_buffer_minutes, address, timezone';
+  'walk_in_buffer_minutes, address, timezone, business_type';
 
 const NON_TEXT_MESSAGE =
   'Por ahora solo puedo leer mensajes de texto. Escribeme lo que necesitas y con gusto te ayudo.';
@@ -270,7 +273,7 @@ async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
     // (parseMetaPayload ya descartó la referencia al mensaje; aquí la re-leemos)
     const nonTextSender = detectMetaNonTextSender(body);
     if (nonTextSender) {
-      after(() => sendNonTextResponseMeta(nonTextSender.phoneNumberId, nonTextSender.fromPhone));
+      after(() => sendNonTextResponseMeta(nonTextSender.phoneNumberId, nonTextSender.fromPhone, nonTextSender.messageType));
     }
     // Status updates, delivery receipts, etc. — no hay nada más que hacer
     return NextResponse.json({ status: 'ok' });
@@ -286,7 +289,43 @@ async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  after(() => processMetaMessage(normalized.phoneNumberId, normalized.customerPhone, normalized.body, normalized.customerName));
+  after(async () => {
+    // ── Debounce buffer — acumula mensajes rápidos del mismo número ───────
+    // bufferAndWait retorna null si otra instancia ya tiene el lock (esta
+    // invocación solo empujó al buffer). Retorna FlushedBuffer cuando la
+    // ventana expiró y hay mensajes para procesar (puede ser 1 o N).
+    const flushed = await bufferAndWait(
+      normalized.phoneNumberId,
+      normalized.customerPhone,
+      {
+        text:          normalized.body,
+        timestamp:     Date.now(),
+        message_id:    normalized.messageId,
+        customer_name: normalized.customerName,
+      },
+    );
+
+    if (!flushed) return; // otra instancia es el lock owner
+
+    if (flushed.count > 1) {
+      console.log(JSON.stringify({
+        ts:             new Date().toISOString(),
+        service:        'bot',
+        event:          'buffer_flushed',
+        customer_phone: maskPhone(normalized.customerPhone),
+        message_count:  flushed.count,
+        info:           `Buffered ${flushed.count} messages from ${maskPhone(normalized.customerPhone)}, processing as single block`,
+      }));
+    }
+
+    await processMetaMessage(
+      normalized.phoneNumberId,
+      normalized.customerPhone,
+      flushed.combinedText,
+      flushed.customerName,
+      flushed.lastMessageId,
+    );
+  });
 
   return NextResponse.json({ status: 'ok' });
 }
@@ -492,13 +531,13 @@ function escapeXml(str: string): string {
 
 /**
  * Detecta un mensaje entrante de tipo no-texto en el payload raw de Meta.
- * Extrae phoneNumberId y fromPhone ANTES de que parseMetaPayload descarte el mensaje.
+ * Extrae phoneNumberId, fromPhone y messageType ANTES de que parseMetaPayload descarte el mensaje.
  * Retorna null si el payload es un status update, delivery receipt, u otro evento
  * sin mensaje de usuario.
  */
 function detectMetaNonTextSender(
   body: unknown,
-): { phoneNumberId: string; fromPhone: string } | null {
+): { phoneNumberId: string; fromPhone: string; messageType: string } | null {
   const payload    = body as Record<string, unknown>;
   const entry      = (payload['entry'] as unknown[])?.[0] as Record<string, unknown> | undefined;
   const change     = (entry?.['changes'] as unknown[])?.[0] as Record<string, unknown> | undefined;
@@ -516,13 +555,59 @@ function detectMetaNonTextSender(
   // Solo los no-texto tienen 'from' pero no 'text.body'
   if (!fromPhone || !messageType || messageType === 'text') return null;
 
-  return { phoneNumberId, fromPhone };
+  return { phoneNumberId, fromPhone, messageType };
 }
 
-/** Envía el mensaje de "solo texto" al cliente — best-effort. */
-async function sendNonTextResponseMeta(phoneNumberId: string, fromPhone: string): Promise<void> {
+/**
+ * Envía una respuesta estática por tipo de mensaje no-texto — best-effort, sin pasar por Claude.
+ *
+ * Nota: el business row NO está disponible en este punto del flujo.
+ * La detección de non-text ocurre cuando `parseMetaPayload` retorna null (mensaje descartado),
+ * ANTES del bloque `after()` que llama a `processMetaMessage` donde se resuelve el negocio.
+ * Ambas rutas son mutuamente excluyentes — por eso se hace un query ligero solo para `location`.
+ */
+async function sendNonTextResponseMeta(
+  phoneNumberId: string,
+  fromPhone: string,
+  messageType: string,
+): Promise<void> {
   try {
-    await sendMessage({ to: fromPhone, message: NON_TEXT_MESSAGE, from: phoneNumberId });
+    let reply: string;
+
+    switch (messageType) {
+      case 'audio':
+        reply = 'Por ahora solo puedo leer mensajes de texto. Escribeme lo que necesitas y con gusto te ayudo \uD83D\uDE0A';
+        break;
+      case 'image':
+      case 'video':
+        reply = 'No puedo ver fotos ni videos, pero si me describes lo que buscas te ayudo!';
+        break;
+      case 'sticker':
+        // Silencio — los stickers son decorativos, responder crea ruido
+        return;
+      case 'document':
+        reply = 'No puedo abrir documentos, pero si me dices que necesitas te ayudo.';
+        break;
+      case 'location': {
+        // Requiere lookup ligero — address no está disponible sin resolver el negocio
+        const supabase = getServiceClient();
+        const { data } = await supabase
+          .from('businesses')
+          .select('address')
+          .eq('whatsapp_phone_number_id', phoneNumberId)
+          .eq('active', true)
+          .maybeSingle();
+        const address = (data as { address?: string } | null)?.address;
+        reply = address
+          ? `Gracias! Nosotros estamos en ${address}.`
+          : 'Gracias por compartir tu ubicacion! Para ver donde estamos, escribeme.';
+        break;
+      }
+      default:
+        reply = NON_TEXT_MESSAGE;
+    }
+
+    await sendMessage({ to: fromPhone, message: reply, from: phoneNumberId });
   } catch {
     // best-effort
   }
@@ -625,6 +710,7 @@ async function processMetaMessage(
   customerPhone: string,
   messageBody: string,
   customerName: string | null,
+  messageId: string | null = null,
 ): Promise<void> {
   const supabase = getServiceClient();
 
@@ -675,7 +761,7 @@ async function processMetaMessage(
     const anthropicKey = process.env['ANTHROPIC_API_KEY'] ?? '';
 
     const msg = buildMetaMessage(
-      { phoneNumberId, customerPhone, body: messageBody, customerName, messageId: null },
+      { phoneNumberId, customerPhone, body: messageBody, customerName, messageId },
       business.id,
     );
 

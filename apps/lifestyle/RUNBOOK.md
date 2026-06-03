@@ -222,21 +222,80 @@ La URL de acceso es: `https://[NEXT_PUBLIC_APP_URL]/dashboard?token=[access_toke
 
 ---
 
-## 6. Restaurar base de datos desde backup
+## 6. Backup y restauracion de base de datos
 
-> Prerequisito: S1-OPS-01 (Supabase Pro + PITR + backup externo) debe estar completo.
-> Mientras no este completo, la unica opcion es PITR si el plan Pro esta activo.
+### Backups automaticos
 
-### Con PITR (Supabase Pro)
+El workflow `.github/workflows/backup-weekly.yml` ejecuta `scripts/backup-supabase.sh` cada domingo a las 03:00 UTC (y on-demand via `workflow_dispatch`).
+
+Cada backup:
+- Es un dump completo (`supabase db dump` — schema + data)
+- Se comprime con gzip
+- Se encripta con GPG AES256 (passphrase en secret `BACKUP_ENCRYPTION_PASSPHRASE`)
+- Se sube a Cloudflare R2: bucket `presenciapro-backups`
+- Naming: `backup-YYYY-MM-DD-HHmmss.sql.gz.gpg`
+- Retencion: 30 dias (el script elimina backups mas antiguos automaticamente)
+
+### Listar backups disponibles en R2
+
+```bash
+AWS_ACCESS_KEY_ID=$R2_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$R2_SECRET_ACCESS_KEY \
+  aws s3 ls s3://presenciapro-backups/ \
+  --endpoint-url $R2_ENDPOINT --region auto
+```
+
+### Restaurar desde backup externo (R2)
+
+```bash
+# 1. Preparar el archivo SQL (descarga + descifra + descomprime)
+export BACKUP_ENCRYPTION_PASSPHRASE=...
+export R2_ACCESS_KEY_ID=...
+export R2_SECRET_ACCESS_KEY=...
+export R2_ENDPOINT=...
+
+bash scripts/restore-supabase.sh backup-YYYY-MM-DD-HHmmss.sql.gz.gpg
+
+# El script imprime el comando psql a ejecutar:
+# psql "${DB_URL}" < /tmp/supabase-restore-NNNNN/backup-YYYY-MM-DD-HHmmss.sql
+
+# 2. Ejecutar el restore (sustituir DB_URL con connection string del proyecto destino)
+#    Supabase Dashboard → Settings → Database → Connection string → URI (NOT pooler)
+psql "${DB_URL}" < /tmp/supabase-restore-NNNNN/backup-YYYY-MM-DD-HHmmss.sql
+
+# 3. Verificar integridad
+psql "${DB_URL}" -c 'SELECT COUNT(*) FROM businesses;'
+psql "${DB_URL}" -c 'SELECT COUNT(*) FROM customers;'
+psql "${DB_URL}" -c 'SELECT COUNT(*) FROM appointments;'
+
+# 4. Limpiar archivo temporal
+rm -rf /tmp/supabase-restore-NNNNN/
+```
+
+**ADVERTENCIAS:**
+- El restore SOBREESCRIBE datos en el proyecto destino. Usar siempre un proyecto staging primero.
+- La `DB_URL` del proyecto destino se encuentra en: Supabase Dashboard → Settings → Database → Connection string → URI
+
+### Con PITR (requiere Supabase Pro)
+
+Si el plan Pro esta activo y el incidente ocurrio en las ultimas horas/dias:
 
 1. Supabase Dashboard → Settings → Database → Point in Time Recovery
 2. Seleccionar fecha y hora del punto de restauracion
 3. Iniciar restauracion
 4. Verificar integridad: contar filas en `businesses`, `customers`, `appointments`
 
-### Tiempo estimado de recuperacion
+> Recomendacion: hacer upgrade a Supabase Pro para habilitar PITR (mayor granularidad de recuperacion).
+
+### Tiempo estimado de recuperacion (RTO)
 
 Pendiente de drill (ver S4-OPS-02). Documentar aqui al completar.
+
+### Ejecutar backup manual inmediato
+
+Si necesitas un backup fuera del ciclo semanal:
+
+1. GitHub → repositorio → Actions → "Weekly Supabase Backup" → Run workflow
+2. O localmente con las env vars configuradas: `bash scripts/backup-supabase.sh`
 
 ---
 

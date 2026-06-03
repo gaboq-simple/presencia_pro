@@ -132,12 +132,35 @@ export async function handleLifestyleMessage(
 
   const model = selectModel(currentState);
 
-  const result = await dispatch(currentState, msg, currentContext, {
+  const dispatchedResult = await dispatch(currentState, msg, currentContext, {
     business,
     supabase,
     anthropicKey,
     model,
   });
+
+  // ── 4b. Acumular historial de conversación ────────────────────────────────
+  // Máximo MAX_HISTORY_TURNS turnos (user+assistant por turno = 2 mensajes por turno).
+  // Las transiciones silenciosas (responseText = '') no generan entradas — son
+  // encadenamientos internos del FSM, no intercambios visibles con el usuario.
+  // El reset por inactividad o estado terminal ya vacía currentContext = {}
+  // antes de llegar aquí, por lo que el historial arranca limpio automáticamente.
+
+  const MAX_HISTORY_TURNS = 6;
+
+  const result = dispatchedResult.responseText
+    ? {
+        ...dispatchedResult,
+        newContext: {
+          ...dispatchedResult.newContext,
+          messages: [
+            ...(currentContext.messages ?? []),
+            { role: 'user' as const, content: msg.body },
+            { role: 'assistant' as const, content: dispatchedResult.responseText },
+          ].slice(-(MAX_HISTORY_TURNS * 2)),
+        },
+      }
+    : dispatchedResult;
 
   // ── 5. Persistir nuevo estado ─────────────────────────────────────────────
 

@@ -16,6 +16,7 @@ import type { LifestyleBusinessConfig, ServiceRow } from './types';
  * Si se pasa `context`, incluye instrucciones para manejar side questions
  * pendientes (context.last_side_question) en la respuesta generada.
  */
+
 // ─── Services catalog block ───────────────────────────────────────────────────
 
 function buildCatalogSection(catalog: ServiceRow[]): string {
@@ -28,7 +29,7 @@ function buildCatalogSection(catalog: ServiceRow[]): string {
     return `- ${svc.name}: ${priceStr}, ${svc.duration_minutes} min${svc.description ? ` — ${svc.description}` : ''}`;
   });
 
-  return `\n\n## Servicios y precios\n${lines.join('\n')}`;
+  return lines.join('\n');
 }
 
 export function buildSystemPrompt(
@@ -36,8 +37,11 @@ export function buildSystemPrompt(
   context?: LifestyleBotContext,
   catalog?: ServiceRow[],
 ): string {
-  const sideQuestionSection = buildSideQuestionSection(context);
-  const catalogSection      = catalog ? buildCatalogSection(catalog) : '';
+  // business_type existe en el schema pero es opcional en el tipo — usar fallback hasta
+  // que todos los tenants lo tengan poblado (TODO: verificar en onboarding).
+  const businessType    = business.businessType ?? 'negocio';
+  const catalogContent  = catalog ? buildCatalogSection(catalog) : '';
+  const sideQSection    = buildSideQuestionSection(context);
 
   return `Eres ${business.botName}, el asistente virtual de ${business.name} en WhatsApp.
 
@@ -137,7 +141,7 @@ Los negocios de bienestar y estética (barberías, spas, salones de belleza) tie
 // ─── Side question section ────────────────────────────────────────────────────
 
 /**
- * Genera la sección del prompt sobre side questions si hay una pendiente en contexto.
+ * Genera el bloque XML de side question si hay una pendiente en contexto.
  * Retorna string vacío cuando no hay side question activa.
  */
 function buildSideQuestionSection(context: LifestyleBotContext | undefined): string {
@@ -145,10 +149,9 @@ function buildSideQuestionSection(context: LifestyleBotContext | undefined): str
 
   return `
 
-## Respuesta a pregunta lateral pendiente
+<pregunta_lateral_pendiente>
 El cliente preguntó: "${context.last_side_question}"
-- Responde esa pregunta PRIMERO con la información que tengas del negocio.
-- Usa ÚNICAMENTE información del negocio definida en este prompt — no inventes datos.
-- Tras responder, retoma el flujo con un conector natural como "Hablando de tu cita —", "Dicho eso —", "Retomando —" o "Por cierto —".
-- Ejemplo de formato: "El corte clásico cuesta $150 MXN y dura 30 min.\\nHablando de tu cita — tienes algun barbero de preferencia o te asignamos uno disponible?"`;
+Responde esa pregunta PRIMERO con la información que tengas del negocio.
+Luego retoma el flujo con un conector natural.
+</pregunta_lateral_pendiente>`;
 }

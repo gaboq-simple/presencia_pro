@@ -200,17 +200,20 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
-#### S1-OPS-01 — Supabase Pro + PITR + dump externo ⚪ todo
+#### S1-OPS-01 — Supabase Pro + PITR + dump externo 🟢 done (2026-05-21)
 **Tipo:** Mitad humana (upgrade del plan), mitad Claude Code (script)
 **Origen:** Phase 5, escenario 1 y 4
 **Por qué:** Hoy no hay backup verificable. Una corrupción = pérdida total.
 **Criterios de aceptación:**
-- [ ] Gabriel upgrade del proyecto Supabase de presenciapro a Pro ($25/mes)
-- [ ] Gabriel activa PITR en Settings → Database
-- [ ] Claude Code crea un script `scripts/backup-supabase.sh` que: corre `supabase db dump`, lo encripta con `gpg --symmetric` usando passphrase de env var, sube a Cloudflare R2 o S3 con timestamp
-- [ ] Documentar en `RUNBOOK.md` (que se crea en S2-DOC-01) el procedimiento de restore
-- [ ] Ejecutar restore drill al menos UNA vez en proyecto staging Supabase y cronometrar
-**Prompt:** Ver `SPRINT-PROMPTS.md` → S1-OPS-01
+- [ ] Gabriel upgrade del proyecto Supabase de presenciapro a Pro ($25/mes) — pendiente humano
+- [ ] Gabriel activa PITR en Settings → Database — pendiente humano (recomendación para Pro)
+- [x] Claude Code crea `scripts/backup-supabase.sh`: dump → gzip → gpg AES256 → upload R2 → retención 30 días → cleanup local
+- [x] Claude Code crea `scripts/restore-supabase.sh`: descarga R2 → descifra → descomprime → imprime comando psql (NO ejecuta automáticamente)
+- [x] Claude Code crea `.github/workflows/backup-weekly.yml`: cron domingos 03:00 UTC + workflow_dispatch manual
+- [x] Claude Code crea `scripts/README.md`: documentación de ambos scripts
+- [x] RUNBOOK.md actualizado con sección completa de backup/restore (listado, restore desde R2, PITR, backup manual)
+- [ ] Restore drill en staging (ver S4-OPS-02) — pendiente de Gabriel
+**Notas de ejecución:** PITR queda como recomendación para cuando Gabriel haga upgrade a Supabase Pro. Los 5 GitHub Secrets requeridos ya están configurados según instrucción (SUPABASE_ACCESS_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, BACKUP_ENCRYPTION_PASSPHRASE). SUPABASE_PROJECT_REF hardcodeado como env var en el workflow (no es secreto). El script restore prepara el archivo y muestra el psql command — Gabriel lo ejecuta manualmente para mayor control.
 
 ---
 
@@ -447,12 +450,107 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ### Semana 4 — Dry run y go-live
 
-#### S4-OPS-01 — Dry run de onboarding completo ⚪ todo
+#### S4-OPS-01 — Dry run de onboarding completo 🟢 done (2026-05-21)
 **Criterios de aceptación:**
-- [ ] Gabriel (o Claude Code asistiendo) onboardea un negocio dummy desde cero usando SOLO el script + checklist
-- [ ] Documentar todas las fricciones encontradas → cada una se vuelve issue/tarea
-- [ ] Iterar el script hasta que el flujo sea reproducible por una persona razonable siguiendo el checklist
+- [x] Gabriel (o Claude Code asistiendo) onboardea un negocio dummy desde cero usando SOLO el script + checklist
+- [x] Documentar todas las fricciones encontradas → cada una se vuelve issue/tarea
+- [ ] Iterar el script hasta que el flujo sea reproducible — fricciones documentadas, iteración pendiente de Gabriel
+**Notas de ejecución:**
+- Dry-run ejecutado con `onboarding/dummy-barberia-test.json` (3 staff, 3 servicios, organización). Salida correcta.
+- `--dry-run` y `--validate` ya existen en el script. Crea: organizations?, businesses, services, staff, staff_availability, staff_services.
+- 6 fricciones documentadas en `apps/lifestyle/ONBOARDING-FRICTION.md`:
+  - F-01 BLOQUEANTE: criterio S2-OPS-01 no implementado (whatsapp_phone_number_id no se valida post-insert)
+  - F-02: `{NEXT_PUBLIC_APP_URL}` no se resuelve en el checklist generado
+  - F-03: staff_availability config no soporta break_start/break_end
+  - F-04: report_whatsapp, review_url, max_late_minutes no configurables desde JSON
+  - F-05: timezone no valida contra IANA
+  - F-06: staff.phone y staff.whatsapp_id se insertan como strings vacíos sin advertencia
+- 4 gaps de go-live documentados: G-01 CRITICO (Template Approvals WhatsApp), G-02 (Embedded Signup no implementado), G-03 (timezone en notificaciones), G-04 (Upstash env vars no en Vercel)
+- 7 env vars faltantes en .env.local.example: SESSION_SECRET, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN, PRIVACY_POLICY_URL, ARCO_URL, NEXT_PUBLIC_SITE_URL, INTAKE_SECRET
 **Prompt:** Ver `SPRINT-PROMPTS.md` → S4-OPS-01
+
+---
+
+#### S4-OPS-04 — Endpoint GET /api/reports/usage 🟢 done (2026-05-21)
+**Origen:** Ad-hoc solicitado junto con S4-OPS-01
+**Criterios de aceptación:**
+- [x] `GET /api/reports/usage?month=YYYY-MM&business_id=<uuid>` retorna JSON con métricas de consumo
+- [x] Auth: solo owner o admin (getCurrentSession, mismo patrón que otros endpoints de reports)
+- [x] business_id opcional — default al business de la sesión; validado contra sesión si se pasa
+- [x] Retorna: total/completed/cancelled/no_show appointments, whatsapp_messages_sent/failed, unique_customers, new_customers, bot_conversations, human_takeovers, period, business_name, generated_at
+- [x] type-check pasa sin errores
+**Notas de ejecución:** Archivo: `apps/lifestyle/src/app/api/reports/usage/route.ts`. Exporta tipo `UsageReport`. Patrón idéntico a summary/route.ts y staff-metrics/route.ts. Rango mes: [inicio, fin_exclusivo) con ISO strings. Errores internos retornan 500 con mensaje genérico (sin leak de schema).
+
+---
+
+#### S4-BOT-01 — Debounce buffer para mensajes WhatsApp consecutivos 🟢 done (2026-05-23)
+**Origen:** Ad-hoc solicitado por Gabriel (fuera del sprint original)
+**Por qué:** Cuando un usuario envía 3 mensajes rápidos ("Hola" / "quiero un corte" / "para mañana"), el bot respondía 3 veces de forma encimada y caótica.
+**Archivos:**
+- `apps/lifestyle/src/lib/message-buffer.ts` (nuevo)
+- `apps/lifestyle/src/app/api/bot/route.ts` (modificado)
+**Criterios de aceptación:**
+- [x] Buffer en Redis con ventana configurable (`MESSAGE_BUFFER_WINDOW_MS`, default 2500ms)
+- [x] Key: `presenciapro:msgbuf:{phoneNumberId}:{phone}` — lista Redis, TTL 10s
+- [x] Lock: `presenciapro:msglock:{phoneNumberId}:{phone}` — SET NX, TTL = WINDOW_MS
+- [x] Primer mensaje adquiere lock, duerme la ventana, flushea buffer, concatena con '\n'
+- [x] Mensajes subsecuentes solo pushean al buffer; el lock owner los recoge
+- [x] Logging claro: `"Buffered N messages from +52XXX..., processing as single block"` (solo si N > 1)
+- [x] Sin Redis configurado (dev local): procesa directamente sin delay (fail-open)
+- [x] En error de Redis: fail-open, procesa mensaje original
+- [x] Mensajes interactive/audio/image/document: no bufferean (parseMetaPayload ya los filtra — sin cambio)
+- [x] Sin breaking changes al rate limiting, dedup, router, handlers, ni envío de respuestas
+- [x] Bonus: `messageId` ahora se pasa correctamente al engine (era `null` hardcodeado — fix colateral)
+- [x] Orphan recovery: si lock owner muere, el siguiente mensaje del usuario (dentro de 10s) adquiere el lock y procesa todos los mensajes acumulados
+- [x] type-check pasa sin errores
+**Notas de ejecución:**
+- Decisión de arquitectura: Redis SET NX como coordinador de instancias (Opción C — sin QStash, sin setTimeout crudo). El sleep vive en after() que Vercel Fluid Compute mantiene vivo.
+- Twilio handler no modificado (dev-only, no requiere buffer).
+- Tests: no implementados — respeta decisión cerrada del sprint. Validar manualmente via WhatsApp + logs de Vercel (`event: buffer_flushed`).
+- Edge case aceptado: si lock owner muere Y no llega otro mensaje en 10s, los mensajes bufferados expiran silenciosamente. El usuario reenvía.
+
+---
+
+#### S4-BOT-02 — Historial multi-turno en el FSM del bot 🟢 done (2026-05-23)
+**Origen:** TODO(MEDIO-2) documentado en greeting.ts:332-347
+**Por qué:** El clasificador recibía `recentHistory` casi siempre vacío o con 1 elemento. Cuando el cliente dice "el 2", el clasificador no tenía contexto de qué opciones se presentaron.
+**Archivos:**
+- `packages/engine/src/bot/lifestyle/handler.ts` (modificado)
+- `packages/engine/src/bot/lifestyle/states/greeting.ts` (modificado)
+**Criterios de aceptación:**
+- [x] Constante `MAX_HISTORY_TURNS = 6` en handler.ts (12 mensajes máx)
+- [x] Después de `dispatch()`, si `responseText` no es vacío: acumular `[...prevMessages, userMsg, botMsg].slice(-12)` en `result.newContext.messages`
+- [x] `greeting.ts` no sobrescribe `messages` con array parcial (deja la acumulación al handler)
+- [x] El reset por inactividad/estado terminal ya vacía `currentContext = {}` → `messages` se limpia implícitamente
+- [x] Transiciones silenciosas (`responseText === ''`) no generan entradas en el historial
+- [x] type-check pasa sin errores
+**Notas de ejecución:**
+- Implementación centralizada en handler.ts (~+20 líneas después del dispatch) en lugar de los 9 handlers individuales — mismo resultado, sin duplicación.
+- TODO(MEDIO-2) eliminado de greeting.ts. El campo `messages: [{ role: 'assistant', ... }]` incorrecto (que omitía el mensaje del usuario) fue reemplazado.
+- Transiciones silenciosas (responseText = '', ej. QUALIFYING_DATETIME fast-path) no generan entrada en el historial — el `if (dispatchedResult.responseText)` las filtra.
+- El buffer de debounce (S4-BOT-01) concatena mensajes con '\n' antes de llegar aquí — entra como un único turno `user`, correcto.
+- type-check: 0 errores.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-05-23)
+
+#### S4-BOT-03 — Rewrite completo del system prompt del bot 🟢 done (2026-05-23)
+**Origen:** Ad-hoc solicitado por Gabriel
+**Por qué:** El prompt anterior era funcional pero genérico. El nuevo introduce espejeo de estilo, detección emocional, manejo de flujo avanzado (mensajes concatenados, emojis como respuesta, múltiples citas), reglas de negocio explícitas alineadas con el FSM, soporte bilingüe, y tags XML para segmentación clara.
+**Archivos:**
+- `packages/engine/src/bot/lifestyle/prompt.ts` (rewrite del body de `buildSystemPrompt`, `buildCatalogSection`, `buildSideQuestionSection`)
+- `packages/engine/src/bot/lifestyle/types.ts` (añadido `businessType?: string` a `LifestyleBusinessConfig`)
+- `apps/lifestyle/src/app/api/bot/route.ts` (mapeo de `business_type`, handler no-texto por tipo: audio/image/video/sticker/document/location)
+**Criterios de aceptación:**
+- [x] Firma de `buildSystemPrompt(business, context?, catalog?)` sin cambios — ningún caller afectado
+- [x] `businessType` mapeado desde `businesses.business_type`; fallback `'negocio'` si no está poblado (TODO en type doc)
+- [x] Catálogo inyectado dentro de `<catalogo_servicios>` con el mismo formato de líneas
+- [x] `buildSideQuestionSection` genera bloque `<pregunta_lateral_pendiente>` (formato XML)
+- [x] No-texto Meta: audio/image/video/sticker/document/location → respuestas estáticas por tipo; sticker → silencio; location → query ligero por `phone_number_id`
+- [x] Razón documentada en `sendNonTextResponseMeta` por qué business no está disponible en ese punto del flujo
+**Notas de ejecución:**
+- `business_type` ya existe en el schema DB (`businesses` tabla). No se requiere migración.
+- El query de location en `sendNonTextResponseMeta` es necesario porque el non-text path retorna antes del bloque `after()` que llama `processMetaMessage` (donde se resuelve el negocio). Ambas rutas son mutuamente excluyentes.
+- Twilio (dev-only) mantiene `NON_TEXT_MESSAGE` como fallback genérico — no tiene granularidad de tipo en el mismo formato.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-05-23)
 
 ---
 
@@ -522,6 +620,11 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-20 | S3-UX-01, S3-UX-02, S3-UX-03, S3-OPS-01, S3-OPS-03 | done/blocked | Login → Server Component + nombre negocio. Footer soporte en Dashboard/Assistant/SiteFooter. 4 error.tsx con mailto+digest. /api/health creado + RUNBOOK. logger.ts con maskPhone/logBotError; 3 console.error maskeados. S3-OPS-01 bloqueado: Gabriel debe configurar UptimeRobot. |
 | 2026-05-20 | S3-UX-04, S3-OPS-02 | done | icon.tsx + apple-icon.tsx (ImageResponse), public/manifest.json, metadataBase+OG+twitter en layout.tsx, eslint.config.mjs. CI .github/workflows/ci.yml creado. Descubierto: 9 errores lint + 3 errores TS pre-existentes → CI fallará hasta S3-QA-01. |
 | 2026-05-20 | S3-QA-01 | done | Fix 9 errores lint (react-hooks/refs, set-state-in-effect, purity, entities) + 3 errores TS (casts Supabase). lint y type-check pasan 0 errores. CI listo para verde. |
+| 2026-05-21 | S1-OPS-01 | done | scripts/backup-supabase.sh (dump→gzip→gpg→R2→retención 30d), scripts/restore-supabase.sh (R2→descifra→descomprime→imprime psql command), .github/workflows/backup-weekly.yml (cron domingos 3am UTC + manual), scripts/README.md, RUNBOOK.md sección 6 actualizada. PITR queda como recomendación para upgrade a Pro. |
+| 2026-05-21 | S4-OPS-01, S4-OPS-04 | done | Dry-run con dummy-barberia-test.json (--dry-run y --validate funcionan). 6 fricciones + 4 gaps de go-live en ONBOARDING-FRICTION.md. Gap crítico: Template Approvals WhatsApp (notificaciones proactivas fallarán sin templates aprobados). 7 env vars faltantes en .env.local.example. Endpoint GET /api/reports/usage creado en src/app/api/reports/usage/route.ts. type-check limpio. |
+| 2026-05-23 | S4-BOT-01 | done | Debounce buffer Redis para mensajes WhatsApp consecutivos. message-buffer.ts (nuevo): bufferAndWait() con SET NX como lock owner. route.ts: after() usa buffer, messageId ahora se pasa correctamente al engine. Orphan recovery built-in. Fail-open en Redis caído. |
+| 2026-05-23 | S4-BOT-02 | done | Historial multi-turno centralizado en handler.ts. MAX_HISTORY_TURNS=6 (12 msgs). TODO(MEDIO-2) resuelto. greeting.ts corregido (ya no sobreescribía messages con array parcial). Transiciones silenciosas y resets implícitos funcionan correctamente. type-check limpio. 2 archivos, ~20 líneas. |
+| 2026-05-23 | S4-BOT-03 | done | Rewrite completo del system prompt. Nuevo prompt con tags XML: identidad, analisis_estilo, deteccion_emocional, deteccion_flujo, reglas_negocio, idioma, formato_whatsapp, catalogo_servicios. businessType mapeado desde DB con fallback 'negocio'. Non-text Meta ahora responde por tipo (audio/image/video/sticker/document/location). Firma de buildSystemPrompt sin cambios. 3 archivos. |
 ---
 
 ## Métricas del sprint

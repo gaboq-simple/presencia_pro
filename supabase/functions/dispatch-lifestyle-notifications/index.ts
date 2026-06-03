@@ -207,12 +207,22 @@ const MONTHS_ES = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ] as const;
 
-function formatDateSpanish(d: Date): string {
-  return `${DAYS_ES[d.getDay()]} ${d.getDate()} de ${MONTHS_ES[d.getMonth()]}`;
+function formatDateSpanish(d: Date, tz: string): string {
+  const localDate = d.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+  const [, monthStr, dayStr] = localDate.split('-');
+  const dayNum    = parseInt(dayStr!, 10);
+  const dayOfWeek = new Date(localDate + 'T12:00:00Z').getDay();
+  const monthIdx  = parseInt(monthStr!, 10) - 1;
+  return `${DAYS_ES[dayOfWeek]} ${dayNum} de ${MONTHS_ES[monthIdx]}`;
 }
 
-function formatTimeHHMM(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+function formatTimeHHMM(d: Date, tz: string): string {
+  return d.toLocaleTimeString('es-MX', {
+    timeZone: tz,
+    hour:     '2-digit',
+    minute:   '2-digit',
+    hour12:   false,
+  });
 }
 
 // ─── handleWaitlistExpiry ─────────────────────────────────────────────────────
@@ -398,6 +408,7 @@ Deno.serve(async (_req) => {
       businesses (
         whatsapp_phone_number_id,
         name,
+        timezone,
         review_url
       )
     `)
@@ -424,6 +435,7 @@ Deno.serve(async (_req) => {
     businesses: {
       whatsapp_phone_number_id: string;
       name:                     string;
+      timezone:                 string;
       review_url:               string | null;
     } | null;
   }>;
