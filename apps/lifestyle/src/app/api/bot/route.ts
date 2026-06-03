@@ -74,7 +74,7 @@ function rowToBusiness(row: BusinessRow): LifestyleBusinessConfig {
 }
 
 const BUSINESS_SELECT =
-  'id, name, slug, whatsapp_number, whatsapp_phone_number_id, ' +
+  'id, name, whatsapp_number, whatsapp_phone_number_id, ' +
   'bot_name, away_message, fallback_message, office_hours, ' +
   'walk_in_buffer_minutes, address, timezone, business_type';
 
@@ -716,24 +716,12 @@ async function processMetaMessage(
 
   // ── 1. Resolver negocio — HUECO 3: logs estructurados ────────────────────
 
-  console.log('LOOKUP_BEFORE', {
-    phoneNumberId,
-    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 40),
-    hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-  });
-
   const { data: businessData, error: bizError } = await supabase
     .from('businesses')
     .select(BUSINESS_SELECT)
     .eq('whatsapp_phone_number_id', phoneNumberId)
     .eq('active', true)
     .maybeSingle();
-
-  console.log('LOOKUP_AFTER', {
-    data: businessData ? 'FOUND:' + (businessData as { slug?: string }).slug : 'NULL',
-    error: bizError ? bizError.message : 'NO_ERROR',
-    phoneNumberId,
-  });
 
   if (bizError) {
     console.error(JSON.stringify({
