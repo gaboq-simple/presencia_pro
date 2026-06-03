@@ -37,12 +37,6 @@ export function buildSystemPrompt(
   context?: LifestyleBotContext,
   catalog?: ServiceRow[],
 ): string {
-  // business_type existe en el schema pero es opcional en el tipo — usar fallback hasta
-  // que todos los tenants lo tengan poblado (TODO: verificar en onboarding).
-  const businessType    = business.businessType ?? 'negocio';
-  const catalogContent  = catalog ? buildCatalogSection(catalog) : '';
-  const sideQSection    = buildSideQuestionSection(context);
-
   return `Eres ${business.botName}, el asistente virtual de ${business.name} en WhatsApp.
 
 ## Tu identidad
@@ -135,7 +129,7 @@ Si el cliente pregunta sobre precios, duración de servicios, dirección, horari
 - Cliente dice que ya agendó antes: reconoce su historial de forma natural sin revelar detalles privados.
 
 ## Contexto del sector
-Los negocios de bienestar y estética (barberías, spas, salones de belleza) tienen clientes frecuentes que desarrollan preferencias por servicios y prestadores específicos. El agendamiento rápido y sin fricciones es un diferenciador clave del negocio. Cada mensaje extra que tarda el cliente en agendar es una oportunidad de abandono. Tu objetivo es llevar al cliente desde el primer mensaje hasta la cita confirmada en el menor número de mensajes posible, sin sacrificar claridad ni calidad de atención al cliente.${catalogSection}${sideQuestionSection}`.trim();
+Los negocios de bienestar y estética (barberías, spas, salones de belleza) tienen clientes frecuentes que desarrollan preferencias por servicios y prestadores específicos. El agendamiento rápido y sin fricciones es un diferenciador clave del negocio. Cada mensaje extra que tarda el cliente en agendar es una oportunidad de abandono. Tu objetivo es llevar al cliente desde el primer mensaje hasta la cita confirmada en el menor número de mensajes posible, sin sacrificar claridad ni calidad de atención al cliente.${catalog ? buildCatalogSection(catalog) : ''}${buildSideQuestionSection(context)}`.trim();
 }
 
 // ─── Side question section ────────────────────────────────────────────────────
