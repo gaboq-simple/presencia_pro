@@ -615,6 +615,36 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-06 — Disponibilidad propositiva (bot ofrece horarios reales) 🟢 done (2026-06-05)
+**Origen:** Solicitado por Gabriel (2026-06-05). Smoke test real: el bot, al pedir disponibilidad, responde con MÁS preguntas en vez de consultar la agenda, y escaló a humano incorrectamente.
+**Alcance ESTRICTO:** FASE A (cálculo de disponibilidad) primero, verde con tests, y SOLO entonces FASE B (bot propositivo por fecha/hora). NO tocar: barbero específico (sprint siguiente), cancelar/reagendar, tono/idioma, System Prompt v2.
+**Rama:** `feat/availability-proactive` (sin merge a main).
+**Archivos (previstos):**
+- `packages/engine/src/bot/lifestyle/scheduling.ts` (day_of_week TZ-safe)
+- `packages/engine/src/bot/lifestyle/tzUtils.ts` (helper weekday TZ-independiente)
+- `packages/engine/src/bot/lifestyle/states/qualifyingDatetime.ts` (parseDate UTC-safe)
+- `packages/engine/src/bot/lifestyle/states/presentingSlots.ts` (getUTCDay + export builder)
+- `packages/engine/src/bot/lifestyle/availabilityIntent.ts` (nuevo, puro)
+- `packages/engine/src/bot/lifestyle/states/qualifyingStaff.ts` (ruteo propositivo)
+- Tests `node:test` (sin red, sin Supabase, sin Anthropic)
+**Criterios de aceptación:**
+- [x] FASE A: el cálculo de slots encuentra un barbero disponible día N 10:00-20:00 para un slot de las 17:00 (test que reproduce el caso Carlos).
+- [x] FASE A: "mañana" se calcula en el timezone del negocio (America/Mexico_City), no en UTC; un slot de las 17:00 local no se descarta por offset.
+- [x] FASE B: al pedir disponibilidad con fecha conocida, el bot consulta la agenda y OFRECE horarios concretos (no preguntas).
+- [x] FASE B: si la hora exacta no está libre, ofrece las alternativas más cercanas del mismo día en vez de escalar.
+- [x] Escalar a humano SOLO si no hay NINGÚN slot en rango razonable. (presentingSlots: preferido sin cupo → autoAssign; luego `findSlotsInNextDays` 5 días; luego waitlist; FALLBACK solo por error de query o sin disponibilidad real.)
+- [x] Fallback determinista si el LLM falla se conserva (`buildSlotsMessage` / `buildAltDateFallback`).
+- [x] Tests `node:test` deterministas verdes vía `npm test`; type-check/lint limpios.
+**Notas de ejecución:**
+- **Diagnóstico FASE A (causa raíz REAL, distinta a la hipótesis):** el cálculo de slots NO estaba roto. Verificado por SQL + reproducción con mock: con la base actual (Barbería El Estilo, 3 barberos vinculados + availability día 1-6 10:00-20:00) `getAvailableSlots` SÍ encuentra las 17:00 de mañana (sábado), tanto en servidor UTC como UTC-6. El escalado "no hay staff disponible para Corte de cabello" ($200) vino de un **dataset viejo** sin el servicio/vínculo — fue **problema de datos**, ya inexistente en la base actual. Suspect #1 (timezone del `day_of_week`): `requestedDate.getDay()` da el weekday correcto en México, pero **depende de que el servidor sea UTC** → fragilidad latente. Fix aplicado: derivar el weekday de forma TZ-independiente (`getUTCDay()` sobre noon-UTC) para no depender del TZ del runtime.
+- **FASE A — hardening aplicado:** nuevo helper `weekdayFromDateStr(dateStr)` en `tzUtils.ts` (getUTCDay sobre noon-UTC). `scheduling.ts` usa `weekdayFromDateStr(dateStr)` para `day_of_week` y en `waitlistFormatDate`. `qualifyingDatetime.ts:parseDate` reconvertido a getters/setters UTC (getUTCDate/getUTCDay/getUTCFullYear/setUTCDate) consistente con `nowLocal` anclado a noon-UTC; ramas "mañana"/"pasado mañana"/día de semana/mes-nombre/slash ahora TZ-safe. `presentingSlots.ts` ya migrado a `weekdayFromDateStr`.
+- **FASE B — bot propositivo:** nuevo detector puro `availabilityIntent.ts:isAvailabilityQuestion(text)` (regex, sin LLM). Ruteo: `qualifyingStaff.ts` — si el cliente pregunta disponibilidad antes de elegir barbero → `autoAssign=true`, fecha = la del mensaje (parseDate) o hoy → `SHOWING_SLOTS` (no insiste en barbero). `qualifyingDatetime.ts` — pregunta de disponibilidad SIN fecha concreta → parte de hoy → `SHOWING_SLOTS`. Con fecha concreta ya routeaba. `SHOWING_SLOTS` ofrece slots reales y, si el día pedido no tiene cupo, propone el día cercano (`findSlotsInNextDays`). **Fuera de alcance (respetado):** barbero específico ("quiero con Carlos") NO implementado; flujo "el que sea" intacto.
+- **Tests (`npm test`, node:test, 54 verdes):** `tests/availability.test.ts` (FASE A: bug Carlos 17:00 encontrado; parseDate mañana/hoy en MX no UTC; slot 17:00 → 23:00Z; slot ocupado no se ofrece; sin availability → []; sin staff_services → []; fecha pasada → próximo año). `tests/availabilityProactive.test.ts` (FASE B: detector positivos/negativos; `buildSlotsMessage` contiene horarios concretos; hora exacta no disponible comunica + alternativas). type-check `apps/lifestyle` limpio; lint 0 errores.
+- **Pendiente humano:** rama `feat/availability-proactive` para PR; sin merge a main; sin deploy a prod (NO aplicado). Cambios hechos en la rama de trabajo actual.
+**Prompt:** Ad-hoc/sprint solicitado por Gabriel (2026-06-05 — SPRINT DISPONIBILIDAD)
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -688,6 +718,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-23 | S4-BOT-03 | done | Rewrite completo del system prompt. Nuevo prompt con tags XML: identidad, analisis_estilo, deteccion_emocional, deteccion_flujo, reglas_negocio, idioma, formato_whatsapp, catalogo_servicios. businessType mapeado desde DB con fallback 'negocio'. Non-text Meta ahora responde por tipo (audio/image/video/sticker/document/location). Firma de buildSystemPrompt sin cambios. 3 archivos. |
 | 2026-06-03 | S4-BOT-04 | done | Cableado de datos reales del negocio al bot. businessContext.ts (módulo puro) + prompt.ts inyecta contexto real (reemplaza hardcode "bienestar y estética"). answerSideQuestion por topic con fallback [DERIVA]→minisite. Classifier enriquecido en qualifyingService/awaitingConfirmation/confirmationResponse. Migraciones 039/040/041 (no aplicadas). onboard-business retrocompatible + schemas extraídos a onboard-schema.ts. 24 tests node:test (`npm test`) verdes; type-check/lint limpios. Rama feat/business-context-wiring (sin merge). Observación: prompt.ts es markdown, NO el "System Prompt v2" XML de S4-BOT-03 → posible rewrite perdido. |
 | 2026-06-05 | S4-BOT-05 | done | Fricción conversacional (3 fixes). FIX1 debounce adaptativo + FIX2 race (lock retenido durante proceso, drain loop) + DEDUP de lote extraídos a message-buffer-core.ts (puro); message-buffer.ts wrapper; nueva API bufferAndProcess. FIX3 anti re-saludo en continuity.ts (puro) + greeting.ts pasa historial al generador. 5 env nuevas con defaults retrocompatibles. 43 tests node:test verdes (~9s); type-check/lint limpios; tsconfig.test.json gana override cjs para apps/lifestyle/src. Rama feat/conversation-friction (sin merge). Fuera de alcance: ruteo de disponibilidad = sprint 2. |
+| 2026-06-05 | S4-BOT-06 | done | Disponibilidad propositiva. FASE A: causa raíz era DATOS (dataset viejo), no lógica; slot calc verificado correcto. Hardening TZ-independiente: weekdayFromDateStr (getUTCDay sobre noon-UTC) en tzUtils/scheduling; parseDate UTC-safe en qualifyingDatetime. FASE B: availabilityIntent.ts:isAvailabilityQuestion (puro) + ruteo a SHOWING_SLOTS autoAssign desde qualifyingStaff/qualifyingDatetime; buildSlotsMessage exportado. 54 tests node:test verdes; type-check/lint limpios. Rama feat/availability-proactive (sin merge, sin prod). Fuera de alcance: barbero específico = sprint siguiente; flujo "el que sea" intacto. |
 ---
 
 ## Métricas del sprint

@@ -21,7 +21,7 @@ import { logBot } from '../../../utils/logger';
 import { buildSystemPrompt } from '../prompt';
 import { getAvailableSlots, findSlotsInNextDays, SchedulingQueryError } from '../scheduling';
 import { formatTimeHumanFromDate, formatTimeHuman, buildBookingNameQuestion, detectsServiceCorrection } from '../utils';
-import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate } from '../tzUtils';
+import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '../tzUtils';
 import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
@@ -268,7 +268,7 @@ export async function handleShowingSlots(
   if (context.autoAssign && displaySlots.length === 1) {
     const chosen        = displaySlots[0]!;
     const chosenDateStr = utcToLocalDateStr(chosen.startsAt, business.timezone);
-    const dayName       = DAYS_ES[new Date(chosenDateStr + 'T12:00:00Z').getDay()]!;
+    const dayName       = DAYS_ES[weekdayFromDateStr(chosenDateStr)]!;
     const dayNum        = parseInt(chosenDateStr.split('-')[2]!, 10);
     const monthName     = MONTHS_ES[parseInt(chosenDateStr.split('-')[1]!, 10) - 1]!;
     const timeStr       = formatTimeHumanFromDate(chosen.startsAt, business.timezone);
@@ -372,7 +372,7 @@ async function generateSlotsMessage(params: {
   const slotsText = slots
     .map((s, i) => {
       const localDs   = utcToLocalDateStr(s.startsAt, tz);
-      const dayName   = DAYS_ES[new Date(localDs + 'T12:00:00Z').getDay()]!;
+      const dayName   = DAYS_ES[weekdayFromDateStr(localDs)]!;
       const dayNum    = parseInt(localDs.split('-')[2]!, 10);
       const monthName = MONTHS_ES[parseInt(localDs.split('-')[1]!, 10) - 1]!;
       const time      = formatTimeHumanFromDate(s.startsAt, tz);
@@ -446,7 +446,7 @@ async function generateSlotsMessage(params: {
 
 // ─── Formato de slots (fallback determinista) ─────────────────────────────────
 
-function buildSlotsMessage(
+export function buildSlotsMessage(
   slots:               SlotCandidate[],
   isWalkIn:            boolean,
   autoAssign:          boolean,
@@ -473,7 +473,7 @@ function buildSlotsMessage(
 
   const lines = slots.map((slot, i) => {
     const localDs   = utcToLocalDateStr(slot.startsAt, tz);
-    const dayName   = DAYS_ES[new Date(localDs + 'T12:00:00Z').getDay()]!;
+    const dayName   = DAYS_ES[weekdayFromDateStr(localDs)]!;
     const dayNum    = parseInt(localDs.split('-')[2]!, 10);
     const monthName = MONTHS_ES[parseInt(localDs.split('-')[1]!, 10) - 1]!;
     const time      = formatTimeHumanFromDate(slot.startsAt, tz);
@@ -490,7 +490,7 @@ function buildSlotsMessage(
 /** Formatea un Date (noon UTC) a "Miercoles 7 de mayo" para mensajes al usuario. */
 function formatDateLabel(d: Date, tz: string): string {
   const localDs  = utcToLocalDateStr(d, tz);
-  const dayOfWeek = new Date(localDs + 'T12:00:00Z').getDay();
+  const dayOfWeek = weekdayFromDateStr(localDs);
   const dayNum    = parseInt(localDs.split('-')[2]!, 10);
   const monthIdx  = parseInt(localDs.split('-')[1]!, 10) - 1;
   return `${DAYS_ES[dayOfWeek]} ${dayNum} de ${MONTHS_ES[monthIdx]}`;

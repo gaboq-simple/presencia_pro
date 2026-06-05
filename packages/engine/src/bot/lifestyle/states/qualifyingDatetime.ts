@@ -20,6 +20,7 @@ import {
   buildSideQuestionResponse,
 } from '../clarification';
 import { detectsServiceCorrection } from '../utils';
+import { isAvailabilityQuestion } from '../availabilityIntent';
 import { utcToLocalDateStr, getTodayStr, noonUTCDate } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -125,6 +126,29 @@ export async function handleQualifyingDatetime(
       requestedDate:          parsedDate,
       requestedShift:         resolvedShift,
       ...(parsedTimeStr ? { requestedTime: parsedTimeStr } : {}),
+      clarification_attempts: 0,
+      last_side_question:     null,
+    };
+    return {
+      newState:     'SHOWING_SLOTS',
+      newContext,
+      responseText: '',
+    };
+  }
+
+  // ── FASE B: pregunta de disponibilidad sin fecha concreta ────────────────
+  // "¿a qué hora tienes?" / "¿qué disponibilidad hay?" sin un día explícito:
+  // partir de HOY y mostrar slots reales. SHOWING_SLOTS ofrecerá las fechas
+  // más cercanas si hoy no hay. No re-preguntar el día.
+  if (isAvailabilityQuestion(lower)) {
+    const today          = getTodayStr(deps.business.timezone);
+    const hasStaffChoice = context.staffId || context.autoAssign;
+    const newContext: LifestyleBotContext = {
+      ...context,
+      isWalkIn:               false,
+      requestedDate:          today,
+      requestedShift:         shift,
+      ...(hasStaffChoice ? {} : { autoAssign: true }),
       clarification_attempts: 0,
       last_side_question:     null,
     };
@@ -270,7 +294,7 @@ export function parseDate(lower: string, now: Date, tz: string): string | null {
   // "pasado mañana" debe verificarse ANTES de "mañana": \bmañana\b matchea ambos.
   if (lower.includes('pasado mañana') || lower.includes('pasado manana')) {
     const d = new Date(nowLocal);
-    d.setDate(d.getDate() + 2);
+    d.setUTCDate(d.getUTCDate() + 2);
     return dateToStr(d);
   }
 
@@ -278,7 +302,7 @@ export function parseDate(lower: string, now: Date, tz: string): string | null {
   // El shift (morning/afternoon) se detecta por separado vía MORNING_KEYWORDS / AFTERNOON_KEYWORDS.
   if (/\bmañana\b/.test(lower)) {
     const tomorrow = new Date(nowLocal);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     return dateToStr(tomorrow);
   }
 
@@ -302,9 +326,9 @@ export function parseDate(lower: string, now: Date, tz: string): string | null {
     const day   = parseInt(monthNameMatch[1]!, 10);
     const month = monthMap[monthNameMatch[2]!] ?? -1;
     if (month >= 0 && day >= 1 && day <= 31) {
-      const year = nowLocal.getFullYear();
-      const d    = new Date(year, month, day);
-      if (d < nowLocal) d.setFullYear(year + 1);
+      const year = nowLocal.getUTCFullYear();
+      const d    = new Date(Date.UTC(year, month, day, 12, 0, 0));
+      if (d < nowLocal) d.setUTCFullYear(year + 1);
       return dateToStr(d);
     }
   }
@@ -314,9 +338,9 @@ export function parseDate(lower: string, now: Date, tz: string): string | null {
     const day   = parseInt(slashMatch[1]!, 10);
     const month = parseInt(slashMatch[2]!, 10) - 1;
     if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
-      const year = nowLocal.getFullYear();
-      const d    = new Date(year, month, day);
-      if (d < nowLocal) d.setFullYear(year + 1);
+      const year = nowLocal.getUTCFullYear();
+      const d    = new Date(Date.UTC(year, month, day, 12, 0, 0));
+      if (d < nowLocal) d.setUTCFullYear(year + 1);
       return dateToStr(d);
     }
   }
@@ -326,15 +350,15 @@ export function parseDate(lower: string, now: Date, tz: string): string | null {
 
 function nextWeekday(from: Date, targetDay: number, isNext: boolean): Date {
   const d    = new Date(from);
-  const diff = (targetDay - d.getDay() + 7) % 7;
-  d.setDate(d.getDate() + (diff === 0 || isNext ? diff + 7 : diff));
+  const diff = (targetDay - d.getUTCDay() + 7) % 7;
+  d.setUTCDate(d.getUTCDate() + (diff === 0 || isNext ? diff + 7 : diff));
   return d;
 }
 
 function dateToStr(d: Date): string {
-  const y   = d.getFullYear();
-  const m   = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const y   = d.getUTCFullYear();
+  const m   = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 

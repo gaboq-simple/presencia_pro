@@ -136,3 +136,16 @@ export function noonUTCDate(dateStr: string): Date {
   const [year, month, day] = dateStr.split('-').map(Number) as [number, number, number];
   return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
 }
+
+/**
+ * Retorna el día de la semana (0=domingo … 6=sábado) para una fecha local
+ * "YYYY-MM-DD" de forma INDEPENDIENTE del timezone del runtime.
+ *
+ * Usa getUTCDay() sobre el mediodía UTC del día indicado: no depende de que el
+ * servidor esté en UTC (a diferencia de `new Date(...).getDay()`, que lee el
+ * timezone local del proceso). Esto evita que el cálculo de `day_of_week` para
+ * cruzar con staff_availability se corra de día si el runtime no es UTC.
+ */
+export function weekdayFromDateStr(dateStr: string): number {
+  return noonUTCDate(dateStr).getUTCDay();
+}
