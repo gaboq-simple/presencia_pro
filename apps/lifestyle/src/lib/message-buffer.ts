@@ -1,45 +1,45 @@
 // ─── Message Buffer — debounce de mensajes consecutivos ───────────────────────
-// Problema: cuando un usuario WhatsApp envía 3 mensajes rápidos ("Hola" /
-// "quiero un corte" / "para mañana"), el bot responde 3 veces encimado.
+// S4-BOT-01 + S4-BOT-05. Capa fina sobre Upstash Redis: arma el cliente, las
+// keys y la config desde env, y delega TODA la lógica (debounce adaptativo,
+// race-safety y dedup de lote) a message-buffer-core.ts —que es pura y
+// testeable sin red.
 //
-// Solución: buffer en Redis con ventana de debounce de 2.5s.
-//   - Primer mensaje de la ventana: adquiere lock con SET NX, espera WINDOW_MS,
-//     lee buffer completo, concatena y procesa como un solo bloque.
-//   - Mensajes subsecuentes (misma ventana): solo pushean al buffer y retornan.
-//     El lock owner los recogerá al despertar.
+// Problema original: cuando un usuario WhatsApp envía varios mensajes seguidos
+// ("Hola" / "quiero un corte" / "para mañana"), el bot respondía varias veces
+// encimado. S4-BOT-05 lo agrava cuando los mensajes vienen pausados.
 //
-// Arquitectura: Redis SET NX para elección de lock owner entre instancias de
-// Vercel Fluid Compute. El sleep vive dentro de after(), que mantiene la
-// instancia viva durante los 2.5s.
+// Solución (ver message-buffer-core.ts):
+//   - Debounce ADAPTATIVO: la ventana se re-arma con cada mensaje nuevo hasta
+//     un cap, consolidando ráfagas pausadas en un solo turno.
+//   - Race-safe: el lock del turno se mantiene durante todo el procesamiento;
+//     los mensajes que llegan mientras el modelo trabaja se drenan después,
+//     nunca en paralelo.
+//   - Dedup: reintentos de webhook (mismo message_id) se descartan al ingresar
+//     y al consolidar el lote.
 //
-// Recuperación de orphans: si el lock owner muere durante el sleep (edge case
-// ≈ 1 en 10,000):
-//   - El lock expira automáticamente después de WINDOW_MS.
-//   - Si el usuario envía otro mensaje dentro del TTL del buffer (10s), ese
-//     mensaje adquiere el lock, hace sleep, y flushea todos los mensajes
-//     acumulados (incluyendo los del owner muerto).
-//   - Si no llega otro mensaje en 10s, el buffer expira silenciosamente.
-//     El usuario simplemente reenvía. Este tradeoff es aceptable.
+// Arquitectura: Redis SET NX para elección de owner entre instancias de Vercel
+// Fluid Compute. El sleep/drain vive dentro de after(), que mantiene la
+// instancia viva durante la ventana + el procesamiento.
 //
 // Solo aplica a mensajes de tipo 'text'. Mensajes interactive/audio/image/
 // document no llegan a esta función — parseMetaPayload ya los filtra.
 //
-// Sin Redis configurado (dev local): bufferAndWait retorna inmediatamente con
-// el mensaje original (sin delay, sin buffer). Comportamiento transparente.
+// Sin Redis configurado (dev local): el mensaje se procesa de inmediato, sin
+// buffer ni delay. Comportamiento transparente. Fail-open ante errores de Redis.
 
 import { Redis } from '@upstash/redis';
+import {
+  buildSingleMessage,
+  loadBufferConfig,
+  runBufferedTurn,
+  type BufferedMessage,
+  type BufferKeys,
+  type FlushedBuffer,
+  type RedisLike,
+} from './message-buffer-core';
 
-// ─── Configuración ────────────────────────────────────────────────────────────
-
-/**
- * Ventana de debounce en ms. Configurable vía env var MESSAGE_BUFFER_WINDOW_MS.
- * Default: 2500ms (2.5 segundos).
- */
-export const MESSAGE_BUFFER_WINDOW_MS =
-  parseInt(process.env['MESSAGE_BUFFER_WINDOW_MS'] ?? '2500', 10);
-
-/** TTL del buffer en segundos. Debe ser mayor que WINDOW_MS para permitir recuperación de orphans. */
-const BUFFER_TTL_S = 10;
+export type { BufferedMessage, FlushedBuffer } from './message-buffer-core';
+export { loadBufferConfig } from './message-buffer-core';
 
 // ─── Redis client (singleton) ─────────────────────────────────────────────────
 
@@ -54,141 +54,71 @@ function getRedis(): Redis | null {
   return _redis;
 }
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
+// ─── Keys ─────────────────────────────────────────────────────────────────────
 
-export type BufferedMessage = {
-  text:          string;
-  timestamp:     number;
-  message_id:    string | null;
-  customer_name: string | null;
-};
-
-export type FlushedBuffer = {
-  /** Todos los textos concatenados con '\n'. */
-  combinedText:  string;
-  /** message_id del último mensaje en orden cronológico (para dedup en el engine). */
-  lastMessageId: string | null;
-  /** Nombre del primer mensaje con customerName no-null. */
-  customerName:  string | null;
-  /** Número de mensajes acumulados. */
-  count:         number;
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function bufferKey(phoneNumberId: string, fromPhone: string): string {
-  return `presenciapro:msgbuf:${phoneNumberId}:${fromPhone}`;
+function buildKeys(phoneNumberId: string, fromPhone: string): BufferKeys {
+  const base = `${phoneNumberId}:${fromPhone}`;
+  return {
+    buffer: `presenciapro:msgbuf:${base}`,
+    lock:   `presenciapro:msglock:${base}`,
+    seen:   `presenciapro:msgseen:${base}`,
+  };
 }
 
-function lockKey(phoneNumberId: string, fromPhone: string): string {
-  return `presenciapro:msglock:${phoneNumberId}:${fromPhone}`;
-}
+// ─── Deps de producción ───────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildSingleMessage(msg: BufferedMessage): FlushedBuffer {
-  return {
-    combinedText:  msg.text,
-    lastMessageId: msg.message_id,
-    customerName:  msg.customer_name,
-    count:         1,
-  };
-}
-
 // ─── API pública ──────────────────────────────────────────────────────────────
 
 /**
- * Hace debounce del mensaje entrante usando Redis como buffer distribuido.
+ * Acumula el mensaje entrante y, si esta invocación es elegida owner del turno,
+ * ejecuta el debounce adaptativo y procesa el/los lote(s) consolidado(s) vía
+ * `processFn`. Las invocaciones que no son owner solo empujan al buffer.
  *
- * - Si esta invocación adquiere el lock (primer mensaje de la ventana):
- *   Espera `MESSAGE_BUFFER_WINDOW_MS`, lee todos los mensajes acumulados,
- *   los concatena y retorna el resultado.
+ * - Sin Redis (dev local): procesa el mensaje original de inmediato.
+ * - Error de Redis: fail-open → procesa el mensaje original directamente.
  *
- * - Si otra instancia ya tiene el lock (mensaje subsecuente):
- *   Pushea al buffer y retorna `null`. El caller debe ignorar este mensaje —
- *   el lock owner lo procesará junto con los demás al despertar.
- *
- * - Sin Redis configurado (dev local):
- *   Retorna el mensaje original inmediatamente sin delay.
- *
- * - En caso de error Redis:
- *   Fail-open: retorna el mensaje original para no bloquear el bot.
+ * El llamador (route.ts) NO debe procesar el mensaje por su cuenta: todo el
+ * trabajo real ocurre dentro de `processFn`, que este buffer invoca cuando
+ * corresponde.
  */
-export async function bufferAndWait(
+export async function bufferAndProcess(
   phoneNumberId: string,
   fromPhone:     string,
   msg:           BufferedMessage,
-): Promise<FlushedBuffer | null> {
+  processFn:     (batch: FlushedBuffer) => Promise<void>,
+): Promise<void> {
   const redis = getRedis();
 
-  // Sin Redis: procesar directamente sin buffer ni delay
+  // Sin Redis: procesar directamente sin buffer ni delay.
   if (!redis) {
-    return buildSingleMessage(msg);
+    await processFn(buildSingleMessage(msg));
+    return;
   }
 
-  const bKey = bufferKey(phoneNumberId, fromPhone);
-  const lKey = lockKey(phoneNumberId, fromPhone);
+  const keys = buildKeys(phoneNumberId, fromPhone);
+  const cfg  = loadBufferConfig();
 
   try {
-    // 1. Agregar mensaje al buffer y refrescar su TTL
-    await redis.rpush(bKey, JSON.stringify(msg));
-    await redis.expire(bKey, BUFFER_TTL_S);
-
-    // 2. Intentar adquirir el lock de procesamiento
-    //    NX = solo si no existe | PX = TTL en milisegundos
-    //    Upstash retorna 'OK' si SET NX tuvo éxito, null si ya existía
-    const acquired = await redis.set(lKey, '1', { nx: true, px: MESSAGE_BUFFER_WINDOW_MS });
-
-    if (acquired === null) {
-      // Otra instancia tiene el lock — solo empujamos al buffer y salimos.
-      // El lock owner leerá este mensaje cuando despierte.
-      return null;
-    }
-
-    // 3. Somos el lock owner. Esperar la ventana de debounce.
-    await sleep(MESSAGE_BUFFER_WINDOW_MS);
-
-    // 4. Leer y limpiar el buffer atómicamente
-    const raw = await redis.lrange(bKey, 0, -1);
-    await redis.del(bKey, lKey);
-
-    if (!raw || raw.length === 0) {
-      // Buffer expiró (TTL de 10s) o fue limpiado por otra instancia.
-      // Procesar el mensaje original como fallback.
-      return buildSingleMessage(msg);
-    }
-
-    // 5. Parsear, ordenar cronológicamente y concatenar
-    const messages: BufferedMessage[] = raw
-      .map((item) => {
-        try {
-          return JSON.parse(item as string) as BufferedMessage;
-        } catch {
-          return null;
-        }
-      })
-      .filter((m): m is BufferedMessage => m !== null)
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    if (messages.length === 0) return buildSingleMessage(msg);
-
-    return {
-      combinedText:  messages.map((m) => m.text).join('\n'),
-      lastMessageId: messages[messages.length - 1]?.message_id ?? null,
-      customerName:  messages.find((m) => m.customer_name !== null)?.customer_name ?? null,
-      count:         messages.length,
-    };
-
+    await runBufferedTurn(
+      redis as unknown as RedisLike,
+      keys,
+      msg,
+      cfg,
+      { sleep, now: Date.now },
+      processFn,
+    );
   } catch (err) {
-    // Fail-open: Redis caído → procesar mensaje original directamente
+    // Fail-open: Redis caído → procesar el mensaje original directamente.
     console.error(JSON.stringify({
-      ts:    new Date().toISOString(),
+      ts:      new Date().toISOString(),
       service: 'bot',
-      event: 'message_buffer_error',
-      error: err instanceof Error ? err.message : String(err),
+      event:   'message_buffer_error',
+      error:   err instanceof Error ? err.message : String(err),
     }));
-    return buildSingleMessage(msg);
+    await processFn(buildSingleMessage(msg));
   }
 }
