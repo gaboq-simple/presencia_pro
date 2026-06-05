@@ -26,6 +26,7 @@ import type { MultiIntentClassification } from '../classifier';
 import { getCatalog, getActiveStaff } from '../catalog';
 import { parseDate } from './qualifyingDatetime';
 import { formatTimeHuman } from '../utils';
+import { buildDefaultGreetingPlan, buildGenerativeMessages, type ConvTurn } from '../continuity';
 import type { LifestyleIncomingMessage, ServiceRow, StaffRow, StateHandlerDeps, StateHandlerResult } from '../types';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -52,10 +53,14 @@ type GreetCase = 'none' | 'service_only' | 'service_date' | 'service_date_time' 
 
 export async function handleGreeting(
   msg: LifestyleIncomingMessage,
-  _context: LifestyleBotContext,
+  context: LifestyleBotContext,
   deps: StateHandlerDeps,
 ): Promise<StateHandlerResult> {
   const { business, supabase, anthropicKey } = deps;
+
+  // Historial reciente de la conversación (lo gestiona handler.ts). Si NO está
+  // vacío, la conversación ya está en curso → el generador no debe re-saludar.
+  const history: ConvTurn[] = (context.messages ?? []) as ConvTurn[];
 
   // ── RETURNING_CHECK ────────────────────────────────────────────────────────
 
@@ -264,44 +269,23 @@ export async function handleGreeting(
       break;
     }
     default: {
-      // 'none' — saludo genérico, con personalización si es cliente recurrente con favoritos
-      if (isReturning && favStaffName && favServiceName) {
-        plan = {
-          nextState: 'QUALIFYING_SERVICE',
-          sonnetInstruction:
-            `El cliente se llama ${customerName} y ya ha visitado el negocio antes. `
-            + `La última vez agendó ${favServiceName} con ${favStaffName}. `
-            + `Salúdalo por nombre de forma cálida y pregunta si quiere agendar lo mismo `
-            + `(${favServiceName} con ${favStaffName}) o prefiere algo diferente. `
-            + `Máximo 2 líneas. Sin exclamaciones al inicio.`,
-          deterministicFallback:
-            `Hola ${customerName}, que gusto! Quieres agendar tu ${favServiceName} con ${favStaffName} como la última vez, o prefieres algo diferente?`,
-        };
-      } else if (isReturning && favServiceName) {
-        plan = {
-          nextState: 'QUALIFYING_SERVICE',
-          sonnetInstruction:
-            `El cliente se llama ${customerName} y ya ha visitado el negocio antes. `
-            + `La última vez agendó ${favServiceName}. `
-            + `Salúdalo por nombre de forma cálida y pregunta si quiere agendar lo mismo o algo diferente. `
-            + `Máximo 2 líneas. Sin exclamaciones al inicio.`,
-          deterministicFallback:
-            `Hola ${customerName}! La última vez fue un ${favServiceName}. Agendamos lo mismo?`,
-        };
-      } else {
-        plan = {
-          nextState: 'QUALIFYING_SERVICE',
-          sonnetInstruction: isReturning
-            ? `El cliente se llama ${customerName} y ya ha visitado el negocio antes. `
-              + `Salúdalo por nombre de forma sutil y cálida, sin mencionar su historial explícitamente. `
-              + `Pregunta en qué puedes ayudarle hoy. Máximo 2 líneas.`
-            : `Es un cliente nuevo. Salúdalo de forma amigable en nombre de ${business.name}. `
-              + `Pregunta en qué puedes ayudarle. Máximo 2 líneas.`,
-          deterministicFallback: isReturning
-            ? `Hola ${customerName}, que gusto verte de nuevo. En que puedo ayudarte hoy?`
-            : `Hola, soy ${business.botName}. En que puedo ayudarte?`,
-        };
-      }
+      // 'none' — saludo genérico. Delega en buildDefaultGreetingPlan, que elige
+      // entre BIENVENIDA (conversación nueva) y CONTINUACIÓN sin re-saludo
+      // (conversación en curso, según el historial). Anti re-saludo: FIX 3.
+      const defaultPlan = buildDefaultGreetingPlan({
+        isReturning,
+        customerName,
+        favStaffName,
+        favServiceName,
+        businessName: business.name,
+        botName:      business.botName,
+        history,
+      });
+      plan = {
+        nextState:             'QUALIFYING_SERVICE',
+        sonnetInstruction:     defaultPlan.sonnetInstruction,
+        deterministicFallback: defaultPlan.deterministicFallback,
+      };
       break;
     }
   }
@@ -309,10 +293,13 @@ export async function handleGreeting(
   // ── Generar responseText vía Claude Sonnet ─────────────────────────────────
 
   const systemPrompt = buildSystemPrompt(business, undefined, services);
+  // FIX 3 — pasar el historial reciente + la instrucción al generador. Así el
+  // modelo sabe que la conversación ya está en curso y no re-saluda.
+  const generativeMessages = buildGenerativeMessages(history, plan.sonnetInstruction);
   const greetingText = await generateGreetingText(
     anthropicKey,
     systemPrompt,
-    plan.sonnetInstruction,
+    generativeMessages,
     deps.model,
     plan.deterministicFallback,
     business.id,
@@ -418,7 +405,7 @@ function resolveStaffFromValue(value: string, staff: StaffRow[]): StaffRow | nul
 async function generateGreetingText(
   apiKey:         string,
   system:         string,
-  userPrompt:     string,
+  messages:       ConvTurn[],
   model:          string,
   fallback:       string,
   businessId:     string,
@@ -432,7 +419,7 @@ async function generateGreetingText(
       model,
       maxTokens: 160,
       system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      messages:  [{ role: 'user', content: userPrompt }],
+      messages,
       timeoutMs: TIMEOUT_SONNET_MS,
       context:   { businessId, customerPhone, state: 'GREETING' },
     });
