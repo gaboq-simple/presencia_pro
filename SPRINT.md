@@ -589,6 +589,32 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-05 — Fricción conversacional (consolidación + continuidad) 🟢 done (2026-06-05)
+**Origen:** Solicitado por Gabriel (2026-06-04). Smoke test real en WhatsApp reveló 3 bugs.
+**Por qué:** En una conversación real: (1) el bot re-saludó a media conversación perdiendo el contexto del estado; (2) 2 mensajes seguidos generaron respuestas encimadas/repetidas; (3) el bot nunca respondió la pregunta de disponibilidad (esto último es RUTEO = sprint 2, NO se toca aquí).
+**Alcance ESTRICTO:** Solo 3 fixes. NO tocar: catálogo de situaciones, ruteo de intenciones fuera de flujo (cancelar/reagendar/disponibilidad), tono/idioma del clasificador, ni System Prompt v2.
+**Archivos (previstos):**
+- `apps/lifestyle/src/lib/message-buffer.ts` + nuevo `message-buffer-core.ts` (lógica pura testeable)
+- `apps/lifestyle/src/app/api/bot/route.ts` (cablear nueva API drain/process del buffer)
+- `packages/engine/src/bot/lifestyle/continuity.ts` (nuevo, puro) + `states/greeting.ts` (anti re-saludo)
+- Tests `node:test` (sin red, sin Supabase, sin Anthropic)
+**Criterios de aceptación:**
+- [x] FIX 1 — Debounce adaptativo: ventana base se re-arma con cada mensaje nuevo hasta un cap. Configurable por env (base/extensión/cap) con defaults actuales. Fail-open si Redis cae.
+- [x] FIX 2 — Race: el lock se mantiene durante el procesamiento (no se libera antes). Mensajes que llegan durante el proceso se acumulan para el siguiente turno (drain loop), nunca en paralelo.
+- [x] DEDUP — Al consolidar un lote, deduplicar contra TODOS los message_id, no solo el último.
+- [x] FIX 3 — Continuidad: las llamadas generativas reciben historial reciente + estado; si el estado NO es inicial, el generador NO produce saludo de bienvenida. Fallback determinista por estado se conserva.
+- [x] Tests `node:test` deterministas (debounce adaptativo, race, dedup de lote, anti re-saludo) corren en segundos vía `npm test`.
+- [x] type-check/lint limpios; rama `feat/conversation-friction`; sin merge a main.
+**Notas de ejecución:**
+- **FIX 1+2+DEDUP** se extrajo a `message-buffer-core.ts` (PURO, I/O inyectado vía `RedisLike` + `{sleep, now}`), y `message-buffer.ts` quedó como wrapper fino (cliente Upstash + keys + `loadBufferConfig` desde env). Nueva API pública: `bufferAndProcess(phoneNumberId, fromPhone, msg, processFn)` reemplaza a `bufferAndWait`. El owner del turno mantiene el lock durante todo el `processFn` y ejecuta un drain loop: ventana adaptativa → `lrange`+`del` → `consolidateBatch` → `processFn` → repetir si llegaron mensajes durante el proceso. Sin Redis (dev) o ante error de Redis → fail-open: procesa el mensaje original directo.
+- Env nuevas (con defaults = valores actuales, retrocompatible): `MESSAGE_BUFFER_WINDOW_MS=2500`, `MESSAGE_BUFFER_EXTENSION_MS=2500`, `MESSAGE_BUFFER_MAX_WINDOW_MS=10000`, `MESSAGE_BUFFER_LOCK_TTL_MS=60000`, `MESSAGE_BUFFER_SEEN_TTL_S=120`.
+- **FIX 3** se extrajo a `continuity.ts` (PURO): `isConversationInProgress`, `buildGenerativeMessages` (historial reciente cap 6 + instrucción como turno final), y `buildDefaultGreetingPlan` que, si hay historial, REEMPLAZA el plan de bienvenida por `CONTINUATION_INSTRUCTION`/`FALLBACK` (sin lenguaje de saludo). `greeting.ts` ahora pasa el historial al generador (`generateGreetingText` recibe `ConvTurn[]` en vez de un único userPrompt sintetizado).
+- Tests: 43 verdes vía `npm test` en ~9s (`tests/messageBuffer.test.ts` con FakeRedis en memoria + reloj/sleep simulados; `tests/continuity.test.ts` anti re-saludo, incluye repro del bug de la evidencia). type-check (`apps/lifestyle`) y eslint limpios. Se añadió `apps/lifestyle/src/**/*.ts: cjs` a `tsconfig.test.json` para que ts-node cargue el core como CommonJS bajo `node --test`.
+- **Fuera de alcance (visto, NO tocado):** el bot no responde la pregunta de disponibilidad → es RUTEO de intenciones fuera de flujo = sprint 2. Otras llamadas generativas (qualifyingService/Staff/awaitingConfirmation/confirmed/showingSlots) NO se enriquecieron con historial para limitar el blast radius; solo `greeting` (donde se reproducía el re-saludo). Mirroring de tono y responder preguntas nuevas = sprint 2/3.
+**Prompt:** Ad-hoc/módulo solicitado por Gabriel (2026-06-04 — SPRINT FRICCIÓN)
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -661,6 +687,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-05-23 | S4-BOT-02 | done | Historial multi-turno centralizado en handler.ts. MAX_HISTORY_TURNS=6 (12 msgs). TODO(MEDIO-2) resuelto. greeting.ts corregido (ya no sobreescribía messages con array parcial). Transiciones silenciosas y resets implícitos funcionan correctamente. type-check limpio. 2 archivos, ~20 líneas. |
 | 2026-05-23 | S4-BOT-03 | done | Rewrite completo del system prompt. Nuevo prompt con tags XML: identidad, analisis_estilo, deteccion_emocional, deteccion_flujo, reglas_negocio, idioma, formato_whatsapp, catalogo_servicios. businessType mapeado desde DB con fallback 'negocio'. Non-text Meta ahora responde por tipo (audio/image/video/sticker/document/location). Firma de buildSystemPrompt sin cambios. 3 archivos. |
 | 2026-06-03 | S4-BOT-04 | done | Cableado de datos reales del negocio al bot. businessContext.ts (módulo puro) + prompt.ts inyecta contexto real (reemplaza hardcode "bienestar y estética"). answerSideQuestion por topic con fallback [DERIVA]→minisite. Classifier enriquecido en qualifyingService/awaitingConfirmation/confirmationResponse. Migraciones 039/040/041 (no aplicadas). onboard-business retrocompatible + schemas extraídos a onboard-schema.ts. 24 tests node:test (`npm test`) verdes; type-check/lint limpios. Rama feat/business-context-wiring (sin merge). Observación: prompt.ts es markdown, NO el "System Prompt v2" XML de S4-BOT-03 → posible rewrite perdido. |
+| 2026-06-05 | S4-BOT-05 | done | Fricción conversacional (3 fixes). FIX1 debounce adaptativo + FIX2 race (lock retenido durante proceso, drain loop) + DEDUP de lote extraídos a message-buffer-core.ts (puro); message-buffer.ts wrapper; nueva API bufferAndProcess. FIX3 anti re-saludo en continuity.ts (puro) + greeting.ts pasa historial al generador. 5 env nuevas con defaults retrocompatibles. 43 tests node:test verdes (~9s); type-check/lint limpios; tsconfig.test.json gana override cjs para apps/lifestyle/src. Rama feat/conversation-friction (sin merge). Fuera de alcance: ruteo de disponibilidad = sprint 2. |
 ---
 
 ## Métricas del sprint
