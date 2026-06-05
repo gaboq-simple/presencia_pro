@@ -34,6 +34,7 @@ import {
   utcToLocalMinutes,
   localTimeToUTC,
   isSameDayInTZ,
+  weekdayFromDateStr,
 } from './tzUtils';
 import { formatTimeHumanFromDate } from './utils';
 
@@ -316,7 +317,7 @@ function waitlistFormatDate(d: Date, tz: string): string {
   const localDateStr = utcToLocalDateStr(d, tz);
   const [, , dayStr] = localDateStr.split('-');
   const dayNum  = parseInt(dayStr!, 10);
-  const dayOfWeek = new Date(localDateStr + 'T12:00:00Z').getDay();
+  const dayOfWeek = weekdayFromDateStr(localDateStr);
   const monthIdx  = parseInt(localDateStr.split('-')[1]!, 10) - 1;
   // suprime warning TS — localMin no se usa en date, es de formato de hora
   void localMin;
@@ -384,8 +385,9 @@ export async function getAvailableSlots(
   const minStart = isWalkIn ? addMinutes(new Date(), walkInBufferMinutes) : null;
   // dateStr en timezone del negocio (requestedDate es noon UTC de ese día local)
   const dateStr   = utcToLocalDateStr(requestedDate, tz);
-  // getDay() sobre noon UTC es el weekday correcto (noon UTC ≡ noon local para MX)
-  const dayOfWeek = requestedDate.getDay();  // 0=domingo, 6=sábado
+  // weekday TZ-independiente: derivado de la fecha LOCAL del negocio, no del TZ
+  // del runtime. Antes usaba requestedDate.getDay(), que asumía servidor UTC.
+  const dayOfWeek = weekdayFromDateStr(dateStr);  // 0=domingo, 6=sábado
 
   // Ventana UTC que cubre el día calendario completo en el timezone del negocio
   const dayStartUTC = localTimeToUTC(dateStr, '00:00', tz);

@@ -24,6 +24,9 @@ import {
 } from '../clarification';
 import { buildSystemPrompt } from '../prompt';
 import { detectsServiceCorrection } from '../utils';
+import { isAvailabilityQuestion } from '../availabilityIntent';
+import { parseDate } from './qualifyingDatetime';
+import { getTodayStr } from '../tzUtils';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
@@ -76,6 +79,26 @@ export async function handleQualifyingStaff(
     context.staffId && !activeStaff.some((s) => s.id === context.staffId)
       ? { ...context, staffId: undefined, autoAssign: undefined }
       : context;
+
+  // ── FASE B: pregunta de disponibilidad → ofrecer slots (sin seguir preguntando) ──
+  // Si el cliente pregunta "¿qué horario hay mañana?" / "¿a qué hora tienes?",
+  // no insistir en elegir barbero: asignar "el que sea" (autoAssign) y mostrar
+  // slots reales. Si trae fecha la usamos; si no, partimos de hoy y SHOWING_SLOTS
+  // ofrecera las alternativas mas cercanas.
+  if (isAvailabilityQuestion(msg.body)) {
+    const bodyLower     = msg.body.trim().toLowerCase();
+    const parsed        = parseDate(bodyLower, msg.timestamp, business.timezone);
+    const requestedDate = effectiveContext.requestedDate ?? parsed ?? getTodayStr(business.timezone);
+    const newContext: LifestyleBotContext = {
+      ...effectiveContext,
+      autoAssign:             true,
+      staffId:                undefined,
+      requestedDate,
+      clarification_attempts: 0,
+      last_side_question:     null,
+    };
+    return { newState: 'SHOWING_SLOTS', newContext, responseText: '' };
+  }
 
   // Si solo hay un barbero activo para este servicio: saltar con autoAssign
   if (activeStaff.length <= 1) {
