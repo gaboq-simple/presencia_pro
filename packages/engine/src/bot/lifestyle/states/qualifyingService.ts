@@ -23,6 +23,7 @@ import {
 } from '../clarification';
 import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
+import { answerSideQuestionDeterministic } from '../sideQuestion';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
@@ -117,10 +118,20 @@ export async function handleQualifyingService(
   }
 
   // ── SIDE QUESTION ─────────────────────────────────────────────────────────
+  // GAP 2 (S4-BOT-07): si el clasificador detecta la pregunta con alta confianza
+  // pero NO produjo respuesta (side_question_answer null), NO caer a CLARIFY.
+  // Derivar deterministamente: plantilla/honesto por keyword o [DERIVA] al minisite.
 
-  if (classification.intent === 'SIDE_QUESTION' && clarResult.prefixMessage) {
-    const flowQuestion  = buildFlowQuestion(servicesForClassifier);
-    const responseText  = buildSideQuestionResponse(clarResult.prefixMessage, flowQuestion);
+  if (classification.intent === 'SIDE_QUESTION' && clarResult.action === 'CLARIFY') {
+    const answer = clarResult.prefixMessage
+      ?? answerSideQuestionDeterministic(
+        classification.value ?? msg.body,
+        business,
+        servicesForClassifier,
+        { appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '' },
+      );
+    const flowQuestion = buildFlowQuestion(servicesForClassifier);
+    const responseText = buildSideQuestionResponse(answer, flowQuestion);
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   clarResult.updatedContext,

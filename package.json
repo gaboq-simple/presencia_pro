@@ -11,7 +11,7 @@
     "dev": "npm run dev --workspace=clients/dra-quevedo",
     "build": "npm run build --workspace=clients/dra-quevedo",
     "new-client": "ts-node --project tsconfig.scripts.json scripts/new-client.ts",
-    "test": "TS_NODE_PROJECT=tsconfig.test.json TS_NODE_TRANSPILE_ONLY=1 node --require ts-node/register --test tests/businessContext.test.ts tests/onboardSchema.test.ts tests/messageBuffer.test.ts tests/continuity.test.ts tests/availability.test.ts tests/availabilityProactive.test.ts"
+    "test": "TS_NODE_PROJECT=tsconfig.test.json TS_NODE_TRANSPILE_ONLY=1 node --require ts-node/register --test tests/businessContext.test.ts tests/onboardSchema.test.ts tests/messageBuffer.test.ts tests/continuity.test.ts tests/availability.test.ts tests/availabilityProactive.test.ts tests/sideQuestion.test.ts"
   },
   "devDependencies": {
     "ts-node": "^10.9.0",

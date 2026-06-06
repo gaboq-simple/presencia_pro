@@ -102,7 +102,9 @@ export function formatOfficeHours(officeHours: OfficeHours | null | undefined): 
 
 /** Lista de atributos/amenities en true, traducidos a etiquetas legibles. */
 const ATTRIBUTE_LABELS: Record<string, string> = {
+  pays_cash:             'acepta pago en efectivo',
   pays_card:             'acepta pago con tarjeta',
+  pays_transfer:         'acepta transferencia',
   parking:               'estacionamiento',
   kids_friendly:         'apto para niños',
   wifi:                  'wifi',
