@@ -645,6 +645,41 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-07 — Catálogo side-questions [FIJO]/[DERIVA] (Zlot) 🟢 done (2026-06-06)
+**Origen:** Solicitado por Gabriel (2026-06-06). Auditoría dirigida halló gaps de **cableado** (no de datos ni de detección): las [FIJO] principales ya responden con dato real vía `buildBusinessContext`, pero (1) GREETING ignora la side-question del primer mensaje, (2) el fallback [DERIVA] no está cableado mid-flow (cae a CLARIFY), (3) formas de pago solo mapean `pays_card`.
+**Decisión de arquitectura:** respuestas DETERMINISTAS por topic + Haiku como respaldo. Topic determinista + dato presente → PLANTILLA FIJA (cero LLM). Topic `other` / dato ausente / combinado → Haiku (`side_question_answer`) o fallback [DERIVA]. Reutiliza `classifyMultiIntent` + `buildBusinessContext`, sin sistema paralelo.
+**Alcance ESTRICTO:** NO tocar cancelar/reagendar/"mi cita", tono/idioma del clasificador, multi-registro de plantillas, System Prompt v2, ni onboarding.
+**Rama:** `feat/sidequestion-catalog` (desde main actualizado, sin merge).
+**Archivos (previstos):**
+- `packages/engine/src/bot/lifestyle/sideQuestion.ts` (nuevo, puro: router + plantillas + horarios naturales + formas de pago)
+- `packages/engine/src/bot/lifestyle/states/greeting.ts` (GAP 1)
+- `packages/engine/src/bot/lifestyle/states/qualifyingService.ts` (GAP 2)
+- `packages/engine/src/bot/lifestyle/states/awaitingConfirmation.ts` (GAP 2)
+- `packages/engine/src/bot/lifestyle/businessContext.ts` (GAP 3: labels efectivo/transferencia)
+- Tests `node:test` (sin red, sin Supabase, sin Anthropic)
+**Criterios de aceptación:**
+- [x] Plantillas deterministas con el texto exacto acordado (ubicación con/sin mapa, horarios naturales, precio exacto, duración, servicios, formas de pago, niños, estacionamiento, reseñas/[DERIVA]).
+- [x] Formateo de office_hours a lenguaje natural (agrupar días con mismo horario).
+- [x] Regla de dato faltante: bandera (pago/niños/estacionamiento) sin dato → respuesta honesta (NO minisite); [DERIVA] real sin dato → minisite.
+- [x] Enrutador: topic determinista+dato → plantilla (no Haiku); topic other / dato ausente / combinado → defer (Haiku/[DERIVA]).
+- [x] GAP 1: GREETING con side-question como primer mensaje responde la pregunta, no saludo genérico.
+- [x] GAP 2: fallback [DERIVA]/honesto funciona mid-flow (qualifyingService, awaitingConfirmation), no solo en CONFIRMED.
+- [x] GAP 3: formas de pago soportan efectivo, tarjeta y transferencia.
+- [x] Tests `node:test` deterministas verdes vía `npm test` (97 tests, 0 fail).
+**Notas de ejecución:**
+- **Módulo nuevo `sideQuestion.ts` (puro):** `routeSideQuestion()` enruta por topic extendido → `{mode:'answer',text}` (plantilla determinista, cero LLM) o `{mode:'defer'}` (el caller usa Haiku/[DERIVA]). `refineTopic(base,question)` deriva payment/kids/parking/reviews/services por keyword (sin tocar el clasificador). Helpers: `formatOfficeHoursNatural` (agrupa días consecutivos con mismo horario → "de lunes a viernes de 10:00 a 20:00, y sábados…"), `paymentForms` (efectivo/tarjeta/transferencia desde `pays_cash`/`pays_card`/`pays_transfer`), `resolveTargetService` (precio/duración exactos por nombre o servicio único), `derivaFallback`, `answerSideQuestionDeterministic` (atajo mid-flow), `composeGreetingSideAnswer`. `MISSING_DATA_ANSWER` para banderas sin dato.
+- **GAP 1 (greeting.ts):** tras `classifyMultiIntent`, si `multi.sideQuestion && greetCase==='none'` → responde la pregunta (router determinista; si defer → `classifyIntent` Haiku → si null `derivaFallback`) + saludo breve + invitación; preserva aviso de privacidad para clientes nuevos. Sigue a `QUALIFYING_SERVICE`. Helper `buildPrivacyNotice` extraído.
+- **GAP 2 (qualifyingService.ts + awaitingConfirmation.ts):** la rama SIDE_QUESTION ya no exige `side_question_answer`/`prefixMessage`; si el clasificador no produjo respuesta → `answerSideQuestionDeterministic` (plantilla/honesto por keyword o [DERIVA]) en vez de caer a CLARIFY/ambiguo.
+- **GAP 3 (businessContext.ts):** `ATTRIBUTE_LABELS` ahora incluye `pays_cash`/`pays_transfer` además de `pays_card`; `paymentForms` mapea las tres.
+- **Decisión de diseño confirmada en tests:** mid-flow, las preguntas de precio/horario/ubicación/duración cuyo dato existe las responde Haiku (con `buildBusinessContext`); el fallback determinista solo cubre categorías keyword-detectables (banderas/servicios/reseñas) y deriva el resto — alineado con "Haiku como respaldo".
+- **Tests:** `tests/sideQuestion.test.ts` (33 casos) — plantillas exactas, formateo de horarios (incl. ejemplo del prompt), formas de pago, banderas true/false, regla de dato faltante, defer vs answer, refineTopic, composición de GREETING. `npm test` global 97 verdes. `tsc --noEmit` en `apps/lifestyle` limpio.
+- **Fuera de alcance (anotado, NO implementado):** campos `parking`/`kids`/`pago` deberían entrar al **onboarding** (sprint futuro) — hoy se cargan a mano en `businesses.attributes`. Tampoco se cableó la side-question combinada booking+pregunta en GREETING (ej. "quiero un corte, ¿cuánto cuesta?" responde el booking y omite la pregunta) ni se modificó el tono/idioma del clasificador.
+- **Deuda / mejora futura (decisión consciente):** el ahorro determinista (plantilla, cero LLM) aplica **solo en GREETING**, donde `classifyMultiIntent` entrega el topic enumerado y `routeSideQuestion` dispara la plantilla antes de un 2º Haiku. Mid-flow (QUALIFYING_SERVICE/AWAITING_CONFIRMATION) la respuesta sale de Haiku (`classifyIntent` ya corre y tiene `buildBusinessContext`), porque `answerSideQuestionDeterministic` **fuerza `topic:'other'`** y pierde el enumerado → price/hours/location/duration no son keyword-detectables y caen a [DERIVA]. Extender el determinismo a mid-flow (preservar el topic enumerado en `answerSideQuestionDeterministic` en vez de forzar `'other'`) es mejora futura **ligada al pendiente de topic determinista en el clasificador** (que hoy no emite topic enumerado en `classifyIntent` single-intent).
+- **Pendiente humano:** rama `feat/sidequestion-catalog` para PR; sin merge a main; sin deploy a prod.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-06-06 — SPRINT CATÁLOGO [FIJO]+[DERIVA])
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero

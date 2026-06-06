@@ -17,6 +17,7 @@ import { classifyIntent } from '../classifier';
 import { buildSideQuestionResponse } from '../clarification';
 import { getCatalog } from '../catalog';
 import { buildBusinessContext } from '../businessContext';
+import { answerSideQuestionDeterministic } from '../sideQuestion';
 import { logBotError } from '../utils/logger';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -137,16 +138,21 @@ export async function handleAwaitingConfirmation(
   }
 
   // ── SIDE QUESTION (sin confirmación) ──────────────────────────────────────
+  // GAP 2 (S4-BOT-07): si no hay respuesta del clasificador (side_question_answer
+  // null), derivar deterministamente en vez de caer al fallback ambiguo.
 
   if (
     classification.intent === 'SIDE_QUESTION' &&
-    classification.confidence >= CONFIRM_THRESHOLD &&
-    classification.side_question_answer
+    classification.confidence >= CONFIRM_THRESHOLD
   ) {
-    const responseText = buildSideQuestionResponse(
-      classification.side_question_answer,
-      FLOW_QUESTION,
-    );
+    const answer = classification.side_question_answer
+      ?? answerSideQuestionDeterministic(
+        classification.value ?? msg.body,
+        deps.business,
+        catalog,
+        { appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '' },
+      );
+    const responseText = buildSideQuestionResponse(answer, FLOW_QUESTION);
     return {
       newState:     'AWAITING_CONFIRMATION',
       newContext:   {

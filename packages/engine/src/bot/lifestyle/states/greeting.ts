@@ -21,8 +21,10 @@ import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
 import type { LifestyleBotContext, LifestyleBotState } from '../../../types/lifestyle.types';
 import { buildSystemPrompt } from '../prompt';
 import { logBot } from '../../../utils/logger';
-import { classifyMultiIntent } from '../classifier';
+import { classifyMultiIntent, classifyIntent } from '../classifier';
 import type { MultiIntentClassification } from '../classifier';
+import { buildBusinessContext } from '../businessContext';
+import { routeSideQuestion, derivaFallback, composeGreetingSideAnswer } from '../sideQuestion';
 import { getCatalog, getActiveStaff } from '../catalog';
 import { parseDate } from './qualifyingDatetime';
 import { formatTimeHuman } from '../utils';
@@ -190,6 +192,55 @@ export async function handleGreeting(
       : {}),
   };
 
+  // ── GAP 1 (S4-BOT-07): side-question pura como primer mensaje ──────────────
+  // Si el mensaje es una pregunta sobre el negocio y NO trae datos de reserva
+  // (greetCase 'none'), respóndela en vez de soltar un saludo genérico.
+  // Determinista por topic; defer → Haiku (classifyIntent) → fallback [DERIVA].
+
+  if (multi.sideQuestion && greetCase === 'none') {
+    const sqOpts = { appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '' };
+    const route = routeSideQuestion({
+      topic:    multi.sideQuestion.topic,
+      question: multi.sideQuestion.question,
+      business,
+      services,
+      opts:     sqOpts,
+    });
+
+    let answer: string;
+    if (route.mode === 'answer') {
+      answer = route.text;
+    } else {
+      const haikuAnswer = await classifyIntent({
+        userMessage:      multi.sideQuestion.question,
+        availableOptions: [],
+        flowQuestion:     'El cliente hizo una pregunta sobre el negocio.',
+        businessContext:  buildBusinessContext(business, services, sqOpts),
+        recentHistory:    [],
+        anthropicKey,
+      }).then((c) => c.side_question_answer).catch(() => null);
+      answer = haikuAnswer ?? derivaFallback(business, sqOpts);
+    }
+
+    const composed = composeGreetingSideAnswer({
+      answer,
+      isReturning,
+      customerName,
+      botName:      business.botName,
+      businessName: business.name,
+      hasHistory:   history.length > 0,
+    });
+    const responseText = !isReturning
+      ? `${composed}\n\n${buildPrivacyNotice()}`
+      : composed;
+
+    return {
+      newState:   'QUALIFYING_SERVICE',
+      newContext: { ...baseContext },
+      responseText,
+    };
+  }
+
   // ── Determinar estado siguiente y prompts ──────────────────────────────────
 
   type GreetPlan = {
@@ -309,10 +360,8 @@ export async function handleGreeting(
 
   // Para clientes nuevos: append aviso de privacidad al final (LFPDPPP Art. 8).
   // Consentimiento tácito: el cliente sigue interactuando tras el aviso.
-  const privacyUrl = process.env['PRIVACY_POLICY_URL'] ?? 'https://zentriq.mx/aviso-de-privacidad';
-  const privacyNotice = `Al continuar, aceptas nuestro aviso de privacidad: ${privacyUrl}`;
   const responseText = !isReturning
-    ? `${greetingText}\n\n${privacyNotice}`
+    ? `${greetingText}\n\n${buildPrivacyNotice()}`
     : greetingText;
 
   // ── Ensamblar resultado ────────────────────────────────────────────────────
@@ -334,6 +383,12 @@ export async function handleGreeting(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Aviso de privacidad para clientes nuevos (LFPDPPP Art. 8). Consentimiento tácito. */
+function buildPrivacyNotice(): string {
+  const privacyUrl = process.env['PRIVACY_POLICY_URL'] ?? 'https://zentriq.mx/aviso-de-privacidad';
+  return `Al continuar, aceptas nuestro aviso de privacidad: ${privacyUrl}`;
+}
 
 /**
  * Parsea una expresión de hora en español a formato "HH:MM".
