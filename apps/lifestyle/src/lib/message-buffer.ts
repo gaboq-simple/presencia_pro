@@ -50,7 +50,13 @@ let _redis: Redis | null = null;
 
 function getRedis(): Redis | null {
   if (!_url || !_token) return null;
-  if (!_redis) _redis = new Redis({ url: _url, token: _token });
+  // automaticDeserialization:false — Upstash por defecto hace JSON.parse de los
+  // valores al leer. Como guardamos JSON.stringify(msg) con rpush, una lectura
+  // con lrange devolvería el OBJETO ya parseado y consolidateBatch volvería a
+  // hacer JSON.parse sobre él → throw → batch null → processFn nunca corre.
+  // Desactivarlo mantiene los valores como strings crudos (igual que el fake de
+  // tests) y la consolidación funciona.
+  if (!_redis) _redis = new Redis({ url: _url, token: _token, automaticDeserialization: false });
   return _redis;
 }
 

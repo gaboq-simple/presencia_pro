@@ -95,6 +95,12 @@ export type RunResult =
 export function consolidateBatch(raw: unknown[]): FlushedBuffer | null {
   const parsed: BufferedMessage[] = (raw ?? [])
     .map((item) => {
+      // Defensa en profundidad: Upstash con automaticDeserialization=true
+      // devuelve el valor YA parseado (objeto). Si recibimos un objeto, lo
+      // usamos tal cual; solo parseamos cuando es string.
+      if (item && typeof item === 'object') {
+        return item as BufferedMessage;
+      }
       try {
         return JSON.parse(item as string) as BufferedMessage;
       } catch {
