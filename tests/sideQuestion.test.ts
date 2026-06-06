@@ -14,6 +14,7 @@ import {
   derivaFallback,
   answerSideQuestionDeterministic,
   composeGreetingSideAnswer,
+  isServiceOrPriceQuestion,
   MISSING_DATA_ANSWER,
 } from '../packages/engine/src/bot/lifestyle/sideQuestion';
 import type { LifestyleBusinessConfig } from '../packages/engine/src/bot/lifestyle/types';
@@ -232,6 +233,59 @@ test('regla dato faltante: niños/estacionamiento sin dato → respuesta honesta
   const biz: LifestyleBusinessConfig = { ...business, attributes: {} };
   assert.equal(routeSideQuestion({ topic: 'other', question: '¿atienden niños?', business: biz, services: catalog, opts: OPTS }).text, MISSING_DATA_ANSWER);
   assert.equal(routeSideQuestion({ topic: 'other', question: '¿hay estacionamiento?', business: biz, services: catalog, opts: OPTS }).text, MISSING_DATA_ANSWER);
+});
+
+// ─── Bug de mapeo: bandera presente-en-false ≠ dato ausente (S4-BOT-07 polish) ─
+
+test('bandera false NO es ausente: parking=false → negativa, no honesta', () => {
+  const no: LifestyleBusinessConfig = { ...business, attributes: { parking: false } };
+  const r = routeSideQuestion({ topic: 'other', question: '¿hay estacionamiento?', business: no, services: catalog, opts: OPTS });
+  assert.equal(r.text, 'No contamos con estacionamiento.');
+  assert.notEqual(r.text, MISSING_DATA_ANSWER);
+});
+
+test('bandera false NO es ausente: kids_friendly=false → negativa, no honesta', () => {
+  const no: LifestyleBusinessConfig = { ...business, attributes: { kids_friendly: false } };
+  const r = routeSideQuestion({ topic: 'other', question: '¿atienden niños?', business: no, services: catalog, opts: OPTS });
+  assert.equal(r.text, 'Por ahora solo atendemos adultos.');
+  assert.notEqual(r.text, MISSING_DATA_ANSWER);
+});
+
+test('pago: banderas presentes-en-false → negativa real, NO dato faltante', () => {
+  const biz: LifestyleBusinessConfig = { ...business, attributes: { pays_cash: false, pays_card: false, pays_transfer: false } };
+  const r = routeSideQuestion({ topic: 'other', question: '¿aceptan tarjeta?', business: biz, services: catalog, opts: OPTS });
+  assert.equal(r.text, 'Por el momento no aceptamos efectivo, tarjeta y transferencia.');
+  assert.notEqual(r.text, MISSING_DATA_ANSWER);
+});
+
+test('pago: una bandera en true entre falses → afirmativa de la habilitada', () => {
+  const biz: LifestyleBusinessConfig = { ...business, attributes: { pays_cash: true, pays_card: false } };
+  const r = routeSideQuestion({ topic: 'other', question: '¿cómo puedo pagar?', business: biz, services: catalog, opts: OPTS });
+  assert.equal(r.text, 'Aceptamos efectivo.');
+});
+
+test('pago: banderas de pago AUSENTES → respuesta honesta (dato faltante)', () => {
+  const biz: LifestyleBusinessConfig = { ...business, attributes: { parking: true } };
+  const r = routeSideQuestion({ topic: 'other', question: '¿aceptan transferencia?', business: biz, services: catalog, opts: OPTS });
+  assert.equal(r.text, MISSING_DATA_ANSWER);
+});
+
+// ─── Pertinencia del menú de servicios (S4-BOT-07 polish #3) ──────────────────
+
+test('isServiceOrPriceQuestion: true para preguntas de servicios/precio', () => {
+  assert.equal(isServiceOrPriceQuestion('¿qué servicios ofrecen?'), true);
+  assert.equal(isServiceOrPriceQuestion('¿cuánto cuesta el corte?'), true);
+  assert.equal(isServiceOrPriceQuestion('¿cuál es el precio?'), true);
+  assert.equal(isServiceOrPriceQuestion('¿manejan tinte?'), true);
+});
+
+test('isServiceOrPriceQuestion: false para ubicación/horario/pago/niños/estacionamiento/reseñas', () => {
+  assert.equal(isServiceOrPriceQuestion('¿dónde están ubicados?'), false);
+  assert.equal(isServiceOrPriceQuestion('¿a qué hora abren?'), false);
+  assert.equal(isServiceOrPriceQuestion('¿aceptan tarjeta?'), false);
+  assert.equal(isServiceOrPriceQuestion('¿atienden niños?'), false);
+  assert.equal(isServiceOrPriceQuestion('¿hay estacionamiento?'), false);
+  assert.equal(isServiceOrPriceQuestion('quiero dejar una reseña'), false);
 });
 
 test('regla dato faltante: [DERIVA] real (productos) → minisite', () => {

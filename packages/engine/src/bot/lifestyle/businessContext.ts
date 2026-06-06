@@ -118,6 +118,18 @@ export function formatAttributes(attributes: Record<string, boolean> | null | un
     .map(([k]) => ATTRIBUTE_LABELS[k] ?? k);
 }
 
+/**
+ * Lista de atributos conocidos explícitamente en false, traducidos a etiquetas.
+ * Clave para que el LLM NO confunda "bandera en false" (dato presente negativo)
+ * con "bandera ausente" (sin dato). Solo reporta llaves conocidas en ATTRIBUTE_LABELS.
+ */
+export function formatAttributesNegative(attributes: Record<string, boolean> | null | undefined): string[] {
+  if (!attributes) return [];
+  return Object.keys(ATTRIBUTE_LABELS)
+    .filter((k) => attributes[k] === false)
+    .map((k) => ATTRIBUTE_LABELS[k]!);
+}
+
 // ─── Contexto estructurado ────────────────────────────────────────────────────
 
 /**
@@ -159,6 +171,13 @@ export function buildBusinessContext(
   const amenities = formatAttributes(business.attributes);
   if (amenities.length > 0) {
     lines.push(`Comodidades: ${amenities.join(', ')}`);
+  }
+
+  // Banderas explícitamente en false: el negocio NO cuenta con esto (dato real,
+  // no ausencia de dato). Evita que el LLM responda "no tengo información".
+  const noAmenities = formatAttributesNegative(business.attributes);
+  if (noAmenities.length > 0) {
+    lines.push(`No cuenta con: ${noAmenities.join(', ')}`);
   }
 
   if (business.reviewUrl?.trim()) {

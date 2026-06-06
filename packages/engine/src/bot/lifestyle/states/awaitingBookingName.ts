@@ -168,7 +168,7 @@ async function buildSideAnswerFromService(
       ? `$${service.price.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${service.currency}`
       : 'sin costo adicional';
 
-    return `Por cierto, el costo es ${priceStr} y la duracion es de ${service.duration_minutes} min.`;
+    return `El costo es ${priceStr} y la duracion es de ${service.duration_minutes} min.`;
   } catch (err) {
     logBotError({ context: 'awaitingBookingName.buildSideAnswerFromService', error: err, businessId: deps.business.id });
     return null;

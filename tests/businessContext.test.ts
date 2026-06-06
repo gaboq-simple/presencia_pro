@@ -85,11 +85,22 @@ test('buildBusinessContext: incluye tipo, dirección, mapa, horarios y servicios
   assert.match(ctx, /Tinte: \$500 a \$900/);
 });
 
-test('buildBusinessContext: incluye comodidades solo de attributes en true', () => {
+test('buildBusinessContext: comodidades en true bajo "Comodidades"; false bajo "No cuenta con"', () => {
   const ctx = buildBusinessContext(business, catalog, { appUrl: APP_URL });
   assert.match(ctx, /Comodidades: .*acepta pago con tarjeta/);
   assert.match(ctx, /Comodidades: .*estacionamiento/);
-  assert.doesNotMatch(ctx, /wifi/); // wifi=false → no aparece
+  // wifi=false NO se omite (eso lo confundiría con dato ausente): se reporta como negativo.
+  assert.doesNotMatch(ctx, /Comodidades: .*wifi/);
+  assert.match(ctx, /No cuenta con: .*wifi/);
+});
+
+test('buildBusinessContext: omite "No cuenta con" cuando no hay banderas en false', () => {
+  const ctx = buildBusinessContext(
+    { ...business, attributes: { pays_card: true, parking: true } },
+    catalog,
+    { appUrl: APP_URL },
+  );
+  assert.doesNotMatch(ctx, /No cuenta con:/);
 });
 
 test('buildBusinessContext: incluye reseñas y link al minisite', () => {
