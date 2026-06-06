@@ -63,6 +63,25 @@ class FakeRedis implements RedisLike {
   }
 }
 
+// ─── DeserializingFakeRedis: replica el automaticDeserialization de Upstash ────
+// El cliente real @upstash/redis (automaticDeserialization=true por defecto)
+// hace JSON.parse de los valores al leer. Como rpush guarda JSON.stringify(msg),
+// lrange devuelve el OBJETO ya parseado, no el string crudo. Este fake reproduce
+// ese comportamiento real para atrapar el bug de doble-parse de S4-BOT-05.
+
+class DeserializingFakeRedis extends FakeRedis {
+  override async lrange(key: string, start: number, stop: number): Promise<unknown[]> {
+    const raw = await super.lrange(key, start, stop);
+    return raw.map((v) => {
+      try {
+        return JSON.parse(v as string);
+      } catch {
+        return v;
+      }
+    });
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const KEYS: BufferKeys = { buffer: 'buf', lock: 'lock', seen: 'seen' };
@@ -240,6 +259,41 @@ test('race: una invocación que no es owner solo bufferea (status=buffered)', as
   assert.deepEqual(result, { status: 'buffered' });
   assert.equal(processed, false, 'no procesó: otra instancia es owner');
   assert.equal(await redis.llen(KEYS.buffer), 1, 'el mensaje quedó en el buffer para el owner');
+});
+
+// ─── Regresión: Upstash auto-deserializa en lrange (S4-BOT-05 prod bug) ───────
+// Con el cliente REAL, lrange devuelve objetos (no strings). El consolidateBatch
+// debe tolerarlo; de lo contrario hace JSON.parse(objeto) → null → processFn
+// NUNCA corre → bot no responde, 0 llamadas a Meta. Este test FALLA con el
+// código viejo (doble parse) y PASA con el fix tolerante.
+
+test('regresión: lrange auto-deserializado (Upstash real) igual llega a processFn', async () => {
+  const redis = new DeserializingFakeRedis();
+  let clock = 0;
+  const deps = { now: () => clock, sleep: async (ms: number) => { clock += ms; } };
+
+  const batches: FlushedBuffer[] = [];
+  const result = await runBufferedTurn(
+    redis, KEYS, msg('m1', 'hola', 100), CFG, deps,
+    async (b) => { batches.push(b); },
+  );
+
+  assert.deepEqual(result, { status: 'processed', turns: 1 });
+  assert.equal(batches.length, 1, 'processFn DEBE ejecutarse pese a la des-serialización de Upstash');
+  assert.equal(batches[0]!.combinedText, 'hola');
+  assert.equal(batches[0]!.count, 1);
+});
+
+test('regresión: consolidateBatch tolera items ya parseados (objetos)', () => {
+  // Simula lo que devuelve lrange con automaticDeserialization=true.
+  const raw = [
+    msg('a', 'primero', 100),
+    msg('b', 'segundo', 200),
+  ];
+  const out = consolidateBatch(raw);
+  assert.ok(out);
+  assert.equal(out!.combinedText, 'primero\nsegundo');
+  assert.equal(out!.count, 2);
 });
 
 // ─── Dedup de ingreso (reintentos de webhook) ─────────────────────────────────
