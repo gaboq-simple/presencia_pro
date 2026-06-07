@@ -38,14 +38,6 @@ const ADVANCE_THRESHOLD  = 0.85;
 const CLARIFY_THRESHOLD  = 0.60;
 const MAX_CLARIFICATIONS = 2;
 
-// Conectores para retomar el flujo después de una side question
-const RETAKE_CONNECTORS = [
-  'Hablando de tu cita — ',
-  'Dicho eso — ',
-  'Retomando — ',
-  'Por cierto — ',
-] as const;
-
 // ─── Función principal ────────────────────────────────────────────────────────
 
 /**
@@ -191,20 +183,13 @@ export function buildRepeatOptionsMessage(
 }
 
 /**
- * Combina el prefixMessage (respuesta side question) con la pregunta del flujo
- * usando un conector aleatorio.
+ * Combina el prefixMessage (respuesta side question) con la pregunta del flujo.
+ * Sin conectores de relleno ("Dicho eso —", "Por cierto —"): la respuesta es
+ * dato + pregunta natural de retorno, en una sola forma consistente.
  */
 export function buildSideQuestionResponse(
   prefixMessage: string,
   flowQuestion:  string,
 ): string {
-  const connector = pickConnector();
-  return `${prefixMessage}\n${connector}${flowQuestion}`;
-}
-
-// ─── Helpers privados ─────────────────────────────────────────────────────────
-
-function pickConnector(): string {
-  const idx = Math.floor(Math.random() * RETAKE_CONNECTORS.length);
-  return RETAKE_CONNECTORS[idx] ?? RETAKE_CONNECTORS[0];
+  return `${prefixMessage} ${flowQuestion}`;
 }

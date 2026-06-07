@@ -130,10 +130,22 @@ const KW_PAYMENT = ['pago', 'pagar', 'pagos', 'tarjeta', 'efectivo', 'transferen
 const KW_KIDS    = ['nino', 'ninos', 'nina', 'ninas', 'infantil', 'hijo', 'hijos', 'bebe', 'bebes', 'peques'];
 const KW_PARKING = ['estacionamiento', 'estacionar', 'parking', 'parqueo', 'aparcar', 'cochera', 'valet'];
 const KW_REVIEWS = ['resena', 'resenas', 'opinion', 'opiniones', 'queja', 'quejas', 'reclamo', 'reclamar', 'calificar', 'calificacion', 'review', 'reviews', 'mala experiencia'];
-const KW_SERVICES = ['servicio', 'servicios', 'ofrecen', 'ofreces', 'manejan'];
+const KW_SERVICES = ['servicio', 'servicios', 'ofrecen', 'ofreces', 'manejan', 'menu', 'catalogo'];
+const KW_PRICE    = ['precio', 'precios', 'cuesta', 'cuestan', 'cuanto cuesta', 'cobran', 'cobra', 'vale', 'valen', 'costo', 'costos', 'tarifa', 'tarifas'];
 
 function hasKeyword(text: string, keywords: string[]): boolean {
   return keywords.some((kw) => text.includes(kw));
+}
+
+/**
+ * True si la pregunta es sobre servicios o precio. Útil para decidir si es
+ * pertinente anexar la lista/menú de servicios a la respuesta (S4-BOT-07 polish):
+ * el menú solo aporta en preguntas de servicios/precio o al iniciar/retomar la
+ * reserva, no en respuestas de ubicación/horario/pago/niños/estacionamiento/reseñas.
+ */
+export function isServiceOrPriceQuestion(question: string): boolean {
+  const q = normalize(question);
+  return hasKeyword(q, KW_SERVICES) || hasKeyword(q, KW_PRICE);
 }
 
 /**
@@ -228,9 +240,18 @@ export function routeSideQuestion(params: {
     }
 
     case 'payment': {
-      const forms = paymentForms(business.attributes);
-      if (forms.length === 0) return { mode: 'answer', text: MISSING_DATA_ANSWER };
-      return { mode: 'answer', text: `Aceptamos ${joinNatural(forms)}.` };
+      const attrs = business.attributes;
+      const forms = paymentForms(attrs);
+      if (forms.length > 0) return { mode: 'answer', text: `Aceptamos ${joinNatural(forms)}.` };
+      // Sin formas en true: distinguir banderas presentes-en-false (negativa real)
+      // de banderas ausentes (sin dato → honesta). NO colapsar ambos casos.
+      const declined = PAYMENT_FLAGS
+        .filter(([key]) => attrs?.[key] === false)
+        .map(([, label]) => label);
+      if (declined.length > 0) {
+        return { mode: 'answer', text: `Por el momento no aceptamos ${joinNatural(declined)}.` };
+      }
+      return { mode: 'answer', text: MISSING_DATA_ANSWER };
     }
 
     case 'kids': {

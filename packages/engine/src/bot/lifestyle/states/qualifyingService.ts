@@ -23,11 +23,14 @@ import {
 } from '../clarification';
 import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
-import { answerSideQuestionDeterministic } from '../sideQuestion';
+import { answerSideQuestionDeterministic, isServiceOrPriceQuestion } from '../sideQuestion';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
 const FLOW_QUESTION = 'Que servicio te interesa?';
+// Retorno natural y consistente tras una side-question NO relacionada a servicios/precio.
+// No anexa el menú (la lista satura respuestas de ubicación/horario/pago/etc.).
+const RETURN_TO_BOOKING = 'Te gustaria agendar una cita?';
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 export async function handleQualifyingService(
@@ -123,14 +126,19 @@ export async function handleQualifyingService(
   // Derivar deterministamente: plantilla/honesto por keyword o [DERIVA] al minisite.
 
   if (classification.intent === 'SIDE_QUESTION' && clarResult.action === 'CLARIFY') {
+    const question = classification.value ?? msg.body;
     const answer = clarResult.prefixMessage
       ?? answerSideQuestionDeterministic(
-        classification.value ?? msg.body,
+        question,
         business,
         servicesForClassifier,
         { appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '' },
       );
-    const flowQuestion = buildFlowQuestion(servicesForClassifier);
+    // Solo anexa el menú de servicios cuando es pertinente (servicios/precio).
+    // Para ubicación/horario/pago/niños/etc. usa un retorno simple sin lista.
+    const flowQuestion = isServiceOrPriceQuestion(question)
+      ? buildFlowQuestion(servicesForClassifier)
+      : RETURN_TO_BOOKING;
     const responseText = buildSideQuestionResponse(answer, flowQuestion);
     return {
       newState:     'QUALIFYING_SERVICE',
