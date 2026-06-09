@@ -20,6 +20,7 @@ export type {
 
 export { handleLifestyleMessage } from './lifestyle/handler';
 export { invalidateBusinessCache } from './lifestyle/catalog';
+export { checkEasterEgg } from './lifestyle/easterEgg';
 export type {
   HandleLifestyleMessageOptions,
   LifestyleBotResponse,

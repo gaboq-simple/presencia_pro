@@ -17,7 +17,7 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { handleLifestyleMessage, verifyWebhookSignature } from '@presenciapro/engine/bot';
+import { handleLifestyleMessage, verifyWebhookSignature, checkEasterEgg } from '@presenciapro/engine/bot';
 import { sendMessage } from '@presenciapro/engine/notifications';
 import type { LifestyleBusinessConfig } from '@presenciapro/engine/bot';
 import { parseTwilioPayload, buildLifestyleMessage as buildTwilioMessage } from '@presenciapro/engine/bot/lifestyle/adapters/twilioAdapter';
@@ -285,6 +285,28 @@ async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
       after(() => sendNonTextResponseMeta(nonTextSender.phoneNumberId, nonTextSender.fromPhone, nonTextSender.messageType));
     }
     // Status updates, delivery receipts, etc. — no hay nada más que hacer
+    return NextResponse.json({ status: 'ok' });
+  }
+
+  // ── Easter egg — comando oculto interceptado ANTES de rate limit, buffer,
+  // FSM y cualquier escritura de estado. No toca bot_conversations. ─────────
+  const easterEgg = checkEasterEgg(normalized.body);
+  if (easterEgg) {
+    console.log(JSON.stringify({
+      ts:             new Date().toISOString(),
+      service:        'bot',
+      event:          'easter_egg_triggered',
+      customer_phone: maskPhone(normalized.customerPhone),
+    }));
+    after(async () => {
+      try {
+        await sendMessage({
+          to:      normalized.customerPhone,
+          message: easterEgg,
+          from:    normalized.phoneNumberId,
+        });
+      } catch { /* best-effort */ }
+    });
     return NextResponse.json({ status: 'ok' });
   }
 
