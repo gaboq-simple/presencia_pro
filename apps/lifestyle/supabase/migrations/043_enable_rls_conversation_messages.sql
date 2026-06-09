@@ -1,0 +1,26 @@
+-- ─── Migration 043: Habilitar RLS en conversation_messages ────────────────────
+-- Corrige una omisión histórica: la tabla quedó con RLS deshabilitado.
+--
+-- Historia:
+--   - 027_bot_handoff.sql creó la tabla conversation_messages SIN habilitar RLS.
+--   - 033_chat_panel_rls.sql agregó las 2 políticas (ls_conv_messages_select_staff,
+--     ls_conv_messages_insert_staff) asumiendo que RLS ya estaba activo —pero
+--     nunca lo estuvo, así que las políticas quedaron creadas pero INERTES.
+--   - Ninguna migración posterior desactivó RLS: el estado actual
+--     (relrowsecurity=false) se explica solo por esa omisión, no por regresión.
+--
+-- Efecto:
+--   Las políticas ya existentes replican el patrón canónico de bot_conversations
+--   (aislamiento por business_id vía ls_staff_business_id()). Al activar RLS, esas
+--   políticas pasan a aplicarse y se cierra la exposición de mensajes de cliente
+--   (PII / LFPDPPP) que hoy es alcanzable vía anon key sobre una tabla sin RLS.
+--
+--   Los accesos legítimos NO se rompen: bot (webhook), server actions del panel y
+--   reportes usan service_role_key, que bypassa RLS. No se usa FORCE ROW LEVEL
+--   SECURITY, por lo que service_role mantiene el bypass intacto.
+--
+-- Alcance:
+--   Cambio aditivo de una línea. No se crean políticas nuevas ni se tocan 027/033
+--   (son historia); esta es una migración nueva hacia adelante.
+
+ALTER TABLE conversation_messages ENABLE ROW LEVEL SECURITY;
