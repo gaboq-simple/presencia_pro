@@ -15,6 +15,7 @@
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { classifyIntent } from '../classifier';
+import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import {
   handleClassification,
   buildSideQuestionResponse,
@@ -178,6 +179,15 @@ export async function handleQualifyingDatetime(
     businessContext,
     recentHistory,
     anthropicKey:     deps.anthropicKey,
+  });
+
+  // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
+  logClassifierOutput({
+    supabase:      deps.supabase,
+    businessId:    deps.business.id,
+    customerPhone: msg.customerPhone,
+    state:         'QUALIFYING_DATETIME',
+    metadata:      buildSingleClassifierMetadata(classification, msg.body),
   });
 
   const clarResult = handleClassification({

@@ -14,6 +14,7 @@
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { classifyIntent } from '../classifier';
+import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import { buildSideQuestionResponse } from '../clarification';
 import { getCatalog } from '../catalog';
 import { buildBusinessContext } from '../businessContext';
@@ -110,6 +111,15 @@ export async function handleAwaitingConfirmation(
     businessContext,
     recentHistory,
     anthropicKey:     deps.anthropicKey,
+  });
+
+  // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
+  logClassifierOutput({
+    supabase:      deps.supabase,
+    businessId:    deps.business.id,
+    customerPhone: msg.customerPhone,
+    state:         'AWAITING_CONFIRMATION',
+    metadata:      buildSingleClassifierMetadata(classification, msg.body),
   });
 
   // ── CONFIRM_YES via clasificador (prioridad sobre side question) ──────────
