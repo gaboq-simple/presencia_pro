@@ -23,14 +23,11 @@ import {
 } from '../clarification';
 import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
-import { answerSideQuestionDeterministic, isServiceOrPriceQuestion } from '../sideQuestion';
+import { answerSideQuestionDeterministic, isServiceOrPriceQuestion, refineTopic, closingForTopic } from '../sideQuestion';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
 const FLOW_QUESTION = 'Que servicio te interesa?';
-// Retorno natural y consistente tras una side-question NO relacionada a servicios/precio.
-// No anexa el menú (la lista satura respuestas de ubicación/horario/pago/etc.).
-const RETURN_TO_BOOKING = 'Te gustaria agendar una cita?';
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 export async function handleQualifyingService(
@@ -134,12 +131,18 @@ export async function handleQualifyingService(
         servicesForClassifier,
         { appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '' },
       );
-    // Solo anexa el menú de servicios cuando es pertinente (servicios/precio).
-    // Para ubicación/horario/pago/niños/etc. usa un retorno simple sin lista.
-    const flowQuestion = isServiceOrPriceQuestion(question)
-      ? buildFlowQuestion(servicesForClassifier)
-      : RETURN_TO_BOOKING;
-    const responseText = buildSideQuestionResponse(answer, flowQuestion);
+    // Cierre adaptativo (S4-BOT-08):
+    //   - Servicios/precio (Nivel 1): anexa el menú numerado = continuación natural.
+    //   - Resto (logística Nivel 2 / salida útil Nivel 3): SOLO el dato/salida,
+    //     sin empuje de agenda. El cierre lo define el nivel del topic, no un
+    //     "¿Te gustaría agendar?" genérico cosido al final.
+    let responseText: string;
+    if (isServiceOrPriceQuestion(question)) {
+      responseText = buildSideQuestionResponse(answer, buildFlowQuestion(servicesForClassifier));
+    } else {
+      const closing = closingForTopic(refineTopic('other', question));
+      responseText = closing ? `${answer}\n${closing}` : answer;
+    }
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   clarResult.updatedContext,

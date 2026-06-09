@@ -680,6 +680,33 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-08 — Cierre adaptativo de respuestas side-question 🟢 done (2026-06-08)
+**Origen:** Solicitado por Gabriel (2026-06-08). El bot pegaba "¿Te gustaría agendar?" en CADA respuesta side-question (se sentía a vendedor) y a veces doblaba pregunta ("¿Te interesa agendar? ¿Qué servicio te interesa?").
+**Decisión de arquitectura:** cierre DETERMINISTA por topic en 3 niveles (sin LLM extra). Nivel 1 (price/duration/services) invita a agendar con UNA pregunta; Nivel 2 (location/hours/parking/payment/kids) da el dato limpio sin empuje; Nivel 3 (reviews/products→other) da la salida útil (link) sin agenda. La guía del prompt también se alineó a los 3 niveles para las respuestas vía Haiku.
+**Alcance ESTRICTO:** solo el cierre de side-questions + colocación de links en línea propia. No tocar FSM, agendamiento, clasificador, ni los flow-questions legítimos de QUALIFYING_STAFF/DATETIME (son el siguiente paso, no un push de agenda).
+**Rama:** `feat/sidequestion-closing` (desde main actualizado con el pulido mergeado #12, sin merge).
+**Archivos:**
+- `packages/engine/src/bot/lifestyle/sideQuestion.ts` (closingLevelForTopic/closingForTopic/SIDE_QUESTION_INVITE; location con cierre neutro "Aquí te esperamos." + links en línea propia; reviews/derivaFallback con link en línea propia; composeGreetingSideAnswer con `closing` adaptativo)
+- `packages/engine/src/bot/lifestyle/states/greeting.ts` (calcula refineTopic→closingForTopic)
+- `packages/engine/src/bot/lifestyle/states/qualifyingService.ts` (elimina RETURN_TO_BOOKING genérico; servicios/precio→menú, resto→cierre por nivel)
+- `packages/engine/src/bot/lifestyle/clarification.ts` (buildSideQuestionResponse une con salto de línea → link en línea propia + sin doble pregunta pegada)
+- `packages/engine/src/bot/lifestyle/prompt.ts` (sección "preguntas fuera del flujo" reescrita a 3 niveles + máx 1 pregunta + links en línea propia)
+- `tests/sideQuestion.test.ts` (+ casos de niveles, doble pregunta ausente, links en línea propia; templates actualizados)
+**Criterios de aceptación:**
+- [x] Cada topic mapeado a su nivel de cierre (closingLevelForTopic).
+- [x] Nivel 1 invita / Nivel 2 dato limpio sin push / Nivel 3 salida útil sin agenda.
+- [x] Sin doble pregunta; máximo UNA pregunta por mensaje (solo Nivel 1).
+- [x] Links en su propia línea (salto antes y después).
+- [x] Menú numerado de servicios solo en preguntas de servicios/precio (mantenido).
+- [x] `npm test` 112 verdes; `tsc --noEmit` en apps/lifestyle limpio.
+**Notas de ejecución:**
+- Mid-flow (QUALIFYING_SERVICE) el cierre se deriva por keyword (refineTopic); para servicios/precio se conserva el menú (continuación natural = Nivel 1 en forma de lista). QUALIFYING_STAFF/DATETIME conservan su flow-question (siguiente paso real del agendamiento, no push) — ahora con salto de línea para links.
+- La eliminación del "¿Te gustaría agendar?" en Haiku se hace vía prompt (determinista, sin llamada extra): se instruye responder solo el dato y no cerrar con pregunta genérica → mata la doble pregunta en origen.
+**Pendiente humano:** rama `feat/sidequestion-closing` para PR; sin merge a main; sin deploy a prod.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-06-08 — cierre adaptativo side-question)
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -754,6 +781,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-06-03 | S4-BOT-04 | done | Cableado de datos reales del negocio al bot. businessContext.ts (módulo puro) + prompt.ts inyecta contexto real (reemplaza hardcode "bienestar y estética"). answerSideQuestion por topic con fallback [DERIVA]→minisite. Classifier enriquecido en qualifyingService/awaitingConfirmation/confirmationResponse. Migraciones 039/040/041 (no aplicadas). onboard-business retrocompatible + schemas extraídos a onboard-schema.ts. 24 tests node:test (`npm test`) verdes; type-check/lint limpios. Rama feat/business-context-wiring (sin merge). Observación: prompt.ts es markdown, NO el "System Prompt v2" XML de S4-BOT-03 → posible rewrite perdido. |
 | 2026-06-05 | S4-BOT-05 | done | Fricción conversacional (3 fixes). FIX1 debounce adaptativo + FIX2 race (lock retenido durante proceso, drain loop) + DEDUP de lote extraídos a message-buffer-core.ts (puro); message-buffer.ts wrapper; nueva API bufferAndProcess. FIX3 anti re-saludo en continuity.ts (puro) + greeting.ts pasa historial al generador. 5 env nuevas con defaults retrocompatibles. 43 tests node:test verdes (~9s); type-check/lint limpios; tsconfig.test.json gana override cjs para apps/lifestyle/src. Rama feat/conversation-friction (sin merge). Fuera de alcance: ruteo de disponibilidad = sprint 2. |
 | 2026-06-05 | S4-BOT-06 | done | Disponibilidad propositiva. FASE A: causa raíz era DATOS (dataset viejo), no lógica; slot calc verificado correcto. Hardening TZ-independiente: weekdayFromDateStr (getUTCDay sobre noon-UTC) en tzUtils/scheduling; parseDate UTC-safe en qualifyingDatetime. FASE B: availabilityIntent.ts:isAvailabilityQuestion (puro) + ruteo a SHOWING_SLOTS autoAssign desde qualifyingStaff/qualifyingDatetime; buildSlotsMessage exportado. 54 tests node:test verdes; type-check/lint limpios. Rama feat/availability-proactive (sin merge, sin prod). Fuera de alcance: barbero específico = sprint siguiente; flujo "el que sea" intacto. |
+| 2026-06-08 | S4-BOT-08 | done | Cierre adaptativo de side-questions (determinista, sin LLM extra). 3 niveles por topic: closingLevelForTopic/closingForTopic en sideQuestion.ts. Nivel 1 (price/duration/services) invita con 1 pregunta; Nivel 2 (location/hours/parking/payment/kids) dato limpio sin push (location con cierre neutro "Aquí te esperamos."); Nivel 3 (reviews/products) salida útil con link, sin agenda. Links en línea propia (templates + buildSideQuestionResponse une con \n). Eliminado RETURN_TO_BOOKING genérico en qualifyingService (servicios/precio→menú; resto→cierre por nivel). composeGreetingSideAnswer recibe `closing` adaptativo. prompt.ts sección "preguntas fuera del flujo" reescrita a 3 niveles + máx 1 pregunta (mata la doble pregunta en Haiku). 112 tests verdes; tsc apps/lifestyle limpio. Rama feat/sidequestion-closing (desde origin/main con #12, sin merge). |
 | 2026-06-06 | S4-BOT-07 polish | done | Pulido de tono + bug de mapeo del catálogo. (1) Bug bandera false≠ausente: businessContext.ts gana formatAttributesNegative → línea "No cuenta con:" para banderas en false (el LLM ya no las confunde con dato ausente → parking=false responde "No contamos con…"); sideQuestion.ts pago distingue presente-false (negativa) de ausente (honesta). (2) Tono: eliminados conectores con guion ("Dicho eso —", "Por cierto —"…) de clarification.ts (buildSideQuestionResponse junta dato + retorno natural) y de prompt.ts; "Por cierto, el costo…" → "El costo…" en awaitingConfirmation/awaitingBookingName. (3) Lista de servicios solo pertinente: isServiceOrPriceQuestion (sideQuestion.ts) gobierna si qualifyingService anexa el menú; ubicación/horario/pago/niños/estacionamiento/reseñas ya no lo arrastran. 105 tests node:test verdes; type-check limpio; lint 0 errores. Rama feat/sidequestion-polish (desde origin/main tras merge PR #11, sin merge). NO se tocó la lógica de datos determinista que ya servía. |
 ---
 

@@ -185,11 +185,12 @@ export function buildRepeatOptionsMessage(
 /**
  * Combina el prefixMessage (respuesta side question) con la pregunta del flujo.
  * Sin conectores de relleno ("Dicho eso —", "Por cierto —"): la respuesta es
- * dato + pregunta natural de retorno, en una sola forma consistente.
+ * dato + pregunta natural de retorno. Se unen con salto de línea para que un
+ * link al final del dato quede en su propia línea (nunca pegado a la pregunta).
  */
 export function buildSideQuestionResponse(
   prefixMessage: string,
   flowQuestion:  string,
 ): string {
-  return `${prefixMessage} ${flowQuestion}`;
+  return `${prefixMessage}\n${flowQuestion}`;
 }

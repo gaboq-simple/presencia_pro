@@ -15,6 +15,9 @@ import {
   answerSideQuestionDeterministic,
   composeGreetingSideAnswer,
   isServiceOrPriceQuestion,
+  closingLevelForTopic,
+  closingForTopic,
+  SIDE_QUESTION_INVITE,
   MISSING_DATA_ANSWER,
 } from '../packages/engine/src/bot/lifestyle/sideQuestion';
 import type { LifestyleBusinessConfig } from '../packages/engine/src/bot/lifestyle/types';
@@ -127,18 +130,18 @@ test('resolveTargetService: ambiguo → null', () => {
 
 // ─── routeSideQuestion: plantillas deterministas ──────────────────────────────
 
-test('routeSideQuestion: ubicación con mapa', () => {
+test('routeSideQuestion: ubicación con mapa (link en línea propia + cierre neutro)', () => {
   const r = routeSideQuestion({ topic: 'location', question: '¿dónde están?', business, services: catalog, opts: OPTS });
   assert.deepEqual(r, {
     mode: 'answer',
-    text: 'Estamos en Av. Reforma 123, CDMX. Aquí te dejo el mapa: https://maps.google.com/?q=el-corte',
+    text: 'Estamos en Av. Reforma 123, CDMX.\nhttps://maps.google.com/?q=el-corte\nAquí te esperamos.',
   });
 });
 
-test('routeSideQuestion: ubicación sin mapa', () => {
+test('routeSideQuestion: ubicación sin mapa (cierre neutro, sin agenda)', () => {
   const biz: LifestyleBusinessConfig = { ...business, mapUrl: undefined };
   const r = routeSideQuestion({ topic: 'location', question: '¿dónde están?', business: biz, services: catalog, opts: OPTS });
-  assert.deepEqual(r, { mode: 'answer', text: 'Estamos en Av. Reforma 123, CDMX.' });
+  assert.deepEqual(r, { mode: 'answer', text: 'Estamos en Av. Reforma 123, CDMX.\nAquí te esperamos.' });
 });
 
 test('routeSideQuestion: horarios formateados', () => {
@@ -195,20 +198,20 @@ test('routeSideQuestion: estacionamiento true / false', () => {
   assert.equal(routeSideQuestion({ topic: 'other', question: '¿hay estacionamiento?', business: no, services: catalog, opts: OPTS }).text, 'No contamos con estacionamiento.');
 });
 
-test('routeSideQuestion: reseñas con review_url (excepción de tono)', () => {
+test('routeSideQuestion: reseñas con review_url (link en línea propia, sin agenda)', () => {
   const r = routeSideQuestion({ topic: 'other', question: 'quiero dejar una reseña', business, services: catalog, opts: OPTS });
   assert.deepEqual(r, {
     mode: 'answer',
-    text: 'Lamento que no haya sido la mejor experiencia. Puedes dejarnos tu opinión aquí para que el equipo la vea: https://g.page/r/review-el-corte',
+    text: 'Lamento que no haya sido la mejor experiencia. Puedes dejarnos tu opinión aquí:\nhttps://g.page/r/review-el-corte',
   });
 });
 
-test('routeSideQuestion: reseñas sin review_url → minisite con tacto', () => {
+test('routeSideQuestion: reseñas sin review_url → minisite con tacto (link en línea propia)', () => {
   const biz: LifestyleBusinessConfig = { ...business, reviewUrl: undefined };
   const r = routeSideQuestion({ topic: 'other', question: 'tengo una queja', business: biz, services: catalog, opts: OPTS });
   assert.deepEqual(r, {
     mode: 'answer',
-    text: `Lamento que no haya sido la mejor experiencia. Cuéntanos más aquí: ${APP_URL}/barberia-el-corte`,
+    text: `Lamento que no haya sido la mejor experiencia. Cuéntanos más aquí:\n${APP_URL}/barberia-el-corte`,
   });
 });
 
@@ -288,9 +291,9 @@ test('isServiceOrPriceQuestion: false para ubicación/horario/pago/niños/estaci
   assert.equal(isServiceOrPriceQuestion('quiero dejar una reseña'), false);
 });
 
-test('regla dato faltante: [DERIVA] real (productos) → minisite', () => {
+test('regla dato faltante: [DERIVA] real (productos) → minisite (link en línea propia)', () => {
   const ans = answerSideQuestionDeterministic('¿venden productos para barba?', business, catalog, OPTS);
-  assert.equal(ans, `Eso lo puedes ver aquí: ${APP_URL}/barberia-el-corte`);
+  assert.equal(ans, `Eso lo puedes ver aquí:\n${APP_URL}/barberia-el-corte`);
 });
 
 // ─── Enrutador: deterministic vs defer ────────────────────────────────────────
@@ -309,8 +312,8 @@ test('enrutador: dato ausente (horarios/ubicación) → defer', () => {
 
 // ─── derivaFallback ───────────────────────────────────────────────────────────
 
-test('derivaFallback: minisite si existe, si no derivación al equipo', () => {
-  assert.equal(derivaFallback(business, OPTS), `Eso lo puedes ver aquí: ${APP_URL}/barberia-el-corte`);
+test('derivaFallback: minisite si existe (link en línea propia), si no derivación al equipo', () => {
+  assert.equal(derivaFallback(business, OPTS), `Eso lo puedes ver aquí:\n${APP_URL}/barberia-el-corte`);
   assert.equal(derivaFallback(minimalBusiness, OPTS), 'Con gusto lo consultamos con el equipo y te confirmamos.');
 });
 
@@ -331,27 +334,29 @@ test('answerSideQuestionDeterministic: servicios por keyword funciona mid-flow',
 test('answerSideQuestionDeterministic: pregunta no determinista → [DERIVA] minisite', () => {
   assert.equal(
     answerSideQuestionDeterministic('cuánto cuesta el Corte clásico', business, catalog, OPTS),
-    `Eso lo puedes ver aquí: ${APP_URL}/barberia-el-corte`,
+    `Eso lo puedes ver aquí:\n${APP_URL}/barberia-el-corte`,
   );
 });
 
 // ─── GREETING (GAP 1) ─────────────────────────────────────────────────────────
 
-test('composeGreetingSideAnswer: cliente nuevo → saludo breve + respuesta + invitación', () => {
+test('composeGreetingSideAnswer: Nivel 1 (precio) → saludo breve + respuesta + invitación', () => {
   const out = composeGreetingSideAnswer({
     answer: 'El Corte clásico sale en $200.',
+    closing: closingForTopic('price'),
     isReturning: false,
     customerName: null,
     botName: 'Zlot',
     businessName: 'Barbería El Corte',
     hasHistory: false,
   });
-  assert.equal(out, 'Hola, soy Zlot de Barbería El Corte. El Corte clásico sale en $200.\n¿Te gustaría agendar una cita?');
+  assert.equal(out, 'Hola, soy Zlot de Barbería El Corte. El Corte clásico sale en $200.\n¿Te gustaría agendar?');
 });
 
-test('composeGreetingSideAnswer: cliente recurrente saluda por nombre', () => {
+test('composeGreetingSideAnswer: Nivel 2 (horarios) cliente recurrente → sin empuje de agenda', () => {
   const out = composeGreetingSideAnswer({
     answer: 'Abrimos de lunes a viernes de 10:00 a 20:00.',
+    closing: closingForTopic('hours'),
     isReturning: true,
     customerName: 'Juan',
     botName: 'Zlot',
@@ -359,19 +364,22 @@ test('composeGreetingSideAnswer: cliente recurrente saluda por nombre', () => {
     hasHistory: false,
   });
   assert.match(out, /^Hola Juan\. Abrimos/);
+  assert.doesNotMatch(out, /agendar/);
 });
 
-test('composeGreetingSideAnswer: con historial responde directo sin re-saludar', () => {
+test('composeGreetingSideAnswer: Nivel 2 (pago) con historial → dato limpio, sin invitación', () => {
   const out = composeGreetingSideAnswer({
     answer: 'Aceptamos tarjeta.',
+    closing: closingForTopic('payment'),
     isReturning: true,
     customerName: 'Juan',
     botName: 'Zlot',
     businessName: 'Barbería El Corte',
     hasHistory: true,
   });
-  assert.equal(out, 'Aceptamos tarjeta.\n¿Te gustaría agendar una cita?');
+  assert.equal(out, 'Aceptamos tarjeta.');
   assert.doesNotMatch(out, /Hola/);
+  assert.doesNotMatch(out, /agendar/);
 });
 
 test('GREETING: side-question como primer mensaje responde el dato, no saludo genérico', () => {
@@ -382,6 +390,7 @@ test('GREETING: side-question como primer mensaje responde el dato, no saludo ge
   assert.equal(route.mode, 'answer');
   const out = composeGreetingSideAnswer({
     answer: route.mode === 'answer' ? route.text : '',
+    closing: closingForTopic('price'),
     isReturning: false,
     customerName: null,
     botName: 'Zlot',
@@ -389,4 +398,83 @@ test('GREETING: side-question como primer mensaje responde el dato, no saludo ge
     hasHistory: false,
   });
   assert.match(out, /El Corte clásico sale en \$200\./);
+});
+
+// ─── Cierre adaptativo por nivel (S4-BOT-08) ──────────────────────────────────
+
+test('closingLevelForTopic: mapeo de cada topic a su nivel', () => {
+  // Nivel 1 — intención de servicio
+  assert.equal(closingLevelForTopic('price'), 1);
+  assert.equal(closingLevelForTopic('duration'), 1);
+  assert.equal(closingLevelForTopic('services'), 1);
+  // Nivel 2 — logística
+  assert.equal(closingLevelForTopic('location'), 2);
+  assert.equal(closingLevelForTopic('hours'), 2);
+  assert.equal(closingLevelForTopic('parking'), 2);
+  assert.equal(closingLevelForTopic('payment'), 2);
+  assert.equal(closingLevelForTopic('kids'), 2);
+  // Nivel 3 — sin intención de cita ahora
+  assert.equal(closingLevelForTopic('reviews'), 3);
+  assert.equal(closingLevelForTopic('other'), 3);
+});
+
+test('closingForTopic: solo Nivel 1 invita a agendar', () => {
+  assert.equal(closingForTopic('price'), SIDE_QUESTION_INVITE);
+  assert.equal(closingForTopic('duration'), SIDE_QUESTION_INVITE);
+  assert.equal(closingForTopic('services'), SIDE_QUESTION_INVITE);
+  // Niveles 2 y 3 no anexan empuje de agenda
+  for (const t of ['location', 'hours', 'parking', 'payment', 'kids', 'reviews', 'other'] as const) {
+    assert.equal(closingForTopic(t), '');
+  }
+});
+
+test('Nivel 1: respuesta invita a agendar con UNA sola pregunta', () => {
+  const out = composeGreetingSideAnswer({
+    answer: 'El Corte clásico sale en $200.',
+    closing: closingForTopic('price'),
+    isReturning: true, customerName: 'Ana', botName: 'Zlot', businessName: 'X', hasHistory: true,
+  });
+  assert.equal(out, 'El Corte clásico sale en $200.\n¿Te gustaría agendar?');
+  assert.equal((out.match(/\?/g) ?? []).length, 1);
+});
+
+test('Nivel 2: logística → dato limpio, sin pregunta de agenda', () => {
+  const r = routeSideQuestion({ topic: 'other', question: '¿hay estacionamiento?', business, services: catalog, opts: OPTS });
+  const answer = r.mode === 'answer' ? r.text : '';
+  const closing = closingForTopic(refineTopic('other', '¿hay estacionamiento?'));
+  const out = closing ? `${answer}\n${closing}` : answer;
+  assert.equal(out, 'Sí, contamos con estacionamiento.');
+  assert.doesNotMatch(out, /agendar/);
+});
+
+test('Nivel 3: reseñas/productos → salida útil con link, sin agenda', () => {
+  const reviews = routeSideQuestion({ topic: 'other', question: 'quiero dejar una reseña', business, services: catalog, opts: OPTS });
+  assert.match(reviews.mode === 'answer' ? reviews.text : '', /\nhttps:\/\/g\.page/);
+  assert.doesNotMatch(reviews.mode === 'answer' ? reviews.text : '', /agendar/);
+
+  const products = answerSideQuestionDeterministic('¿venden productos?', business, catalog, OPTS);
+  assert.match(products, /Eso lo puedes ver aquí:\n/);
+  assert.doesNotMatch(products, /agendar/);
+});
+
+test('regla transversal: links siempre en su propia línea (salto antes del URL)', () => {
+  // El URL nunca debe ir pegado a media frase: siempre precedido por un salto.
+  const loc = routeSideQuestion({ topic: 'location', question: '¿dónde?', business, services: catalog, opts: OPTS });
+  const locText = loc.mode === 'answer' ? loc.text : '';
+  assert.doesNotMatch(locText, /[^\n]https?:\/\//); // ningún URL pegado a un caracter no-salto
+  assert.match(locText, /\nhttps:\/\/maps/);
+});
+
+test('regla transversal: nunca dos preguntas en una respuesta de side-question', () => {
+  // Nivel 1 (máximo 1 pregunta) y Niveles 2/3 (0 preguntas de agenda).
+  const samples: Array<[string, string]> = [
+    ['price', 'El Corte clásico sale en $200.'],
+    ['hours', 'Abrimos de lunes a viernes de 10:00 a 20:00.'],
+    ['payment', 'Aceptamos tarjeta.'],
+  ];
+  for (const [topic, answer] of samples) {
+    const closing = closingForTopic(topic as Parameters<typeof closingForTopic>[0]);
+    const out = closing ? `${answer}\n${closing}` : answer;
+    assert.ok((out.match(/\?/g) ?? []).length <= 1, `"${out}" tiene más de una pregunta`);
+  }
 });
