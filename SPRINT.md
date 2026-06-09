@@ -748,6 +748,37 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S5-DATA-01 — Limpieza de staff duplicado ("Carlos" huérfano) en Barbería Demo 🟢 done (2026-06-09)
+**Origen:** Ad-hoc solicitado por Gabriel (2026-06-09). Diagnóstico read-only previo reveló que el negocio Barbería Demo (`4de6a450-9681-41b3-bdac-4b7fa39016a2`) tenía **DOS registros de staff activos llamados "Carlos"**, idénticos salvo `id` y `created_at`. El duplicado venía de un **alta manual sin guard de idempotencia** (NO de seed ni migración — sin rastro en `supabase/migrations/`, ni en `onboard-business.ts` con el dummy JSON, ni en grep del repo). Estaba **amplificando bugs del FSM**: al ser idénticos, el dedup-por-hora colapsaba ambos y gatillaba el auto-commit de Bug B.
+**Qué se conservó / qué se borró:**
+- **Canónico CONSERVADO:** `cd8d7f08-0250-47c5-b353-3c8dc6d72c24` (2do creado, 02:17:28). Tiene el service link a "Corte de cabello", el horario completo (6 días en `staff_availability`), 2 citas `confirmed` futuras (2026-06-10) y es favorito de 1 cliente.
+- **Huérfano ELIMINADO:** `23fae157-0ba2-40f2-a0bd-370830f7ba73` (1ro creado, 02:14:30). **Cero FKs** en las 12 tablas que referencian `staff` (re-verificado en vivo, no por el conteo del diagnóstico previo).
+**Cómo se ejecutó (manual vía MCP/SQL contra producción `hdqazbuxtpavtioufrsv`):** (1) `SELECT *` de respaldo de la fila huérfana → (2) bloque `DO` atómico: re-conteo en vivo de las 12 FK (`staff_services`, `staff_availability`, `staff_blocks`, `staff_schedule_exceptions`, `waitlist`, `customers.favorite_staff_id`, `bot_conversations.taken_by`, `conversation_messages.staff_id`, `arco_requests.resolved_by`, `appointments` ×3 staff_id/created_by/modified_by) con `RAISE EXCEPTION`+ROLLBACK ante cualquier dependiente, seguido del `DELETE FROM staff WHERE id = '<huérfano>'` por **ID literal exacto** (nunca por name/phone — idénticos entre ambos Carlos) → (3) confirmación post-borrado. Resultado: 0 dependientes, 1 fila borrada, queda 1 solo Carlos (cd8d7f08), 2 citas confirmed intactas apuntando al canónico.
+**Camino de reversión (recupera la fila idéntica, id y created_at originales):**
+```sql
+INSERT INTO staff (id, business_id, auth_id, name, phone, whatsapp_id, role, active, created_at, photo_url, pin)
+VALUES (
+  '23fae157-0ba2-40f2-a0bd-370830f7ba73',
+  '4de6a450-9681-41b3-bdac-4b7fa39016a2',
+  NULL,
+  'Carlos',
+  '15551112222',
+  '15551112222',
+  'barber',
+  true,
+  '2026-06-05 02:14:30.379004+00',
+  NULL,
+  NULL
+);
+```
+**Hallazgos derivados (registrados como backlog, NO resueltos — ver "Backlog post-sprint"):**
+- `conversation_messages` tiene **RLS deshabilitado** (única tabla así) → exposición potencial de mensajes de cliente (PII/LFPDPPP) vía anon key. Prioridad por encima de los bugs de UX. **Atender antes del go-live.**
+- `onboard-business.ts` inserta staff **sin guard de idempotencia a nivel staff** (solo a nivel slug del business) → la puerta para futuros duplicados sigue abierta.
+- Tres bugs de UX diagnosticados turno-por-turno, pendientes de fix: **Bug B** (handler, = C5: auto-confirma slot no pedido), **Bug C** (clasificación: "horarios disponibles" → horario del local), **Bug A** (handler/datos: no sabe listar staff). **Bug B debe RE-VERIFICARSE contra la base ya limpia antes de diseñar su fix** — el duplicado lo amplificaba y el síntoma puede haber cambiado.
+**Pendiente humano:** ninguno (operación ejecutada y verificada en producción).
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -791,6 +822,19 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 - Ligado al **gap de CI**: sin esta cobertura, CI no puede proteger el flujo central contra regresiones. Es prerrequisito para cerrar "Tests automatizados (unit + e2e)" abajo de forma significativa.
 
 **Riesgo si se posterga:** cualquier cambio futuro en estados/clasificador puede romper el agendamiento sin que ningún test lo detecte (como ocurrió aquí). Debe atacarse antes que el resto del backlog de tests.
+
+---
+
+### 🔴 SEGURIDAD/COMPLIANCE — RLS deshabilitado en `conversation_messages` (ANTES del go-live)
+
+**Hallazgo (origen S5-DATA-01, 2026-06-09):** `conversation_messages` es la **única tabla del esquema con RLS deshabilitado**. Queda expuesta a los roles anon/authenticated → cualquiera con la anon key puede leer/modificar todos los mensajes de cliente. Son datos personales (contenido de conversación WhatsApp) → exposición PII / riesgo **LFPDPPP**.
+**Prioridad:** por encima de los bugs de UX. **Atender antes del go-live.**
+**Caveat:** habilitar RLS sin políticas bloquea todo acceso a la tabla. La remediación es `ALTER TABLE public.conversation_messages ENABLE ROW LEVEL SECURITY;` **+** definir las políticas correctas (espejo de las de `bot_conversations`, migration 033: SELECT/INSERT para staff del negocio). No aplicar el ALTER suelto.
+
+### Hallazgos derivados de S5-DATA-01 (no resueltos)
+
+- **`onboard-business.ts` sin guard de idempotencia a nivel staff:** el script solo verifica el slug del business (`checkSlugExists`); el staff se inserta con `.insert()` plano, sin guard por nombre/teléfono. La puerta para futuros duplicados de staff sigue abierta (este fue el origen del doble "Carlos").
+- **Tres bugs de UX del bot, diagnosticados turno-por-turno, pendientes de fix:** Bug B (handler, = C5: auto-confirma slot no pedido), Bug C (clasificación: "horarios disponibles" → horario del local), Bug A (handler/datos: no sabe listar staff). **Bug B debe RE-VERIFICARSE contra la base ya limpia (post S5-DATA-01) antes de diseñar su fix** — el staff duplicado lo amplificaba y el síntoma puede haber cambiado.
 
 ---
 
@@ -839,6 +883,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-06-08 | S4-BOT-08 | done | Cierre adaptativo de side-questions (determinista, sin LLM extra). 3 niveles por topic: closingLevelForTopic/closingForTopic en sideQuestion.ts. Nivel 1 (price/duration/services) invita con 1 pregunta; Nivel 2 (location/hours/parking/payment/kids) dato limpio sin push (location con cierre neutro "Aquí te esperamos."); Nivel 3 (reviews/products) salida útil con link, sin agenda. Links en línea propia (templates + buildSideQuestionResponse une con \n). Eliminado RETURN_TO_BOOKING genérico en qualifyingService (servicios/precio→menú; resto→cierre por nivel). composeGreetingSideAnswer recibe `closing` adaptativo. prompt.ts sección "preguntas fuera del flujo" reescrita a 3 niveles + máx 1 pregunta (mata la doble pregunta en Haiku). 112 tests verdes; tsc apps/lifestyle limpio. Rama feat/sidequestion-closing (desde origin/main con #12, sin merge). |
 | 2026-06-09 | S4-BOT-09 | done | Hotfix bucle QUALIFYING_SERVICE en negocio de servicio único (preexistente, no regresión — bot_logs 2026-06-06 anterior a S4-BOT-08). #1 Auto-resolve servicio único: qualifyingService.ts fast-path `allServices.length===1 && !looksLikeSideQuestion` → buildAdvanceResult → QUALIFYING_STAFF; greeting.ts auto-pick servicio único con hasBookingSignal. #2 Anti-loop (afecta a todos): repeatFallbackContext NO resetea clarification_attempts en ADVANCE-sin-resolve (incrementa) → MAX_TOTAL_ATTEMPTS=5 escala a FALLBACK (escape humano alcanzable en ≤5 turnos). looksLikeSideQuestion (puro) discrimina afirmaciones vs preguntas de negocio. NO se hizo #3 (consumir intent type = refactor classifier; documentado como deuda). 7 tests nuevos (qualifyingService.test.ts): single-service advance, anti-loop incremento+escalada, regresión del bug. 124 tests verdes; tsc apps/lifestyle limpio. Causa de no-detección previa: no existían tests de handler/integración para qualifyingService/greeting + classifier no inyectable para e2e multi-estado. Rama feat/fix-qualifying-loop (desde main actualizado, sin merge). |
 | 2026-06-09 | S5-OBS-01 | done | Instrumentación de logging del clasificador (aditivo, sin cambio de comportamiento). Migración `20260608000000_bot_logs_metadata.sql`: `metadata jsonb NULL DEFAULT NULL` en `bot_logs` — aplicada MANUALMENTE vía SQL Editor de prod (`hdqazbuxtpavtioufrsv`), el archivo documenta pero no autoaplica. 7 call sites fire-and-forget (`event_type='classifier_output'`): single en qualifyingService/Staff/Datetime, awaitingConfirmation, confirmationResponse, side-question de greeting; multi en greeting. Payload de forma fija (compliance ARCO). Verificado en prod tras agendamiento de prueba: fila multi poblada (date/time/service con confidence). Hallazgo: el clasificador extrae con alta confianza → la pérdida de datos está aguas abajo en los handlers (C1/C2), no en la extracción. PR #16 mergeado a main. |
+| 2026-06-09 | S5-DATA-01 | done | Limpieza de staff duplicado en Barbería Demo (`4de6a450`). DOS "Carlos" activos idénticos (alta manual sin guard de idempotencia, no seed/migración); el duplicado amplificaba bugs del FSM (dedup-por-hora colapsaba ambos → auto-commit Bug B). Conservado canónico `cd8d7f08` (service link + horario + 2 citas confirmed); eliminado huérfano `23fae157` (0 FKs en las 12 tablas, re-verificado en vivo). Ejecución manual vía MCP/SQL contra prod (`hdqazbuxtpavtioufrsv`): SELECT respaldo → bloque DO atómico (re-conteo 12 FK + DELETE por ID literal, abort ante dependiente) → confirmación (0 deps, 1 borrada, 1 Carlos restante, citas intactas). INSERT de reversión documentado en la tarea. Hallazgos a backlog (NO resueltos): RLS off en conversation_messages (PII/LFPDPPP, antes de go-live), onboard-business.ts sin guard de idempotencia a nivel staff, 3 bugs UX (B/C/A) pendientes — Bug B a re-verificar contra base limpia. Solo doc, commit directo a main. |
 | 2026-06-06 | S4-BOT-07 polish | done | Pulido de tono + bug de mapeo del catálogo. (1) Bug bandera false≠ausente: businessContext.ts gana formatAttributesNegative → línea "No cuenta con:" para banderas en false (el LLM ya no las confunde con dato ausente → parking=false responde "No contamos con…"); sideQuestion.ts pago distingue presente-false (negativa) de ausente (honesta). (2) Tono: eliminados conectores con guion ("Dicho eso —", "Por cierto —"…) de clarification.ts (buildSideQuestionResponse junta dato + retorno natural) y de prompt.ts; "Por cierto, el costo…" → "El costo…" en awaitingConfirmation/awaitingBookingName. (3) Lista de servicios solo pertinente: isServiceOrPriceQuestion (sideQuestion.ts) gobierna si qualifyingService anexa el menú; ubicación/horario/pago/niños/estacionamiento/reseñas ya no lo arrastran. 105 tests node:test verdes; type-check limpio; lint 0 errores. Rama feat/sidequestion-polish (desde origin/main tras merge PR #11, sin merge). NO se tocó la lógica de datos determinista que ya servía. |
 ---
 
