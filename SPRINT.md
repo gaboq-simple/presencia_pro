@@ -707,6 +707,29 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
+#### S4-BOT-09 — Hotfix bucle en QUALIFYING_SERVICE (servicio único + anti-loop) 🟢 done (2026-06-09)
+**Origen:** Bug reportado por Gabriel (2026-06-09). Negocio de **un solo servicio** quedaba atascado en `QUALIFYING_SERVICE` repitiendo la oferta sin avanzar; "sí"/"no"/preguntas de horario no enganchaban la transición. Conversación real (negocio `4de6a450-…`) confirmada en `bot_conversations` + `bot_logs`.
+**Causa raíz (reproducida, NO regresión de S4-BOT-08):** los `bot_logs` muestran el mismo bucle el **2026-06-06** (anterior al merge de S4-BOT-08, 2026-06-08). El path ADVANCE→QUALIFYING_STAFF de `qualifyingService.ts` quedó byte-idéntico en S4-BOT-08 (solo cambió la rama side-question). Defecto estructural pre-existente: (a) negocio de servicio único nunca auto-resuelve el único servicio → pregunta "¿cuál?" sin opción contestable; (b) el clasificador devuelve `CONFIRM_YES` con alta confianza pero `value=null` → `handleClassification` da **ADVANCE y resetea `clarification_attempts` a 0**; en `qualifyingService` no hay servicio extraíble → cae a REPEAT_OPTIONS con el contador en 0 → el guard `MAX_TOTAL_ATTEMPTS=5→FALLBACK` **nunca dispara** → bucle infinito sin escalar a humano.
+**Alcance ESTRICTO (solo #1 y #2; #3 NO):**
+- **#1 Servicio único:** fast-path en `qualifyingService.ts` (si `allServices.length===1` y el mensaje no es side-question → `buildAdvanceResult` → QUALIFYING_STAFF) + espejo en `greeting.ts` (auto-pick del único servicio cuando hay señal de reserva y no es pregunta del negocio). Detector determinista `looksLikeSideQuestion` (sin red).
+- **#2 Anti-loop (afecta a TODOS los negocios):** `repeatFallbackContext` — en el camino ADVANCE-sin-resolver NO resetear `clarification_attempts`; incrementarlo para que el escape a FALLBACK sea alcanzable.
+**Rama:** `feat/fix-qualifying-loop` (desde `origin/main` con #14, sin merge).
+**Archivos:**
+- `packages/engine/src/bot/lifestyle/states/qualifyingService.ts` (fast-path servicio único, `looksLikeSideQuestion`, `repeatFallbackContext`)
+- `packages/engine/src/bot/lifestyle/states/greeting.ts` (auto-pick servicio único con señal de reserva)
+- `tests/qualifyingService.test.ts` (nuevo: 7 tests — fast-path, discriminación del detector, anti-loop + regresión que reproduce el contador clavado en 0)
+**Criterios de aceptación:**
+- [x] Servicio único: "quiero agendar" / "sí" → avanza a QUALIFYING_STAFF sin preguntar cuál.
+- [x] Anti-loop: ADVANCE-sin-resolver repetido SUBE `clarification_attempts` y escala a FALLBACK en ≤5 turnos (no bucle infinito).
+- [x] Pregunta real ("¿cuánto cuesta?") NO se auto-resuelve (detector puro).
+- [x] `npm test` 124 verdes (7 nuevos); `tsc --noEmit` apps/lifestyle limpio.
+**Por qué los tests existentes no lo cacharon:** no había NINGÚN test de los handlers `qualifyingService`/`greeting` ni de integración del happy-path de agendamiento — la suite cubría side-questions puras pero no la transición de estado. El clasificador no es inyectable, así que un e2e multi-estado real requiere red/mock del LLM (fuera del harness puro actual); se cubrió con tests deterministas a nivel handler + simulación pura de la aritmética del bucle.
+**Deuda registrada (#3 — NO hacer en este hotfix, va en sprint aparte):** `handleClassification` ignora el `intent` salvo `SIDE_QUESTION` (solo mira `confidence`). Un `CONFIRM_YES`/`CONFIRM_NO`/`SELECT_OPTION` no se consume según su tipo → reaparecerá en otros estados. Consumir el intent type es **refactor del clasificador/clarification**, requiere su propia tarea. Además: un e2e real de agendamiento exige hacer el clasificador inyectable o mockeable (habilitaría el test integración punta-a-punta que faltó). **→ ELEVADA a deuda técnica de máxima prioridad** (ver "🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD" al inicio del Backlog post-sprint): sin esto no hay cobertura e2e del flujo central de reserva, ligado a #3 y al gap de CI.
+**Pendiente humano:** rama `feat/fix-qualifying-loop` para PR; sin merge a main; sin deploy.
+**Prompt:** Ad-hoc/hotfix solicitado por Gabriel (2026-06-09 — bucle QUALIFYING_SERVICE)
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -738,6 +761,20 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 ## Backlog post-sprint (NO trabajar en este sprint)
 
 Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra al sprint sin renegociación.
+
+### 🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path de agendamiento
+
+**Por qué encabeza el backlog:** sin un clasificador inyectable/mockeable NO puede existir el test e2e punta-a-punta del flujo de reserva. Hoy, en consecuencia, **NO tenemos cobertura del flujo central del producto (agendar) de extremo a extremo** — es el camino que más importa y el único sin red de seguridad. Este es exactamente el gap que dejó pasar el bucle de S4-BOT-09: el bug vivía en la costura handler↔classifier que ningún test podía ejercitar.
+
+**Alcance:**
+- Hacer el clasificador (`classifyIntent` / `classifyMultiIntent`) inyectable o mockeable en los handlers (dependency injection), para simular respuestas del LLM sin red.
+- Construir el test e2e del happy-path de agendamiento (greeting → qualifying* → showing slots → confirming → confirmed) con el classifier mockeado.
+- Ligado a **#3 de S4-BOT-09**: `handleClassification` ignora el `intent` salvo `SIDE_QUESTION` (solo mira `confidence`); consumir el tipo de intent (`CONFIRM_YES`/`CONFIRM_NO`/`SELECT_OPTION`) es parte del mismo refactor.
+- Ligado al **gap de CI**: sin esta cobertura, CI no puede proteger el flujo central contra regresiones. Es prerrequisito para cerrar "Tests automatizados (unit + e2e)" abajo de forma significativa.
+
+**Riesgo si se posterga:** cualquier cambio futuro en estados/clasificador puede romper el agendamiento sin que ningún test lo detecte (como ocurrió aquí). Debe atacarse antes que el resto del backlog de tests.
+
+---
 
 - Audit log completo de acciones humanas
 - Exportación CSV de citas/clientes/reportes
@@ -782,6 +819,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-06-05 | S4-BOT-05 | done | Fricción conversacional (3 fixes). FIX1 debounce adaptativo + FIX2 race (lock retenido durante proceso, drain loop) + DEDUP de lote extraídos a message-buffer-core.ts (puro); message-buffer.ts wrapper; nueva API bufferAndProcess. FIX3 anti re-saludo en continuity.ts (puro) + greeting.ts pasa historial al generador. 5 env nuevas con defaults retrocompatibles. 43 tests node:test verdes (~9s); type-check/lint limpios; tsconfig.test.json gana override cjs para apps/lifestyle/src. Rama feat/conversation-friction (sin merge). Fuera de alcance: ruteo de disponibilidad = sprint 2. |
 | 2026-06-05 | S4-BOT-06 | done | Disponibilidad propositiva. FASE A: causa raíz era DATOS (dataset viejo), no lógica; slot calc verificado correcto. Hardening TZ-independiente: weekdayFromDateStr (getUTCDay sobre noon-UTC) en tzUtils/scheduling; parseDate UTC-safe en qualifyingDatetime. FASE B: availabilityIntent.ts:isAvailabilityQuestion (puro) + ruteo a SHOWING_SLOTS autoAssign desde qualifyingStaff/qualifyingDatetime; buildSlotsMessage exportado. 54 tests node:test verdes; type-check/lint limpios. Rama feat/availability-proactive (sin merge, sin prod). Fuera de alcance: barbero específico = sprint siguiente; flujo "el que sea" intacto. |
 | 2026-06-08 | S4-BOT-08 | done | Cierre adaptativo de side-questions (determinista, sin LLM extra). 3 niveles por topic: closingLevelForTopic/closingForTopic en sideQuestion.ts. Nivel 1 (price/duration/services) invita con 1 pregunta; Nivel 2 (location/hours/parking/payment/kids) dato limpio sin push (location con cierre neutro "Aquí te esperamos."); Nivel 3 (reviews/products) salida útil con link, sin agenda. Links en línea propia (templates + buildSideQuestionResponse une con \n). Eliminado RETURN_TO_BOOKING genérico en qualifyingService (servicios/precio→menú; resto→cierre por nivel). composeGreetingSideAnswer recibe `closing` adaptativo. prompt.ts sección "preguntas fuera del flujo" reescrita a 3 niveles + máx 1 pregunta (mata la doble pregunta en Haiku). 112 tests verdes; tsc apps/lifestyle limpio. Rama feat/sidequestion-closing (desde origin/main con #12, sin merge). |
+| 2026-06-09 | S4-BOT-09 | done | Hotfix bucle QUALIFYING_SERVICE en negocio de servicio único (preexistente, no regresión — bot_logs 2026-06-06 anterior a S4-BOT-08). #1 Auto-resolve servicio único: qualifyingService.ts fast-path `allServices.length===1 && !looksLikeSideQuestion` → buildAdvanceResult → QUALIFYING_STAFF; greeting.ts auto-pick servicio único con hasBookingSignal. #2 Anti-loop (afecta a todos): repeatFallbackContext NO resetea clarification_attempts en ADVANCE-sin-resolve (incrementa) → MAX_TOTAL_ATTEMPTS=5 escala a FALLBACK (escape humano alcanzable en ≤5 turnos). looksLikeSideQuestion (puro) discrimina afirmaciones vs preguntas de negocio. NO se hizo #3 (consumir intent type = refactor classifier; documentado como deuda). 7 tests nuevos (qualifyingService.test.ts): single-service advance, anti-loop incremento+escalada, regresión del bug. 124 tests verdes; tsc apps/lifestyle limpio. Causa de no-detección previa: no existían tests de handler/integración para qualifyingService/greeting + classifier no inyectable para e2e multi-estado. Rama feat/fix-qualifying-loop (desde main actualizado, sin merge). |
 | 2026-06-06 | S4-BOT-07 polish | done | Pulido de tono + bug de mapeo del catálogo. (1) Bug bandera false≠ausente: businessContext.ts gana formatAttributesNegative → línea "No cuenta con:" para banderas en false (el LLM ya no las confunde con dato ausente → parking=false responde "No contamos con…"); sideQuestion.ts pago distingue presente-false (negativa) de ausente (honesta). (2) Tono: eliminados conectores con guion ("Dicho eso —", "Por cierto —"…) de clarification.ts (buildSideQuestionResponse junta dato + retorno natural) y de prompt.ts; "Por cierto, el costo…" → "El costo…" en awaitingConfirmation/awaitingBookingName. (3) Lista de servicios solo pertinente: isServiceOrPriceQuestion (sideQuestion.ts) gobierna si qualifyingService anexa el menú; ubicación/horario/pago/niños/estacionamiento/reseñas ya no lo arrastran. 105 tests node:test verdes; type-check limpio; lint 0 errores. Rama feat/sidequestion-polish (desde origin/main tras merge PR #11, sin merge). NO se tocó la lógica de datos determinista que ya servía. |
 ---
 

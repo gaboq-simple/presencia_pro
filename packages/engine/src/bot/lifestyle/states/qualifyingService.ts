@@ -20,6 +20,7 @@ import {
   buildClarifyMessage,
   buildRepeatOptionsMessage,
   buildSideQuestionResponse,
+  type ClarificationResult,
 } from '../clarification';
 import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
@@ -64,6 +65,16 @@ export async function handleQualifyingService(
 
   if (matches.length > 1) {
     return buildAmbiguousResult(context, matches);
+  }
+
+  // ── Fast path: servicio único (S4-BOT-09) ─────────────────────────────────
+  // Con un solo servicio en catálogo no hay nada que elegir. Si el cliente no
+  // está preguntando algo del negocio (precio/ubicación/horario/etc.), avanzar
+  // directo. Esto rompe el bucle de "¿cuál servicio?" cuando el cliente dice
+  // "sí" / "quiero una cita" sin nombrar el servicio (no matchea y el
+  // clasificador no puede extraerlo). Las preguntas reales siguen al clasificador.
+  if (allServices.length === 1 && !looksLikeSideQuestion(msg.body)) {
+    return buildAdvanceResult(context, allServices[0]!);
   }
 
   // ── Si había candidatos ambiguos y el input no matchea ninguno,
@@ -163,9 +174,14 @@ export async function handleQualifyingService(
 
   // ── REPEAT_OPTIONS (también fallback para ADVANCE sin resolve) ────────────
   // Si se superó MAX_TOTAL_ATTEMPTS → escalar a FALLBACK con agente humano.
+  // Anti-loop (S4-BOT-09): un ADVANCE que no resolvió servicio dejó
+  // clarification_attempts en 0; repeatFallbackContext restaura el incremento
+  // para que el escape a FALLBACK sea alcanzable y no haya bucle infinito.
+
+  const fallbackCtx = repeatFallbackContext(clarResult, attempts);
 
   const MAX_TOTAL_ATTEMPTS = 5;
-  if ((clarResult.updatedContext.clarification_attempts ?? 0) >= MAX_TOTAL_ATTEMPTS) {
+  if ((fallbackCtx.clarification_attempts ?? 0) >= MAX_TOTAL_ATTEMPTS) {
     return {
       newState:     'FALLBACK',
       newContext:   { ...context, clarification_attempts: 0 },
@@ -186,9 +202,31 @@ export async function handleQualifyingService(
 
   return {
     newState:     'QUALIFYING_SERVICE',
-    newContext:   clarResult.updatedContext,
+    newContext:   fallbackCtx,
     responseText,
   };
+}
+
+// ─── Anti-loop (S4-BOT-09) ────────────────────────────────────────────────────
+
+/**
+ * Contexto a persistir en el camino REPEAT_OPTIONS. Cuando se llega aquí vía un
+ * ADVANCE de alta confianza que NO pudo resolverse a un servicio (ej. el cliente
+ * dijo "sí"/"no" y el clasificador no extrajo un servicio), handleClassification
+ * ya reseteó clarification_attempts a 0. Si dejáramos ese 0, el guard de
+ * MAX_TOTAL_ATTEMPTS nunca dispararía → bucle infinito sin escalar a un humano.
+ * Restauramos el incremento sobre los intentos previos para mantener el escape a
+ * FALLBACK alcanzable. En el REPEAT_OPTIONS normal (baja confianza) el contador
+ * ya viene incrementado por handleClassification, así que se respeta tal cual.
+ */
+export function repeatFallbackContext(
+  clarResult:    ClarificationResult,
+  priorAttempts: number,
+): LifestyleBotContext {
+  if (clarResult.action === 'ADVANCE') {
+    return { ...clarResult.updatedContext, clarification_attempts: priorAttempts + 1 };
+  }
+  return clarResult.updatedContext;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -284,6 +322,31 @@ function findMatchingServices(
 
 function formatPrice(price: number): string {
   return price.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+// Pistas de logística/info del negocio que NO cubre isServiceOrPriceQuestion
+// (ubicación, horario, pago, estacionamiento, niños, reseñas). Sin acentos.
+const SIDE_Q_HINTS = [
+  'donde', 'direccion', 'ubicacion', 'mapa', 'como llego',
+  'horario', 'horarios', 'abren', 'cierran', 'abierto', 'cuando', 'dura', 'duracion',
+  'pago', 'pagar', 'tarjeta', 'efectivo', 'transferencia',
+  'estacionamiento', 'parking', 'valet', 'cochera',
+  'nino', 'ninos', 'infantil', 'hijo',
+  'resena', 'resenas', 'opinion', 'review', 'reviews',
+];
+
+/**
+ * Detector determinista: ¿el mensaje parece una pregunta sobre el negocio?
+ * Usado por el fast-path de servicio único para NO auto-resolver cuando el
+ * cliente en realidad está preguntando algo (precio/ubicación/horario/etc.) —
+ * esas siguen al clasificador para responderse como side-question. Una
+ * afirmación o intención de reserva ("sí", "quiero una cita") retorna false.
+ */
+export function looksLikeSideQuestion(text: string): boolean {
+  if (/[?¿]/.test(text)) return true;
+  if (isServiceOrPriceQuestion(text)) return true;
+  const q = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return SIDE_Q_HINTS.some((kw) => q.includes(kw));
 }
 
 async function generateRepeatQuestion(

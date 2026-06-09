@@ -134,7 +134,7 @@ export async function handleGreeting(
     ? multi.serviceMatch!.value
     : null;
   const serviceMatches    = serviceMatchValue ? findServicesFromValue(serviceMatchValue, services) : [];
-  const resolvedService   = serviceMatches.length === 1 ? serviceMatches[0]! : null;
+  let resolvedService     = serviceMatches.length === 1 ? serviceMatches[0]! : null;
   const ambiguousServices = serviceMatches.length > 1 ? serviceMatches : [];
 
   const resolvedStaff = (multi.staffMatch?.confidence ?? 0) >= CONFIDENCE_THRESHOLD
@@ -160,6 +160,18 @@ export async function handleGreeting(
     parsedShift = hour >= 13 ? 'afternoon' : 'morning';
   } else {
     parsedShift = shiftRaw ?? null;
+  }
+
+  // ── Auto-pick servicio único (S4-BOT-09) ───────────────────────────────────
+  // Si el negocio tiene un solo servicio y el cliente no lo nombró pero sí
+  // mostró intención de reservar (fecha/hora/staff o afirmación), seleccionarlo
+  // automáticamente: no tiene sentido preguntar "¿cuál servicio?". Así
+  // "quiero agendar una cita para mañana" avanza sin trabarse. No aplica a
+  // preguntas del negocio (se responden aparte) ni a saludos sin señal de reserva.
+  const hasBookingSignal = Boolean(resolvedStaff || parsedDate || parsedTimeStr || multi.confirmYes);
+  if (!resolvedService && ambiguousServices.length === 0 && services.length === 1
+      && !multi.sideQuestion && hasBookingSignal) {
+    resolvedService = services[0]!;
   }
 
   // ── Determinar caso de saludo ──────────────────────────────────────────────
