@@ -39,6 +39,50 @@ export type SideQuestionRoute =
 export const MISSING_DATA_ANSWER =
   'Sobre eso no tengo el dato a la mano, pero escríbenos y con gusto te confirmamos.';
 
+/** Invitación de cierre — SOLO Nivel 1 (preguntas con intención de servicio). */
+export const SIDE_QUESTION_INVITE = '¿Te gustaría agendar?';
+
+/** Cierre neutro y cálido para ubicación (Nivel 2). Embebido en la plantilla. */
+const LOCATION_CLOSING = 'Aquí te esperamos.';
+
+// ─── Cierre adaptativo por topic (3 niveles) ──────────────────────────────────
+
+/**
+ * Nivel de cierre de una side-question:
+ *   1 — intención de servicio (price/duration/services): invita a agendar (1 pregunta).
+ *   2 — logística (location/hours/parking/payment/kids): dato limpio, SIN empuje.
+ *   3 — sin intención de cita ahora (reviews/other→productos/[DERIVA]): salida útil, SIN agenda.
+ */
+export type ClosingLevel = 1 | 2 | 3;
+
+export function closingLevelForTopic(topic: ExtendedTopic): ClosingLevel {
+  switch (topic) {
+    case 'price':
+    case 'duration':
+    case 'services':
+      return 1;
+    case 'location':
+    case 'hours':
+    case 'parking':
+    case 'payment':
+    case 'kids':
+      return 2;
+    case 'reviews':
+    case 'other':
+    default:
+      return 3;
+  }
+}
+
+/**
+ * Cierre adaptativo a anexar tras responder una side-question.
+ * Solo Nivel 1 invita a agendar. Niveles 2 y 3 no anexan nada: el dato limpio o
+ * la salida útil (link en su propia línea, ya en la plantilla) es la respuesta.
+ */
+export function closingForTopic(topic: ExtendedTopic): string {
+  return closingLevelForTopic(topic) === 1 ? SIDE_QUESTION_INVITE : '';
+}
+
 // ─── Formas de pago (banderas en attributes) ──────────────────────────────────
 
 const PAYMENT_FLAGS: ReadonlyArray<readonly [string, string]> = [
@@ -208,12 +252,10 @@ export function routeSideQuestion(params: {
       const address = business.address?.trim();
       if (!address) return { mode: 'defer' };
       const map = business.mapUrl?.trim();
-      return {
-        mode: 'answer',
-        text: map
-          ? `Estamos en ${address}. Aquí te dejo el mapa: ${map}`
-          : `Estamos en ${address}.`,
-      };
+      // Nivel 2 (logística): dato limpio + cierre neutro cálido, sin empuje de
+      // agenda. El link del mapa va en su PROPIA línea (salto antes y después).
+      const base = map ? `Estamos en ${address}.\n${map}` : `Estamos en ${address}.`;
+      return { mode: 'answer', text: `${base}\n${LOCATION_CLOSING}` };
     }
 
     case 'hours': {
@@ -270,18 +312,20 @@ export function routeSideQuestion(params: {
     }
 
     case 'reviews': {
+      // Nivel 3: salida útil (link de reseñas / sitio) en su PROPIA línea, sin
+      // invitar a agendar.
       const reviewUrl = business.reviewUrl?.trim();
       if (reviewUrl) {
         return {
           mode: 'answer',
-          text: `Lamento que no haya sido la mejor experiencia. Puedes dejarnos tu opinión aquí para que el equipo la vea: ${reviewUrl}`,
+          text: `Lamento que no haya sido la mejor experiencia. Puedes dejarnos tu opinión aquí:\n${reviewUrl}`,
         };
       }
       const minisite = buildMinisiteUrl(business, opts);
       return {
         mode: 'answer',
         text: minisite
-          ? `Lamento que no haya sido la mejor experiencia. Cuéntanos más aquí: ${minisite}`
+          ? `Lamento que no haya sido la mejor experiencia. Cuéntanos más aquí:\n${minisite}`
           : 'Lamento que no haya sido la mejor experiencia. Escríbenos y con gusto lo revisamos con el equipo.',
       };
     }
@@ -304,8 +348,9 @@ export function derivaFallback(
   opts?: BusinessContextOptions,
 ): string {
   const minisite = buildMinisiteUrl(business, opts);
+  // Link en su PROPIA línea (Nivel 3: salida útil, sin agenda).
   return minisite
-    ? `Eso lo puedes ver aquí: ${minisite}`
+    ? `Eso lo puedes ver aquí:\n${minisite}`
     : 'Con gusto lo consultamos con el equipo y te confirmamos.';
 }
 
@@ -328,25 +373,28 @@ export function answerSideQuestionDeterministic(
 
 /**
  * Compone la respuesta de GREETING cuando el primer mensaje es una side-question
- * pura: saludo breve + respuesta + invitación a agendar. Si la conversación ya
- * está en curso (hasHistory) responde directo sin re-saludar.
+ * pura: saludo breve + respuesta + cierre ADAPTATIVO según el nivel del topic.
+ * `closing` viene de closingForTopic() — vacío en Niveles 2 y 3 (sin empuje de
+ * agenda). Si la conversación ya está en curso (hasHistory) responde directo
+ * sin re-saludar. El cierre, cuando existe, va en su propia línea.
  */
 export function composeGreetingSideAnswer(params: {
   answer: string;
+  closing: string;
   isReturning: boolean;
   customerName: string | null;
   botName: string;
   businessName: string;
   hasHistory: boolean;
 }): string {
-  const invite = '¿Te gustaría agendar una cita?';
+  const body = params.closing ? `${params.answer}\n${params.closing}` : params.answer;
   if (params.hasHistory) {
-    return `${params.answer}\n${invite}`;
+    return body;
   }
   const greeting = params.isReturning && params.customerName
     ? `Hola ${params.customerName}.`
     : `Hola, soy ${params.botName} de ${params.businessName}.`;
-  return `${greeting} ${params.answer}\n${invite}`;
+  return `${greeting} ${body}`;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

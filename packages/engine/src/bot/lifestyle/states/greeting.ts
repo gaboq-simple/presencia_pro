@@ -24,7 +24,7 @@ import { logBot } from '../../../utils/logger';
 import { classifyMultiIntent, classifyIntent } from '../classifier';
 import type { MultiIntentClassification } from '../classifier';
 import { buildBusinessContext } from '../businessContext';
-import { routeSideQuestion, derivaFallback, composeGreetingSideAnswer } from '../sideQuestion';
+import { routeSideQuestion, derivaFallback, composeGreetingSideAnswer, refineTopic, closingForTopic } from '../sideQuestion';
 import { getCatalog, getActiveStaff } from '../catalog';
 import { parseDate } from './qualifyingDatetime';
 import { formatTimeHuman } from '../utils';
@@ -222,8 +222,12 @@ export async function handleGreeting(
       answer = haikuAnswer ?? derivaFallback(business, sqOpts);
     }
 
+    // Cierre adaptativo por nivel del topic (determinista): Nivel 1 invita a
+    // agendar; Niveles 2 y 3 no anexan empuje de agenda.
+    const refinedTopic = refineTopic(multi.sideQuestion.topic, multi.sideQuestion.question);
     const composed = composeGreetingSideAnswer({
       answer,
+      closing:      closingForTopic(refinedTopic),
       isReturning,
       customerName,
       botName:      business.botName,
