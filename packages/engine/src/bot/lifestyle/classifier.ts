@@ -47,7 +47,7 @@ export type IntentClassification = {
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001';
+export const CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_HISTORY      = 2;
 
 // ─── Función principal ────────────────────────────────────────────────────────

@@ -23,6 +23,11 @@ import { buildSystemPrompt } from '../prompt';
 import { logBot } from '../../../utils/logger';
 import { classifyMultiIntent, classifyIntent } from '../classifier';
 import type { MultiIntentClassification } from '../classifier';
+import {
+  logClassifierOutput,
+  buildSingleClassifierMetadata,
+  buildMultiClassifierMetadata,
+} from '../classifierLog';
 import { buildBusinessContext } from '../businessContext';
 import { routeSideQuestion, derivaFallback, composeGreetingSideAnswer, refineTopic, closingForTopic } from '../sideQuestion';
 import { getCatalog, getActiveStaff } from '../catalog';
@@ -126,6 +131,15 @@ export async function handleGreeting(
       staff:        allStaff.map((s) => s.name),
       anthropicKey,
     }).catch(() => ({ unclear: true } as MultiIntentClassification));
+
+    // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
+    logClassifierOutput({
+      supabase,
+      businessId:    business.id,
+      customerPhone: msg.customerPhone,
+      state:         'GREETING',
+      metadata:      buildMultiClassifierMetadata(multi, msg.body),
+    });
   }
 
   // ── Resolver entidades detectadas ──────────────────────────────────────────
@@ -230,7 +244,17 @@ export async function handleGreeting(
         businessContext:  buildBusinessContext(business, services, sqOpts),
         recentHistory:    [],
         anthropicKey,
-      }).then((c) => c.side_question_answer).catch(() => null);
+      }).then((c) => {
+        // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
+        logClassifierOutput({
+          supabase,
+          businessId:    business.id,
+          customerPhone: msg.customerPhone,
+          state:         'GREETING',
+          metadata:      buildSingleClassifierMetadata(c, multi.sideQuestion!.question),
+        });
+        return c.side_question_answer;
+      }).catch(() => null);
       answer = haikuAnswer ?? derivaFallback(business, sqOpts);
     }
 

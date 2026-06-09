@@ -15,6 +15,7 @@ import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { getCatalog } from '../catalog';
 import { classifyIntent } from '../classifier';
+import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import {
   handleClassification,
   buildClarifyMessage,
@@ -99,6 +100,15 @@ export async function handleQualifyingService(
     businessContext,
     recentHistory,
     anthropicKey,
+  });
+
+  // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
+  logClassifierOutput({
+    supabase,
+    businessId:    business.id,
+    customerPhone: msg.customerPhone,
+    state:         'QUALIFYING_SERVICE',
+    metadata:      buildSingleClassifierMetadata(classification, msg.body),
   });
 
   const clarResult = handleClassification({

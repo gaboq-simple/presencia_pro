@@ -15,6 +15,7 @@ import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { sendWhatsAppMeta }         from '../../../notifications/whatsapp';
 import { notifyWaitlist }           from '../scheduling';
 import { classifyIntent }           from '../classifier';
+import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import { getCatalog }               from '../catalog';
 import { buildBusinessContext }     from '../businessContext';
 import { formatTimeHumanFromDate }  from '../utils';
@@ -273,6 +274,15 @@ export async function handleConfirmationResponse(
       businessContext,
       recentHistory,
       anthropicKey:     deps.anthropicKey,
+    });
+
+    // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
+    logClassifierOutput({
+      supabase,
+      businessId:    business.id,
+      customerPhone: msg.customerPhone,
+      state:         'CONFIRMED',
+      metadata:      buildSingleClassifierMetadata(classification, msg.body),
     });
 
     if (
