@@ -25,6 +25,7 @@ import { parseMetaPayload, buildLifestyleMessage as buildMetaMessage } from '@pr
 import { maskPhone } from '@presenciapro/engine/utils';
 import { rateLimit } from '@/lib/rate-limit';
 import { bufferAndProcess } from '@/lib/message-buffer';
+import { isTestResetCommand, TEST_RESET_CONFIRMATION } from '@/lib/test-reset';
 
 // ─── Supabase admin client ────────────────────────────────────────────────────
 
@@ -459,6 +460,13 @@ async function getTwilioResponseText(
     const business  = await resolveBusinessByTwilio(supabase, toNumber);
     if (!business) return null;
 
+    // ── Comando de reset de prueba (dev síncrono — esta ruta no pasa por
+    // handoffGate; retorna el texto directamente como TwiML) ───────────────
+    if (isTestResetCommand(customerPhone, messageBody, process.env['TEST_PHONE_ALLOWLIST'])) {
+      await performTestReset(supabase, business.id, customerPhone);
+      return TEST_RESET_CONFIRMATION;
+    }
+
     const anthropicKey = process.env['ANTHROPIC_API_KEY'] ?? '';
     const msg = buildTwilioMessage(
       { customerPhone, toNumber, body: messageBody, customerName, messageId: null },
@@ -505,6 +513,15 @@ async function processTwilioMessage(
   }
 
   if (!business) return; // ya logueado en resolveBusinessByTwilio
+
+  // ── Comando de reset de prueba — ANTES del handoffGate ───────────────────
+  if (isTestResetCommand(customerPhone, messageBody, process.env['TEST_PHONE_ALLOWLIST'])) {
+    await performTestReset(supabase, business.id, customerPhone);
+    try {
+      await sendMessage({ to: customerPhone, message: TEST_RESET_CONFIRMATION });
+    } catch { /* best-effort */ }
+    return;
+  }
 
   // ── Handoff gate — verificar modo de sesión antes de pasar al FSM ─────────
   const shouldProcess = await handoffGate(supabase, business, customerPhone, messageBody);
@@ -644,6 +661,45 @@ async function sendNonTextResponseMeta(
   }
 }
 
+// ─── Test reset command ───────────────────────────────────────────────────────
+// Comando de reset SOLO para pruebas. Devuelve una conversación a estado limpio
+// (GREETING / context vacío / modo bot, handoff liberado) sin borrar la fila a
+// mano. Las guardas puras (trigger exacto + allowlist) viven en '@/lib/test-reset'
+// (unit-testable). La allowlist se lee de TEST_PHONE_ALLOWLIST (CSV, NO commiteada)
+// y se inyecta en cada call site. Se intercepta ANTES del handoffGate para que una
+// conversación en modo human/paused no trague el comando antes de resetearse.
+
+/**
+ * Resetea la fila de bot_conversations de (business_id, customer_phone) a estado
+ * limpio. Reusa el cliente service-role existente. No envía la confirmación —
+ * eso queda a cargo del caller (varía por provider).
+ */
+async function performTestReset(
+  supabase: ReturnType<typeof getServiceClient>,
+  businessId: string,
+  customerPhone: string,
+): Promise<void> {
+  await supabase
+    .from('bot_conversations')
+    .update({
+      state:        'GREETING',
+      context:      {},
+      session_mode: 'bot',
+      taken_by:     null,
+      taken_at:     null,
+    })
+    .eq('business_id', businessId)
+    .eq('customer_phone', customerPhone);
+
+  console.log(JSON.stringify({
+    ts:             new Date().toISOString(),
+    service:        'bot',
+    event:          'test_reset_command',
+    business_id:    businessId,
+    customer_phone: maskPhone(customerPhone),
+  }));
+}
+
 // ─── Handoff gate ─────────────────────────────────────────────────────────────
 // Verifica si la conversación está bajo control humano o pausada.
 // Retorna true  → el FSM debe procesar el mensaje (modo 'bot' o auto-released).
@@ -781,6 +837,21 @@ async function processMetaMessage(
   }
 
   const business = rowToBusiness(businessData as unknown as BusinessRow);
+
+  // ── Comando de reset de prueba — ANTES del handoffGate ───────────────────
+  // Debe ir antes del gate: si la conversación quedó en human/paused, el gate
+  // tragaría el comando y nunca se resetearía.
+  if (isTestResetCommand(customerPhone, messageBody, process.env['TEST_PHONE_ALLOWLIST'])) {
+    await performTestReset(supabase, business.id, customerPhone);
+    try {
+      await sendMessage({
+        to:      customerPhone,
+        message: TEST_RESET_CONFIRMATION,
+        from:    business.whatsappPhoneNumberId,
+      });
+    } catch { /* best-effort */ }
+    return;
+  }
 
   // ── Handoff gate — verificar modo de sesión antes de pasar al FSM ─────────
   const shouldProcess = await handoffGate(supabase, business, customerPhone, messageBody);
