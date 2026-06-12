@@ -125,6 +125,14 @@ export const LifestyleBotContextSchema = z.object({
   /** Slot elegido en ISO 8601 UTC. Se establece en CONFIRMING_APPOINTMENT. */
   selectedSlot: z.string().datetime().optional(),
 
+  /**
+   * Slot más cercano ofrecido cuando el cliente pidió una hora NO disponible
+   * en CONFIRMING_APPOINTMENT (decisión b: "a las 6 no tengo, lo más cercano es 5:15").
+   * ISO 8601 UTC del pendingSlot ofrecido. Si el cliente responde afirmativamente
+   * en el siguiente turno, se selecciona ese slot. null/ausente si no hay oferta pendiente.
+   */
+  nearestOfferSlot: z.string().datetime().nullable().optional(),
+
   /** UUID de la cita creada en la DB — se establece en CONFIRMED. */
   appointmentId: z.string().uuid().optional(),
 
