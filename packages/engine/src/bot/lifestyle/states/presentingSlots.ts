@@ -163,6 +163,7 @@ export async function handleShowingSlots(
         staffToQuery:        staffForService,
         supabase,
         tz:                  business.timezone,
+        requestedTime:       context.requestedTime ?? undefined,
       });
     } catch (err) {
       if (err instanceof SchedulingQueryError) {

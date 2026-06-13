@@ -26,16 +26,23 @@
 //   Incrementa clarification_attempts y pide clarificación (máx MAX_CLARIFY_ATTEMPTS).
 
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
-import { getCatalog } from '../catalog';
+import { getCatalog, getStaffForService } from '../catalog';
 import {
   formatTimeHumanFromDate,
   formatTimeHuman,
   buildBookingNameQuestion,
   detectsServiceCorrection,
 } from '../utils';
-import { utcToLocalMinutes } from '../tzUtils';
+import { utcToLocalMinutes, noonUTCDate } from '../tzUtils';
+import { getAvailableSlots, SchedulingQueryError } from '../scheduling';
 import { parseDate } from './qualifyingDatetime';
-import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
+
+// Mensaje al usuario cuando los queries de disponibilidad fallan (reusa el
+// patrón de presentingSlots.ts).
+const SCHEDULING_ERROR_MESSAGE =
+  'No pude verificar la disponibilidad en este momento. ' +
+  'Intenta de nuevo en unos minutos o escribenos directamente.';
 
 const DAYS_ES   = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
 const MONTHS_ES = [
@@ -139,10 +146,96 @@ export async function handleConfirmingAppointment(
       return buildConfirmationResult(context, route.slot, business.id, business.timezone, supabase, msg.customerName);
 
     case 'offer_nearest': {
-      const tz          = business.timezone;
-      const hh          = String(Math.floor(route.requestedMinutes / 60)).padStart(2, '0');
-      const mm          = String(route.requestedMinutes % 60).padStart(2, '0');
-      const reqLabel    = formatTimeHuman(`${hh}:${mm}`);
+      const tz       = business.timezone;
+      const hh       = String(Math.floor(route.requestedMinutes / 60)).padStart(2, '0');
+      const mm       = String(route.requestedMinutes % 60).padStart(2, '0');
+      const reqLabel = formatTimeHuman(`${hh}:${mm}`);
+
+      // Re-consultar la disponibilidad REAL del día (mismo día de los slots ya
+      // mostrados — NO es salto de fecha). El matcher base solo ve los ≤3
+      // pendingSlots presentados; la hora pedida puede existir en el día aunque
+      // no estuviera entre ellos. getAvailableSlots reordena bidireccionalmente
+      // por cercanía a la hora pedida y devuelve ≤3.
+      let realSlots: SlotCandidate[] | null = null;
+      if (context.serviceId && context.requestedDate) {
+        try {
+          const catalog = await getCatalog(business.id, supabase);
+          const service = catalog.find((s) => s.id === context.serviceId);
+          if (service) {
+            const staffToQuery = await getStaffForService(business.id, service.id, supabase);
+            realSlots = await getAvailableSlots({
+              businessId:          business.id,
+              serviceId:           service.id,
+              durationMinutes:     service.duration_minutes,
+              requestedDate:       noonUTCDate(context.requestedDate),
+              shift:               null,
+              preferredStaffId:    context.autoAssign ? null : (context.staffId ?? null),
+              isWalkIn:            false,
+              walkInBufferMinutes: business.walkInBufferMinutes,
+              staffToQuery,
+              supabase,
+              tz,
+              requestedTime:       `${hh}:${mm}`,
+            });
+          }
+        } catch (err) {
+          if (err instanceof SchedulingQueryError) {
+            if (attempts >= 1) {
+              return {
+                newState:     'FALLBACK',
+                newContext:   { ...context, clarification_attempts: 0, nearestOfferSlot: null },
+                responseText: business.fallbackMessage,
+              };
+            }
+            return {
+              newState:     'CONFIRMING_APPOINTMENT',
+              newContext:   { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
+              responseText: SCHEDULING_ERROR_MESSAGE,
+            };
+          }
+          throw err;
+        }
+      }
+
+      // Disponibilidad real recuperada → REEMPLAZAR pendingSlots (≤3, ya
+      // ordenados por cercanía). El primero es el más cercano a la hora pedida.
+      if (realSlots && realSlots.length > 0) {
+        const newPending: LifestylePendingSlot[] = realSlots.map((s, i) => ({
+          index:     i + 1,
+          staffId:   s.staffId,
+          staffName: s.staffName,
+          startsAt:  s.startsAt.toISOString(),
+          endsAt:    s.endsAt.toISOString(),
+        }));
+        const offered     = newPending[0]!;
+        const offeredMin   = utcToLocalMinutes(new Date(offered.startsAt), tz);
+        const isExact      = Math.abs(offeredMin - route.requestedMinutes) <= EXACT_TOL;
+        const offeredTime  = formatTimeHumanFromDate(new Date(offered.startsAt), tz);
+        const staffPart    = context.autoAssign ? '' : ` con ${offered.staffName}`;
+
+        // CRÍTICO (anti Bug-B): aunque la hora pedida exista exacta, NO
+        // auto-confirmar. Presentar y esperar el "sí" explícito del cliente.
+        // El slot ofrecido queda en pendingSlots[0] = nearestOfferSlot, donde
+        // la rama de aceptación (AFFIRM_RE) lo recoge.
+        const responseText = isExact
+          ? `Si, tengo disponible a las ${offeredTime}${staffPart}. Te la agendo?`
+          : `A las ${reqLabel} no tengo disponible${staffPart}. ` +
+            `Lo mas cercano es a las ${offeredTime}. Te sirve?`;
+
+        return {
+          newState:   'CONFIRMING_APPOINTMENT',
+          newContext: {
+            ...context,
+            pendingSlots:           newPending,
+            nearestOfferSlot:       offered.startsAt,
+            clarification_attempts: 0,
+          },
+          responseText,
+        };
+      }
+
+      // Sin disponibilidad real recuperable → ofrecer el más cercano de los ya
+      // mostrados (comportamiento previo, conserva el slot en pendingSlots).
       const nearestTime = formatTimeHumanFromDate(new Date(route.slot.startsAt), tz);
       const staffPart   = context.autoAssign ? '' : ` con ${route.slot.staffName}`;
       return {
