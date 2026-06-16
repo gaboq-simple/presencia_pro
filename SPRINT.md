@@ -956,6 +956,20 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 
 ---
 
+### 🟠 GAP — notificación de escalado diferida un turno (origen: S5-BOT-03, 2026-06-16)
+
+**Origen:** descubierto durante la implementación de S5-BOT-03 (handoff por rechazo). Hallazgo de lectura, NO corregido — fuera del alcance del frontier de esa tarea.
+
+**El gap:** en el handoff por rechazo (4º "no" consecutivo → `ESCALATED`), `buildRejectionResult` (`confirmingAppointment.ts:384-399`) cambia el estado y le **promete al cliente** "te conecto con el equipo", pero la **notificación real al admin NO se dispara en ese paso**. Se difiere a `handleFallback` (`fallback.ts`), que solo corre en el **siguiente** mensaje del cliente (el `fallbackAttempts:2` que siembra `buildRejectionResult` está calibrado para que ese próximo mensaje cruce `MAX_FALLBACK_ATTEMPTS` y dispare el aviso al admin por WhatsApp).
+
+**Riesgo:** si el cliente se queda callado tras el "te conecto" —lo más probable, porque ya está frustrado y se le pidió esperar— el admin **nunca recibe el aviso** → cliente en limbo esperando un contacto que no fue notificado. La promesa al cliente y la acción (notificar admin) **deben ser atómicas**: disparar la notificación en el mismo paso que la promesa.
+
+**Caveat al arreglar:** NO duplicar el aviso. El diseño diferido actual quizás evita la doble notificación precisamente vía `fallbackAttempts:2`; verificar ese acoplamiento antes de mover la notificación al paso de la promesa (si se adelanta sin ajustar el contador, el siguiente mensaje podría re-notificar).
+
+**Severidad:** alto impacto de negocio (se pierde el handoff), NO de estabilidad (el bot no se rompe). Mismo patrón de "punto de falla por depender de una acción adicional en un turno futuro" que la cancelación.
+
+---
+
 - Audit log completo de acciones humanas
 - Exportación CSV de citas/clientes/reportes
 - Multi-sucursal de escritura (mutaciones desde sesión organization)
