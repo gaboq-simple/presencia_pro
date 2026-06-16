@@ -844,6 +844,32 @@ VALUES (
 
 ---
 
+#### S5-BOT-03 — Aceptación/negación en CONFIRMING_APPOINTMENT (fix `AFFIRM_RE` + progresión de rechazo) 🟢 done (2026-06-16)
+**Origen:** "Hallazgo lateral" de S5-BOT-02 — `AFFIRM_RE` no matcheaba "sí" con acento (el `\b` ASCII no hace boundary tras la 'í'), y el flujo no distinguía un "no" (rechazo) de un input no reconocido (no te entendí). El cliente que respondía "sí" a una oferta caía al clarify ciego.
+**Frontera dura (NO tocado):** `routeSlotSelection`, `matchNaturalSlot`, la reconsulta de día real y la rama `offer_nearest` (S5-BOT-01/02, verificados). NO clasificador. NO derivación salvo el cuarto "no". NO cancelación. El comportamiento de "no, a las 6" como corrección (lo consume el matcher natural) NO se rompe.
+**Las 4 piezas:**
+- **Pieza 1 — `AFFIRM_RE` → `isAffirmation()` normalizado.** Se reemplaza el regex con `\b` por listas ASCII + `normalize()` (NFD + strip diacríticos, mismo patrón que `sideQuestion.ts`). Afirmaciones claras: `si, simon, dale, va, vale, ok, okay, claro, sale, perfecto, correcto, afirmativo, de acuerdo, me sirve, orale`. Tokens cortos/ambiguos (`si, va, ok, okay, sale, vale`) → **match de mensaje completo** (tras normalizar/quitar puntuación) para que "¿va a estar?" NO acepte. Largos/distintivos (`simon, dale, claro, perfecto, correcto, afirmativo, de acuerdo, me sirve, orale`) → anclaje por espacios. La rama solo corre con `nearestOfferSlot` presente (condición sin cambios).
+- **Pieza 2 — Negación DOWNSTREAM del router (regla maestra).** La detección de "no" va **DESPUÉS** de `routeSlotSelection`, solo cuando devuelve `none`. NUNCA antes. Así "no, a las 6" / "no, mejor las 7" pasan intactos por el matcher natural (extrae la hora → `offer_nearest`) y solo el "no" SIN señal de selección entra a la rama de negación. Negaciones claras: `no, nel, negativo, ahorita no, no gracias` (normalizadas; cortas → mensaje completo, `negativo` → anclaje). Las implícitas ("que amable", "a la vuelta", "luego", "asi esta bien gracias") NO se fuerzan → caen al clarify natural.
+- **Pieza 3 — Progresión escalonada de rechazo (contador `rejection_attempts`).** Contador NUEVO, **separado** de `clarification_attempts` (distingue "me dijiste que no" de "no te entendí"). Cuenta "no" CONSECUTIVOS; se resetea a 0 ante cualquier avance (selección, `offer_nearest`, corrección, `date_redirect`). Pasos, cada uno RECONOCE el "no" antes de redirigir (nunca suena a "elige opción N"):
+  - `0` (1er no) → **A**: "Sin problema." + re-ofrecer alternativas concretas del día (otras horas de `pendingSlots`, excluyendo la ofrecida).
+  - `1` (2do no) → **B**: "Entiendo. ¿Qué hora te vendría mejor?" (pregunta abierta).
+  - `2` (3er no) → **C**, cambio de eje: "Va. ¿Prefieres quizás otro día, o buscas algo en particular?" (no repite lo de la hora).
+  - `3` (4to no) → **handoff a humano** vía `ESCALATED` (mecanismo de escalado existente; `fallbackAttempts: 2`).
+  - **Razón del diseño:** un cliente que rechaza repetidamente no necesita que le repitan opciones — necesita escalada gradual de empatía (reconocer) y de eje (hora → día → "algo en particular" → humano). Dos contadores separados evitan que un "no" consuma presupuesto de clarify (y viceversa), y que la mezcla degrade el tono.
+- **Pieza 4 — Copy del clarify ciego.** Reescrito a tono humano (reusa el registro de `offer_nearest`): "Disculpa, no te seguí bien. Solo dime a qué hora te gustaría… Si cualquiera te sirve, dime 'cualquiera' y te asigno la primera." Una sola pregunta por mensaje.
+**Criterios de aceptación:**
+- [x] "sí" con acento acepta (bug original); afirmaciones coloquiales aceptan.
+- [x] "no, a las 6" se consume como corrección (`offer_nearest`), NO entra a negación (regresión crítica).
+- [x] "no" solo → A; "no"→"no"→"no" progresa A→B→C; cuarto "no" → `ESCALATED`.
+- [x] "no"→"a las 4"(avanza)→"no" resetea a A (no salta a B).
+- [x] Tokens cortos ("va", "ok") aceptan solo como mensaje completo, no embebidos ("¿va a estar?" NO acepta).
+- [x] Regresión: selección directa y `offer_nearest` de S5-BOT-01/02 intactos.
+- [x] 29 tests nuevos en `tests/affirmNegationHandling.test.ts`; `npm test` 206 verdes; `tsc --noEmit` apps/lifestyle limpio (EXIT 0).
+**Verificación:** unit tests (206 pass / 0 fail) + type-check de la app verde. Smoke por WhatsApp con "sí" real **pendiente**, se hará en pasada conjunta con el smoke de `fix/slot-availability-real-day` (S5-BOT-02). Rama `fix/affirm-negation-handling`, **sin merge**.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-06-16 — fix de aceptación/negación en `confirmingAppointment.ts`).
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
