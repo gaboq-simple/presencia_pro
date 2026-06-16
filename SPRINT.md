@@ -824,6 +824,52 @@ VALUES (
 
 ---
 
+#### S5-BOT-02 — Disponibilidad real del día en CONFIRMING_APPOINTMENT (fix del "más cercano") 🟢 done (2026-06-13)
+**Origen:** finding "🟠 BUG DE DISPONIBILIDAD" (smoke de S5-BOT-01, diagnóstico read-only 2026-06-13, ver Backlog post-sprint). El "más cercano" colapsaba a la mañana porque el matcher comparaba la hora pedida solo contra los ≤3 slots mostrados, no contra el día real.
+**Alcance (la frontera, 2 archivos):** `presentingSlots.ts` (Bug 1) y `confirmingAppointment.ts` rama `offer_nearest` (Bug 2). NO se tocó el router puro `routeSlotSelection` (sus tests de `slotSelection.test.ts` quedan intactos) ni la rama `select` (selección directa de S5-BOT-01). FUERA de alcance: modo hora-primero, presentación representativa, domingo hardcodeado, dedup del parser.
+**Los dos bugs:**
+- **Bug 1 (rollover ciego):** `findSlotsInNextDays` (vía `presentingSlots.ts:158`) NO reenviaba `requestedTime` al `getAvailableSlots` del día alternativo → el día alterno presentaba los 3 slots **más tempranos**, no los más cercanos a la hora pedida. Fix: una línea — `requestedTime: context.requestedTime ?? undefined` en el `baseOpts`.
+- **Bug 2 (matcher ciego):** la rama `offer_nearest` ofrecía el más cercano de los **≤3 `pendingSlots` mostrados**, nunca el día real. Fix: re-consultar `getAvailableSlots` del **mismo día** (NO salto de fecha) con `requestedTime` derivado de `route.requestedMinutes`, `preferredStaffId = autoAssign ? null : staffId`, `durationMinutes`/`staffToQuery` vía `getCatalog`/`getStaffForService` (cacheados). Se **REEMPLAZAN** (no se appendean) los `pendingSlots` con el resultado (≤3, ya ordenado bidireccional por cercanía — se reusa esa lógica de `scheduling.ts`, no se replica) y `nearestOfferSlot = resultado[0]`. `SchedulingQueryError` se maneja con el patrón de retry de `presentingSlots`. Si no hay disponibilidad real recuperable, cae al comportamiento previo (slot de los mostrados).
+**Nota CRÍTICA — NO auto-confirma (anti Bug-B):** aunque `resultado[0]` sea la hora pedida exacta, NO se agenda en silencio. Se presenta ("Sí, tengo disponible a las X. ¿Te la agendo?") y se espera el "sí" explícito del cliente; el slot ofrecido queda en `pendingSlots[0] = nearestOfferSlot` donde la rama de aceptación (`AFFIRM_RE`) lo recoge. El único camino de confirmación directa sigue siendo la selección explícita (rama `select`, S5-BOT-01) — esta rama nunca commitea sola. Si la hora real no es exacta: "a las X no tengo, lo más cercano es Y, ¿te sirve?".
+**Criterios de aceptación:**
+- [x] Bug 1: día alternativo ofrece cerca de la hora pedida (test de `findSlotsInNextDays` con/sin `requestedTime`).
+- [x] Bug 2: hora pedida que SÍ existe pero no estaba mostrada → la ofrece y espera "sí" (no auto-agenda).
+- [x] Bug 2: hora NO disponible → ofrece la real más cercana **bidireccional** (caso antes: 16:30; caso después: 13:00), no un slot de la mañana.
+- [x] Aceptación "sí"/"dale" tras la oferta → `AWAITING_BOOKING_NAME` con el slot ofrecido (vive en los `pendingSlots` reemplazados).
+- [x] Regresión: selección directa entre los mostrados sigue yendo a `AWAITING_BOOKING_NAME`; el router puro NO cambió (sus 28 tests intactos).
+- [x] 7 tests nuevos en `tests/slotAvailabilityRealDay.test.ts`; `npm test` 177 verdes; `tsc --noEmit` apps/lifestyle limpio (EXIT 0).
+**Verificación:** unit tests (177 pass / 0 fail) + type-check de la app verde. Smoke test por WhatsApp es el veredicto (con `/reset-bot` entre intentos), re-verificando además la selección directa de S5-BOT-01 porque este fix toca el mismo núcleo. Rama `fix/slot-availability-real-day` (desde `feat/slot-selection-natural`, que contiene S5-BOT-01), **sin merge**.
+**Hallazgo lateral (NO corregido — fuera de alcance):** `AFFIRM_RE` no matchea "sí" con acento (el `\b` ASCII no hace boundary tras 'í'); "si"/"dale"/"va" sí. Pre-existente de S5-BOT-01. Anotado para backlog.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-06-13 — fix de disponibilidad real del día).
+
+---
+
+#### S5-BOT-03 — Aceptación/negación en CONFIRMING_APPOINTMENT (fix `AFFIRM_RE` + progresión de rechazo) 🟢 done (2026-06-16)
+**Origen:** "Hallazgo lateral" de S5-BOT-02 — `AFFIRM_RE` no matcheaba "sí" con acento (el `\b` ASCII no hace boundary tras la 'í'), y el flujo no distinguía un "no" (rechazo) de un input no reconocido (no te entendí). El cliente que respondía "sí" a una oferta caía al clarify ciego.
+**Frontera dura (NO tocado):** `routeSlotSelection`, `matchNaturalSlot`, la reconsulta de día real y la rama `offer_nearest` (S5-BOT-01/02, verificados). NO clasificador. NO derivación salvo el cuarto "no". NO cancelación. El comportamiento de "no, a las 6" como corrección (lo consume el matcher natural) NO se rompe.
+**Las 4 piezas:**
+- **Pieza 1 — `AFFIRM_RE` → `isAffirmation()` normalizado.** Se reemplaza el regex con `\b` por listas ASCII + `normalize()` (NFD + strip diacríticos, mismo patrón que `sideQuestion.ts`). Afirmaciones claras: `si, simon, dale, va, vale, ok, okay, claro, sale, perfecto, correcto, afirmativo, de acuerdo, me sirve, orale`. Tokens cortos/ambiguos (`si, va, ok, okay, sale, vale`) → **match de mensaje completo** (tras normalizar/quitar puntuación) para que "¿va a estar?" NO acepte. Largos/distintivos (`simon, dale, claro, perfecto, correcto, afirmativo, de acuerdo, me sirve, orale`) → anclaje por espacios. La rama solo corre con `nearestOfferSlot` presente (condición sin cambios).
+- **Pieza 2 — Negación DOWNSTREAM del router (regla maestra).** La detección de "no" va **DESPUÉS** de `routeSlotSelection`, solo cuando devuelve `none`. NUNCA antes. Así "no, a las 6" / "no, mejor las 7" pasan intactos por el matcher natural (extrae la hora → `offer_nearest`) y solo el "no" SIN señal de selección entra a la rama de negación. Negaciones claras: `no, nel, negativo, ahorita no, no gracias` (normalizadas; cortas → mensaje completo, `negativo` → anclaje). Las implícitas ("que amable", "a la vuelta", "luego", "asi esta bien gracias") NO se fuerzan → caen al clarify natural.
+- **Pieza 3 — Progresión escalonada de rechazo (contador `rejection_attempts`).** Contador NUEVO, **separado** de `clarification_attempts` (distingue "me dijiste que no" de "no te entendí"). Cuenta "no" CONSECUTIVOS; se resetea a 0 ante cualquier avance (selección, `offer_nearest`, corrección, `date_redirect`). Pasos, cada uno RECONOCE el "no" antes de redirigir (nunca suena a "elige opción N"):
+  - `0` (1er no) → **A**: "Sin problema." + re-ofrecer alternativas concretas del día (otras horas de `pendingSlots`, excluyendo la ofrecida).
+  - `1` (2do no) → **B**: "Entiendo. ¿Qué hora te vendría mejor?" (pregunta abierta).
+  - `2` (3er no) → **C**, cambio de eje: "Va. ¿Prefieres quizás otro día, o buscas algo en particular?" (no repite lo de la hora).
+  - `3` (4to no) → **handoff a humano** vía `ESCALATED` (mecanismo de escalado existente; `fallbackAttempts: 2`).
+  - **Razón del diseño:** un cliente que rechaza repetidamente no necesita que le repitan opciones — necesita escalada gradual de empatía (reconocer) y de eje (hora → día → "algo en particular" → humano). Dos contadores separados evitan que un "no" consuma presupuesto de clarify (y viceversa), y que la mezcla degrade el tono.
+- **Pieza 4 — Copy del clarify ciego.** Reescrito a tono humano (reusa el registro de `offer_nearest`): "Disculpa, no te seguí bien. Solo dime a qué hora te gustaría… Si cualquiera te sirve, dime 'cualquiera' y te asigno la primera." Una sola pregunta por mensaje.
+**Criterios de aceptación:**
+- [x] "sí" con acento acepta (bug original); afirmaciones coloquiales aceptan.
+- [x] "no, a las 6" se consume como corrección (`offer_nearest`), NO entra a negación (regresión crítica).
+- [x] "no" solo → A; "no"→"no"→"no" progresa A→B→C; cuarto "no" → `ESCALATED`.
+- [x] "no"→"a las 4"(avanza)→"no" resetea a A (no salta a B).
+- [x] Tokens cortos ("va", "ok") aceptan solo como mensaje completo, no embebidos ("¿va a estar?" NO acepta).
+- [x] Regresión: selección directa y `offer_nearest` de S5-BOT-01/02 intactos.
+- [x] 29 tests nuevos en `tests/affirmNegationHandling.test.ts`; `npm test` 206 verdes; `tsc --noEmit` apps/lifestyle limpio (EXIT 0).
+**Verificación:** unit tests (206 pass / 0 fail) + type-check de la app verde. Smoke por WhatsApp con "sí" real **pendiente**, se hará en pasada conjunta con el smoke de `fix/slot-availability-real-day` (S5-BOT-02). Rama `fix/affirm-negation-handling`, **sin merge**.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-06-16 — fix de aceptación/negación en `confirmingAppointment.ts`).
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -884,6 +930,46 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 
 ---
 
+### 🟠 BUG DE DISPONIBILIDAD — el "más cercano" ignora el día real (origen: smoke de S5-BOT-01, 2026-06-13)
+
+**Origen:** smoke test por WhatsApp del flujo de selección de slot (S5-BOT-01, que quedó SIN merge pendiente de smoke). Diagnóstico read-only contra prod, sin tocar código ni datos.
+
+**Disponibilidad REAL verificada (Carlos canónico `cd8d7f08`, Barbería Demo `4de6a450`, TZ `America/Mexico_City`):**
+- `staff_availability`: Lun–Vie 10:00–20:00, Sáb 10:00–18:00, **sin fila para Domingo (day 0)**. Sin breaks.
+- `office_hours` del negocio: 09:00–23:00 **todos los días, incluido domingo** → **incoherente con el staff** (poblado de datos, no bug de código).
+- Citas confirmadas lun 15: 10:15–10:45 y **17:00–17:30** (las 5pm exactas, ocupadas). 16:30 y 17:30 LIBRES.
+- Sin `staff_blocks` ni `staff_schedule_exceptions`.
+
+**Veredicto datos-vs-código:**
+- Síntoma **"Carlos no tiene disponibilidad mañana (domingo) pero sí el lunes" = DATOS.** Carlos no tiene franja de domingo; el bot dice la verdad. (Subyace incoherencia `office_hours` vs `staff_availability` — limpieza de datos pendiente.)
+- Síntoma **"a las 5pm → no disponible, lo más cercano es [hora de la mañana]" = CÓDIGO.** Carlos sí trabaja la tarde (hasta 20:00); 16:30/17:30 libres. Dos fallos encadenados:
+  1. `findSlotsInNextDays` (`scheduling.ts:653`) **NO reenvía `requestedTime`** al `getAvailableSlots` del día alternativo (`presentingSlots.ts:158-166`) → presenta los 3 slots **más tempranos** (mañana), no los más cercanos a la hora pedida.
+  2. El matcher de `CONFIRMING_APPOINTMENT` (`matchNaturalSlot`, `confirmingAppointment.ts:267-288`) compara la hora pedida **solo contra los ≤3 `pendingSlots` mostrados**, nunca contra la disponibilidad real del día (decisión "b" deliberada, comentario `confirmingAppointment.ts:16-17`). Con 3 slots de la mañana en pantalla, el "más cercano" a las 17:00 es matemáticamente un slot de la mañana.
+
+**Dirección del "más cercano":** bidireccional (antes y después) SOLO en la presentación inicial del día pedido (`getAvailableSlots` ordena por cercanía, `scheduling.ts:603-611`). Se pierde en el camino de día alternativo y en el re-pedido dentro de `CONFIRMING_APPOINTMENT` → colapsa a la mañana.
+
+**Síntoma "siempre 3 contiguos":** `MAX_SLOTS_TO_RETURN=3` (`scheduling.ts:44`) + orden cronológico cuando no hay `requestedTime` → los 3 más tempranos a 15 min (10:00/10:15/10:30). Son un `slice(0,3)` de muchos, no toda la disponibilidad.
+
+**Horizonte de búsqueda:** agendado directo lo gobierna `parseDate` (`qualifyingDatetime.ts:295`) — hasta ~12 meses si es **fecha concreta** ("4 de julio", "4/7"); frases relativas ("dentro de 3 semanas") NO se parsean (caen al clasificador). La búsqueda de alternativas cuando el día pedido está vacío está limitada a **5 días calendario** (`presentingSlots.ts:158`, saltando domingo hardcodeado en `scheduling.ts:651`).
+
+**Fix propuesto (NO ejecutado — requiere aprobación):** (1) reenviar `requestedTime` desde `findSlotsInNextDays` al `getAvailableSlots` alternativo; (2) que el "más cercano" en `CONFIRMING_APPOINTMENT` consulte la disponibilidad real del día (ambas direcciones) en vez de solo los 3 `pendingSlots`; (3) decidir si elevar el límite de 5 días para eventos lejanos; (4) reconciliar `office_hours` vs `staff_availability` (datos). Re-verificar también que esto no reintroduzca el "rollover de día buggy" que motivó la decisión b.
+
+---
+
+### 🟠 GAP — notificación de escalado diferida un turno (origen: S5-BOT-03, 2026-06-16)
+
+**Origen:** descubierto durante la implementación de S5-BOT-03 (handoff por rechazo). Hallazgo de lectura, NO corregido — fuera del alcance del frontier de esa tarea.
+
+**El gap:** en el handoff por rechazo (4º "no" consecutivo → `ESCALATED`), `buildRejectionResult` (`confirmingAppointment.ts:384-399`) cambia el estado y le **promete al cliente** "te conecto con el equipo", pero la **notificación real al admin NO se dispara en ese paso**. Se difiere a `handleFallback` (`fallback.ts`), que solo corre en el **siguiente** mensaje del cliente (el `fallbackAttempts:2` que siembra `buildRejectionResult` está calibrado para que ese próximo mensaje cruce `MAX_FALLBACK_ATTEMPTS` y dispare el aviso al admin por WhatsApp).
+
+**Riesgo:** si el cliente se queda callado tras el "te conecto" —lo más probable, porque ya está frustrado y se le pidió esperar— el admin **nunca recibe el aviso** → cliente en limbo esperando un contacto que no fue notificado. La promesa al cliente y la acción (notificar admin) **deben ser atómicas**: disparar la notificación en el mismo paso que la promesa.
+
+**Caveat al arreglar:** NO duplicar el aviso. El diseño diferido actual quizás evita la doble notificación precisamente vía `fallbackAttempts:2`; verificar ese acoplamiento antes de mover la notificación al paso de la promesa (si se adelanta sin ajustar el contador, el siguiente mensaje podría re-notificar).
+
+**Severidad:** alto impacto de negocio (se pierde el handoff), NO de estabilidad (el bot no se rompe). Mismo patrón de "punto de falla por depender de una acción adicional en un turno futuro" que la cancelación.
+
+---
+
 - Audit log completo de acciones humanas
 - Exportación CSV de citas/clientes/reportes
 - Multi-sucursal de escritura (mutaciones desde sesión organization)
@@ -896,6 +982,50 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 - Billing automatizado (Stripe/Conekta)
 - Webhooks salientes para integraciones del cliente
 - SSO/SAML para staff corporativo
+
+---
+
+## Visión del motor de agendamiento (modelo objetivo)
+
+> **Qué es esto:** NO es un bug ni una tarea. Es el modelo objetivo del motor de agendamiento — la foto de cómo debe comportarse cuando esté completo. Guía los próximos sprints de scheduling y sirve de norte para decidir fixes y features. Las piezas concretas se irán cortando en tareas `S{n}-BOT-*` a medida que se aborden.
+
+### 1. Disponibilidad es por barbero, no por negocio
+
+Cada barbero tiene su propia agenda. El negocio no tiene "una disponibilidad" — tiene la unión de las agendas de sus barberos. Consecuencia clave: **que un barbero descanse NO cierra el negocio.** Si Carlos descansa los domingos, eso significa "ese barbero no, quizás otro sí" — nunca "no hay citas el domingo". El motor debe razonar a nivel barbero y solo colapsar a nivel negocio cuando explícitamente todos los barberos están fuera.
+
+### 2. Dos modos de búsqueda simétricos
+
+El cliente entra por uno de dos caminos, y ambos deben funcionar igual de bien:
+
+- **(a) Barbero-primero:** el cliente pide a un barbero específico ("quiero con Carlos"). Se busca en la agenda de ese barbero. Si además pide una hora, se chequea esa hora en SU agenda; si no está disponible, se ofrece lo más cercano dentro de su agenda (ambas direcciones, antes y después).
+- **(b) Hora-primero:** al cliente no le importa quién lo atienda ("quiero el sábado a las 5"). Se busca esa hora **entre todas las agendas**, se ofrece el barbero que la tiene libre, y si al cliente no le gusta ese barbero o esa hora, se ajusta a lo más parecido (otra hora cercana, u otro barbero a esa hora).
+
+Son simétricos: uno fija el barbero y varía la hora; el otro fija la hora y varía el barbero. El motor debe soportar ambos como ciudadanos de primera clase, no uno como caso especial del otro.
+
+### 3. Presentación inicial representativa
+
+Cuando la agenda está vacía (o muy abierta), NO ofrecer los 3 slots más tempranos. Ofrecer horarios **distribuidos a lo largo del día** (mañana / tarde / noche) para que el cliente vea el rango real disponible y elija con criterio. Mostrar 10:00/10:15/10:30 le oculta que también hay tardes y noches libres. La primera respuesta debe comunicar la amplitud real, no el primer hueco cronológico.
+
+### 4. Manejo de "barbero descansa / negocio abierto"
+
+Es el escenario donde se ganan o se pierden citas. Cuando el barbero pedido no trabaja ese día pero el negocio sí opera (otros barberos disponibles), el motor debe:
+
+1. **Comunicarlo explícitamente:** "Carlos descansa los domingos." (No esconder la razón ni dar un "no hay disponibilidad" mudo.)
+2. **Ofrecer las dos salidas:**
+   - **Otro barbero ese mismo día** ("pero Andrés sí trabaja el domingo, ¿te lo agendo con él?").
+   - **Ese mismo barbero otro día** ("o si prefieres a Carlos, su próximo día es el lunes").
+
+Dejar al cliente elegir entre conservar el barbero o conservar el día es lo que convierte un "no" en una cita.
+
+### 5. Dependencia: requiere múltiples barberos (bloqueado)
+
+Las siguientes piezas de esta visión **NO pueden implementarse ni probarse con un solo barbero en la base** y quedan **🟡 bloqueadas hasta cargar un segundo barbero real en la base de prueba**:
+
+- **(b) Búsqueda hora-primero** — sin segundo barbero no hay "entre todas las agendas" que recorrer.
+- **Derivación a otro barbero** — no hay a quién derivar.
+- **Manejo de descansos "barbero descansa / negocio abierto"** — con un solo barbero, que descanse SÍ cierra el negocio, así que el escenario no existe.
+
+Desbloqueo: cargar un segundo barbero real (con agenda propia, horario distinto al primero) en la barbería de prueba. Hasta entonces, lo único accionable de esta visión es el comportamiento single-barbero: modo (a) barbero-primero y la presentación inicial representativa (punto 3).
 
 ---
 
@@ -933,6 +1063,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-06-06 | S4-BOT-07 polish | done | Pulido de tono + bug de mapeo del catálogo. (1) Bug bandera false≠ausente: businessContext.ts gana formatAttributesNegative → línea "No cuenta con:" para banderas en false (el LLM ya no las confunde con dato ausente → parking=false responde "No contamos con…"); sideQuestion.ts pago distingue presente-false (negativa) de ausente (honesta). (2) Tono: eliminados conectores con guion ("Dicho eso —", "Por cierto —"…) de clarification.ts (buildSideQuestionResponse junta dato + retorno natural) y de prompt.ts; "Por cierto, el costo…" → "El costo…" en awaitingConfirmation/awaitingBookingName. (3) Lista de servicios solo pertinente: isServiceOrPriceQuestion (sideQuestion.ts) gobierna si qualifyingService anexa el menú; ubicación/horario/pago/niños/estacionamiento/reseñas ya no lo arrastran. 105 tests node:test verdes; type-check limpio; lint 0 errores. Rama feat/sidequestion-polish (desde origin/main tras merge PR #11, sin merge). NO se tocó la lógica de datos determinista que ya servía. |
 | 2026-06-10 | S5-SEC-01 (RLS conversation_messages) | done | `conversation_messages` tenía RLS **deshabilitado por omisión** (027 creó la tabla sin ENABLE; 033 agregó las 2 políticas `ls_conv_messages_select_staff`/`ls_conv_messages_insert_staff` pero olvidó el ENABLE; ninguna migración posterior lo desactivó — el estado era omisión, no regresión). Corrección: migración `043_enable_rls_conversation_messages.sql` = `ALTER TABLE public.conversation_messages ENABLE ROW LEVEL SECURITY;` — **sin políticas nuevas**, porque ya existían y replican el patrón de `bot_conversations` (033: SELECT+INSERT para staff del negocio vía join por `business_id`). Aplicada a prod (`hdqazbuxtpavtioufrsv`); post-check de esquema: `relrowsecurity=true`, `relforcerowsecurity=false`, `policy_count=2`. **Verificado funcionalmente** con flujo real panel+WhatsApp (conv `5215511987286`, 17:32–17:35, post-RLS): los 3 paths de escritura service-role siguen insertando con RLS activo — `bot` (escalación), `human` (mensaje de panel) y `customer` (inbound del webhook, ~8 filas). RLS no rompió el handoff. **Caveat futuro:** las políticas asumen **service role** para el path bot/webhook (que bypassa RLS); si alguien migra ese INSERT a anon/authenticated, `auth.uid()` sería NULL y el `WITH CHECK` lo bloquearía silenciosamente. Migración 043 mergeada a main (fast-forward). |
 | 2026-06-12 | S5-TEST-01 | done | Comando de reset de conversación para testing (`/reset-bot`). Origen: diagnóstico del ciclo de vida del bot — los estados intermedios (QUALIFYING_*/SHOWING_SLOTS/AWAITING_*) no tienen reset de horizonte corto (solo lazy 24h + terminales), así que una re-prueba el mismo día revivía el estado viejo; el workaround era borrar la fila a mano (frágil por UNIQUE+UPSERT). Comportamiento: trigger exacto `/reset-bot` (no substring) + gating por allowlist; resetea state→GREETING, context→{}, session_mode→bot (destraba human/paused), taken_by/taken_at→null + confirmación `✅`. Doble guarda: trigger exacto Y teléfono en `TEST_PHONE_ALLOWLIST` (E.164 sin +, CSV, NO commiteada; fail-closed si ausente/vacía). Fuera de allowlist el comando es inerte e indistinguible de cualquier mensaje (sin revelar que existe). Interceptado en los 3 entrypoints del webhook (Meta async, Twilio async, Twilio dev síncrono) ANTES del handoffGate. Guardas puras en `apps/lifestyle/src/lib/test-reset.ts` (sin deps Next/Supabase/red, allowlist inyectada) + 20 tests en `tests/testReset.test.ts`. UPDATE reusa el cliente service-role. NO tocó FSM/handlers/compliance/easter egg. 143 tests verdes (20 nuevos). Smoke en prod en ambos sentidos (en allowlist resetea; fuera no). PR #17 mergeado a main; desplegado. Caveat: `TEST_PHONE_ALLOWLIST` seteada en Vercel → comando latente en prod, accesible solo a los números de prueba, inerte si se quita la var. Backlog relacionado NO resuelto: reset de "intermedios rancios" para PRODUCCIÓN (opción B del diagnóstico) sigue pendiente — decisión de producto: umbral de inactividad. Solo doc, commit directo a main. |
+| 2026-06-13 | S5-BOT-01 (smoke/diagnóstico) | doc | Diagnóstico read-only datos-vs-código de disponibilidad de slots (smoke por WhatsApp de S5-BOT-01). Verificado contra prod: Carlos `cd8d7f08` trabaja Lun–Vie 10–20 / Sáb 10–18, SIN domingo; `office_hours` declara 09–23 todos los días (incoherente, dato). Veredicto: "no dispo mañana(domingo)" = DATOS (sin franja); "5pm → cercano de la mañana" = CÓDIGO — dos fallos encadenados: `findSlotsInNextDays` no reenvía `requestedTime` (presenta los 3 más tempranos) + matcher `matchNaturalSlot` compara solo contra los ≤3 pendingSlots mostrados, nunca el día real (decisión b). "Más cercano" bidireccional solo en presentación inicial; colapsa a la mañana en día alterno y en re-pedido. Horizonte: directo hasta ~12 meses si es fecha concreta; alternativas limitadas a 5 días calendario (domingo hardcodeado). Registrado como finding "🟠 BUG DE DISPONIBILIDAD" en Backlog post-sprint con fix propuesto (NO ejecutado). Sin tocar código ni base (solo SELECT). |
 | 2026-06-12 | S5-BOT-01 | done | Selección de slot en lenguaje natural en CONFIRMING_APPOINTMENT. Antes el bot presentaba horarios en lenguaje natural pero solo entendía el índice 1/2/3. Dos causas raíz: (1) `detectsDatetimeRequest` interceptaba "a las"/"tarde" y re-ruteaba a QUALIFYING_DATETIME antes de llegar al parser; (2) `parseChoice` hacía `parseInt` sobre todo el string → "5 de la tarde" leído como índice 5 fuera de rango. Regla maestra de ruteo: fecha presente (`parseDate`≠null: "mañana"/"el viernes"/"23 de abril") → se mantiene re-ruteo a QUALIFYING_DATETIME; solo-hora sin fecha → selección del día actual, se matchea contra pendingSlots. Conflicto resuelto quitando frases de turno ("de la tarde") antes de `parseDate` ("5 de la tarde" no es fecha, "mañana a las 5" sí). 6 decisiones: (a) match exacto ±5min; (b) hora no ofrecida → ofrecer cercano DENTRO del estado vía nuevo campo `nearestOfferSlot` (evita bug de rollover de día del re-ruteo); (c) ordinales primera/segunda/último; (d) fuzzy más temprano/tarde/cualquiera-de-la-tarde → slot concreto; (e) índice como fallback de baja prioridad (dígito puro); (f) AM/PM desambiguado contra slots reales (no regla fija 1-6→PM). Parser LOCAL en confirmingAppointment.ts (`routeSlotSelection` puro exportado), reusa solo `parseDate`; NO se tocaron los parsers de greeting/qualifyingDatetime (dedup = sprint aparte). 28 tests nuevos en `tests/slotSelection.test.ts`, 171 verdes, tsc app limpio. Nota observabilidad: el check pre-clasificador era invisible al logging del clasificador (S5-OBS-01), mismo punto ciego que Bug B. Backlog derivado (sprint 2): extraer parser de hora compartido + dedup; revisar wording de presentación de slots; principio "presentación natural exige comprensión natural". Rama `feat/slot-selection-natural`, SIN merge — pendiente smoke por WhatsApp. |
 ---
 

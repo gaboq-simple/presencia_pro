@@ -26,16 +26,23 @@
 //   Incrementa clarification_attempts y pide clarificación (máx MAX_CLARIFY_ATTEMPTS).
 
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
-import { getCatalog } from '../catalog';
+import { getCatalog, getStaffForService } from '../catalog';
 import {
   formatTimeHumanFromDate,
   formatTimeHuman,
   buildBookingNameQuestion,
   detectsServiceCorrection,
 } from '../utils';
-import { utcToLocalMinutes } from '../tzUtils';
+import { utcToLocalMinutes, noonUTCDate } from '../tzUtils';
+import { getAvailableSlots, SchedulingQueryError } from '../scheduling';
 import { parseDate } from './qualifyingDatetime';
-import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
+
+// Mensaje al usuario cuando los queries de disponibilidad fallan (reusa el
+// patrón de presentingSlots.ts).
+const SCHEDULING_ERROR_MESSAGE =
+  'No pude verificar la disponibilidad en este momento. ' +
+  'Intenta de nuevo en unos minutos o escribenos directamente.';
 
 const DAYS_ES   = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
 const MONTHS_ES = [
@@ -67,9 +74,56 @@ const SHIFT_PHRASE_RE = /\b(de|por|en)\s+la\s+(tarde|mañana|manana|noche)\b/g;
 const SHIFT_OR_EXTREME_RE =
   /(\b(de|por|en)\s+la\s+(tarde|mañana|manana|noche)\b|\bm[aá]s\s+(temprano|tarde)\b|\btemprano\b)/;
 
+// Normaliza para matchear: minúsculas + NFD + strip de diacríticos (mismo
+// patrón que sideQuestion.ts). Trabajamos con listas ASCII puras para evitar
+// el bug de acento ("sí" no matcheaba con \b) y NO usamos \b (su boundary
+// falla antes de caracteres acentuados / es la fuente del bug).
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+// Limpia para comparar mensaje completo: normaliza, quita puntuación y colapsa
+// espacios. Permite el match exacto de tokens cortos.
+function cleanMessage(body: string): string {
+  return normalize(body).replace(/[¿?¡!.,;:]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 // Afirmaciones para aceptar el slot cercano ofrecido (decisión b, follow-up).
-const AFFIRM_RE =
-  /(\bs[ií]\b|\bdale\b|\bva\b|\bvale\b|\bese\b|\besa\b|\bperfecto\b|\bok\b|\bokay\b|\bclaro\b|\bsale\b|\bme sirve\b|\bde acuerdo\b)/;
+// Tokens cortos/ambiguos → SOLO match de mensaje completo (evita aceptar
+// "¿va a estar?" por contener "va"). Para "si" además evita tragarse
+// "si, a las 6" (eso es una corrección, la consume el router downstream).
+const AFFIRM_FULL = ['si', 'va', 'ok', 'okay', 'sale', 'vale'];
+// Afirmaciones largas/distintivas → anclaje por espacios (no substring crudo).
+const AFFIRM_ANCHORED = [
+  'simon', 'dale', 'claro', 'perfecto', 'correcto', 'afirmativo',
+  'de acuerdo', 'me sirve', 'orale',
+];
+
+function isAffirmation(body: string): boolean {
+  const n = cleanMessage(body);
+  if (AFFIRM_FULL.includes(n)) return true;
+  const padded = ` ${n} `;
+  return AFFIRM_ANCHORED.some((k) => padded.includes(` ${k} `));
+}
+
+// Negaciones claras. Cortas/ambiguas → match de mensaje completo. La distintiva
+// "negativo" → anclaje por espacios. Las negaciones IMPLÍCITAS ("que amable",
+// "a la vuelta", "luego", "asi esta bien gracias") NO se fuerzan aquí: caen al
+// clarify natural. Esta detección corre SOLO downstream del router (cuando
+// devuelve 'none'); las correcciones tipo "no, a las 6" ya las consumió el
+// matcher natural antes de llegar aquí.
+const NEGATION_FULL = ['no', 'nel', 'ahorita no', 'no gracias'];
+const NEGATION_ANCHORED = ['negativo'];
+
+function isNegation(body: string): boolean {
+  const n = cleanMessage(body);
+  if (NEGATION_FULL.includes(n)) return true;
+  const padded = ` ${n} `;
+  return NEGATION_ANCHORED.some((k) => padded.includes(` ${k} `));
+}
 
 // Tolerancia (min) para considerar que una hora pedida "matchea" un slot.
 // Reusa el patrón de presentingSlots.ts (±5 min).
@@ -101,6 +155,7 @@ export async function handleConfirmingAppointment(
         nearestOfferSlot:             null,
         ambiguous_service_candidates: undefined,
         clarification_attempts:       0,
+        rejection_attempts:           0,
       },
       responseText: 'Sin problema. Cual servicio te interesa?',
     };
@@ -115,12 +170,11 @@ export async function handleConfirmingAppointment(
     };
   }
 
-  const lower    = msg.body.trim().toLowerCase();
   const attempts = context.clarification_attempts ?? 0;
 
   // ── Aceptación del slot cercano ofrecido en el turno anterior (decisión b) ─
 
-  if (context.nearestOfferSlot && AFFIRM_RE.test(lower)) {
+  if (context.nearestOfferSlot && isAffirmation(msg.body)) {
     const offered = pendingSlots.find((s) => s.startsAt === context.nearestOfferSlot);
     if (offered) {
       return buildConfirmationResult(context, offered, business.id, business.timezone, supabase, msg.customerName);
@@ -139,15 +193,102 @@ export async function handleConfirmingAppointment(
       return buildConfirmationResult(context, route.slot, business.id, business.timezone, supabase, msg.customerName);
 
     case 'offer_nearest': {
-      const tz          = business.timezone;
-      const hh          = String(Math.floor(route.requestedMinutes / 60)).padStart(2, '0');
-      const mm          = String(route.requestedMinutes % 60).padStart(2, '0');
-      const reqLabel    = formatTimeHuman(`${hh}:${mm}`);
+      const tz       = business.timezone;
+      const hh       = String(Math.floor(route.requestedMinutes / 60)).padStart(2, '0');
+      const mm       = String(route.requestedMinutes % 60).padStart(2, '0');
+      const reqLabel = formatTimeHuman(`${hh}:${mm}`);
+
+      // Re-consultar la disponibilidad REAL del día (mismo día de los slots ya
+      // mostrados — NO es salto de fecha). El matcher base solo ve los ≤3
+      // pendingSlots presentados; la hora pedida puede existir en el día aunque
+      // no estuviera entre ellos. getAvailableSlots reordena bidireccionalmente
+      // por cercanía a la hora pedida y devuelve ≤3.
+      let realSlots: SlotCandidate[] | null = null;
+      if (context.serviceId && context.requestedDate) {
+        try {
+          const catalog = await getCatalog(business.id, supabase);
+          const service = catalog.find((s) => s.id === context.serviceId);
+          if (service) {
+            const staffToQuery = await getStaffForService(business.id, service.id, supabase);
+            realSlots = await getAvailableSlots({
+              businessId:          business.id,
+              serviceId:           service.id,
+              durationMinutes:     service.duration_minutes,
+              requestedDate:       noonUTCDate(context.requestedDate),
+              shift:               null,
+              preferredStaffId:    context.autoAssign ? null : (context.staffId ?? null),
+              isWalkIn:            false,
+              walkInBufferMinutes: business.walkInBufferMinutes,
+              staffToQuery,
+              supabase,
+              tz,
+              requestedTime:       `${hh}:${mm}`,
+            });
+          }
+        } catch (err) {
+          if (err instanceof SchedulingQueryError) {
+            if (attempts >= 1) {
+              return {
+                newState:     'FALLBACK',
+                newContext:   { ...context, clarification_attempts: 0, nearestOfferSlot: null },
+                responseText: business.fallbackMessage,
+              };
+            }
+            return {
+              newState:     'CONFIRMING_APPOINTMENT',
+              newContext:   { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
+              responseText: SCHEDULING_ERROR_MESSAGE,
+            };
+          }
+          throw err;
+        }
+      }
+
+      // Disponibilidad real recuperada → REEMPLAZAR pendingSlots (≤3, ya
+      // ordenados por cercanía). El primero es el más cercano a la hora pedida.
+      if (realSlots && realSlots.length > 0) {
+        const newPending: LifestylePendingSlot[] = realSlots.map((s, i) => ({
+          index:     i + 1,
+          staffId:   s.staffId,
+          staffName: s.staffName,
+          startsAt:  s.startsAt.toISOString(),
+          endsAt:    s.endsAt.toISOString(),
+        }));
+        const offered     = newPending[0]!;
+        const offeredMin   = utcToLocalMinutes(new Date(offered.startsAt), tz);
+        const isExact      = Math.abs(offeredMin - route.requestedMinutes) <= EXACT_TOL;
+        const offeredTime  = formatTimeHumanFromDate(new Date(offered.startsAt), tz);
+        const staffPart    = context.autoAssign ? '' : ` con ${offered.staffName}`;
+
+        // CRÍTICO (anti Bug-B): aunque la hora pedida exista exacta, NO
+        // auto-confirmar. Presentar y esperar el "sí" explícito del cliente.
+        // El slot ofrecido queda en pendingSlots[0] = nearestOfferSlot, donde
+        // la rama de aceptación (isAffirmation) lo recoge.
+        const responseText = isExact
+          ? `Si, tengo disponible a las ${offeredTime}${staffPart}. Te la agendo?`
+          : `A las ${reqLabel} no tengo disponible${staffPart}. ` +
+            `Lo mas cercano es a las ${offeredTime}. Te sirve?`;
+
+        return {
+          newState:   'CONFIRMING_APPOINTMENT',
+          newContext: {
+            ...context,
+            pendingSlots:           newPending,
+            nearestOfferSlot:       offered.startsAt,
+            clarification_attempts: 0,
+            rejection_attempts:     0,
+          },
+          responseText,
+        };
+      }
+
+      // Sin disponibilidad real recuperable → ofrecer el más cercano de los ya
+      // mostrados (comportamiento previo, conserva el slot en pendingSlots).
       const nearestTime = formatTimeHumanFromDate(new Date(route.slot.startsAt), tz);
       const staffPart   = context.autoAssign ? '' : ` con ${route.slot.staffName}`;
       return {
         newState:   'CONFIRMING_APPOINTMENT',
-        newContext: { ...context, nearestOfferSlot: route.slot.startsAt, clarification_attempts: 0 },
+        newContext: { ...context, nearestOfferSlot: route.slot.startsAt, clarification_attempts: 0, rejection_attempts: 0 },
         responseText:
           `A las ${reqLabel} no tengo disponible${staffPart}. ` +
           `Lo mas cercano es a las ${nearestTime}. Te sirve?`,
@@ -167,6 +308,7 @@ export async function handleConfirmingAppointment(
           pendingSlots:           undefined,
           nearestOfferSlot:       null,
           clarification_attempts: 0,
+          rejection_attempts:     0,
         },
         responseText: '',
       };
@@ -182,6 +324,16 @@ export async function handleConfirmingAppointment(
 
     case 'none':
       break;
+  }
+
+  // ── Negación DOWNSTREAM del router (regla maestra) ────────────────────────
+  // SOLO se evalúa aquí, cuando el router no encontró selección/corrección.
+  // "no, a las 6" / "no, mejor las 7" YA pasaron por matchNaturalSlot (que
+  // extrajo la hora y avanzó), así que nunca llegan a este punto. Solo el "no"
+  // SIN señal de selección entra a la progresión escalonada de rechazo.
+
+  if (isNegation(msg.body)) {
+    return buildRejectionResult(context, pendingSlots, business);
   }
 
   // ── Input no reconocido: retry antes de FALLBACK (BUG 2) ──────────────────
@@ -207,8 +359,72 @@ export async function handleConfirmingAppointment(
       nearestOfferSlot:       null,
     },
     responseText:
-      'Perdona, no te entendi bien. Puedes decirme la hora que prefieres ' +
-      '(por ejemplo "a las 5" o "la mas temprano"). O si no tienes preferencia, dime "cualquiera".',
+      'Disculpa, no te segui bien. Solo dime a que hora te gustaria, ' +
+      'por ejemplo "a las 5" o "la mas temprano". Si cualquiera te sirve, ' +
+      'dime "cualquiera" y te asigno la primera.',
+  };
+}
+
+// ─── Progresión escalonada de rechazo ─────────────────────────────────────────
+// Contador rejection_attempts (consecutivo, separado de clarification_attempts).
+// CADA paso RECONOCE el "no" antes de redirigir; nunca suena a "elige opción N".
+//   0 (1er no) → A: reconocer + re-ofrecer alternativas concretas del día.
+//   1 (2do no) → B: reconocer + preguntar abierto sobre la hora.
+//   2 (3er no) → C: reconocer + cambiar de eje (otro día / algo en particular).
+//   3 (4to no) → handoff a humano (ESCALATED) — mecanismo de escalado existente.
+
+function buildRejectionResult(
+  context:      LifestyleBotContext,
+  pendingSlots: LifestylePendingSlot[],
+  business:     StateHandlerDeps['business'],
+): StateHandlerResult {
+  const rejections = context.rejection_attempts ?? 0;
+  const tz         = business.timezone;
+
+  // Cuarto "no" → handoff a humano (estado terminal ESCALATED).
+  if (rejections >= 3) {
+    return {
+      newState:   'ESCALATED',
+      newContext: {
+        ...context,
+        rejection_attempts:     0,
+        clarification_attempts: 0,
+        nearestOfferSlot:       null,
+        fallbackAttempts:       2,
+      },
+      responseText:
+        'Dejame conectarte con el equipo para que te ayuden a encontrar lo que buscas. ' +
+        'Gracias por tu paciencia.',
+    };
+  }
+
+  let responseText: string;
+  if (rejections === 0) {
+    // A: reconocer + re-ofrecer alternativas concretas del día (si las hay).
+    const alts = pendingSlots
+      .filter((s) => s.startsAt !== context.nearestOfferSlot)
+      .slice(0, 2)
+      .map((s) => formatTimeHumanFromDate(new Date(s.startsAt), tz));
+    responseText = alts.length > 0
+      ? `Sin problema. Tambien tengo a las ${alts.join(' o a las ')}. Cual te acomoda?`
+      : 'Sin problema. Que hora te vendria mejor?';
+  } else if (rejections === 1) {
+    // B: reconocer + preguntar abierto sobre la hora.
+    responseText = 'Entiendo. Que hora te vendria mejor?';
+  } else {
+    // C: reconocer + cambiar de eje (no repetir lo de la hora).
+    responseText = 'Va. Prefieres quizas otro dia, o buscas algo en particular?';
+  }
+
+  return {
+    newState:   'CONFIRMING_APPOINTMENT',
+    newContext: {
+      ...context,
+      rejection_attempts:     rejections + 1,
+      clarification_attempts: 0,
+      nearestOfferSlot:       null,
+    },
+    responseText,
   };
 }
 
@@ -447,6 +663,7 @@ async function buildConfirmationResult(
     staffId:                chosen.staffId,
     selectedSlot:           chosen.startsAt,
     clarification_attempts: 0,
+    rejection_attempts:     0,
     last_side_question:     null,
     nearestOfferSlot:       null,
     pendingBookingName,

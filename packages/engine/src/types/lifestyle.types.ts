@@ -190,6 +190,16 @@ export const LifestyleBotContextSchema = z.object({
   clarification_attempts: z.number().int().nonnegative().optional(),
 
   /**
+   * Número de "no" CONSECUTIVOS del cliente en CONFIRMING_APPOINTMENT.
+   * Separado de clarification_attempts: distingue "me dijiste que no" (rechazo)
+   * de "no te entendí" (input no reconocido). Se resetea a 0 ante cualquier
+   * avance (selección o corrección exitosa). Progresión escalonada de rechazo:
+   * 0→re-ofrecer alternativas, 1→preguntar hora abierta, 2→cambiar de eje,
+   * 3→handoff a humano (ESCALATED).
+   */
+  rejection_attempts: z.number().int().nonnegative().optional(),
+
+  /**
    * Última side question del cliente (texto tal cual), o null si no hubo.
    * Se resetea a null cuando el estado avanza.
    */
