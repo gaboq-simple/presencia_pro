@@ -82,7 +82,7 @@ Empleados del negocio (admin, barber, assistant).
 | id | uuid PK | |
 | business_id | uuid FK → businesses.id | |
 | auth_id | uuid nullable FK → auth.users.id | solo si usa Supabase Auth |
-| name, phone, whatsapp_id | text | |
+| name, phone, whatsapp_id | text NOT NULL | phone y whatsapp_id son NOT NULL en la BD real (no nullable) — insertar staff sin ellos falla |
 | role | text | CHECK: admin / barber / assistant |
 | active | bool | default true |
 | photo_url | text nullable | |
