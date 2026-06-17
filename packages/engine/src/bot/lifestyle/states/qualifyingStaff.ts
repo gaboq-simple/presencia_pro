@@ -26,17 +26,22 @@ import {
 import { buildSystemPrompt } from '../prompt';
 import { detectsServiceCorrection } from '../utils';
 import { isAvailabilityQuestion } from '../availabilityIntent';
+import { wantsToChooseStaff, asksWhoOnly } from '../staffAxisIntent';
 import { parseDate } from './qualifyingDatetime';
 import { getTodayStr } from '../tzUtils';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
-// Keywords que indican "no tengo preferencia"
+// Keywords que indican "no tengo preferencia".
+// S5-BOT-04: se quitaron 'libre' y 'disponible' — eran falsos positivos por
+// match substring (":129"): "¿qué barbero está disponible?" se leía como "el
+// que sea". La lista queda acotada a expresiones inequívocas de no-preferencia.
+// (Deuda: existe otra lista análoga en confirmingAppointment.ts:54 —ya sin
+// 'disponible'/'libre'—; unificarlas algún día.)
 const NO_PREFERENCE_KEYWORDS = [
   'cualquiera', 'cualquier', 'no importa', 'no me importa', 'da igual',
   'el que sea', 'quien sea', 'cualquier barbero', 'no tengo preferencia',
-  'libre', 'disponible',
 ];
 
 const FLOW_QUESTION = 'Con quien te gustaria agendar?';
@@ -81,12 +86,18 @@ export async function handleQualifyingStaff(
       ? { ...context, staffId: undefined, autoAssign: undefined }
       : context;
 
+  // S5-BOT-04: ¿el cliente quiere elegir barbero (eje a) o pregunta quién lo
+  // atiende (eje b)? El eje-barbero debe GANAR a isAvailabilityQuestion para el
+  // caso mixto "¿qué barbero está disponible para las 12?" (hora+barbero) → va
+  // al eje barbero, no a slots-por-hora.
+  const wantsStaffAxis = wantsToChooseStaff(msg.body) || asksWhoOnly(msg.body);
+
   // ── FASE B: pregunta de disponibilidad → ofrecer slots (sin seguir preguntando) ──
   // Si el cliente pregunta "¿qué horario hay mañana?" / "¿a qué hora tienes?",
   // no insistir en elegir barbero: asignar "el que sea" (autoAssign) y mostrar
   // slots reales. Si trae fecha la usamos; si no, partimos de hoy y SHOWING_SLOTS
   // ofrecera las alternativas mas cercanas.
-  if (isAvailabilityQuestion(msg.body)) {
+  if (isAvailabilityQuestion(msg.body) && !wantsStaffAxis) {
     const bodyLower     = msg.body.trim().toLowerCase();
     const parsed        = parseDate(bodyLower, msg.timestamp, business.timezone);
     const requestedDate = effectiveContext.requestedDate ?? parsed ?? getTodayStr(business.timezone);
@@ -119,6 +130,29 @@ export async function handleQualifyingStaff(
       newContext,
       responseText: buildDatetimeQuestion(),
     };
+  }
+
+  // ── S5-BOT-04: eje-barbero → presentar POR barbero (presentBy:'staff') ──────
+  // Eje (a) "qué barberos hay" / "puedo elegir" y eje (b) "¿con quién?" se
+  // tratan igual en A1: en vez de auto-asignar mudo, mostrar los slots SIN
+  // suprimir el nombre del barbero. La respuesta híbrida fina (eje b) es A2.
+  // Va ANTES de NO_PREFERENCE para que "¿qué barbero está disponible?" no se
+  // lea como "el que sea". Multi-barbero (activeStaff.length > 1 garantizado
+  // por el shortcut de arriba).
+  if (wantsStaffAxis) {
+    const bodyLower     = msg.body.trim().toLowerCase();
+    const parsed        = parseDate(bodyLower, msg.timestamp, business.timezone);
+    const requestedDate = effectiveContext.requestedDate ?? parsed ?? getTodayStr(business.timezone);
+    const newContext: LifestyleBotContext = {
+      ...effectiveContext,
+      autoAssign:             true,
+      staffId:                undefined,
+      presentBy:              'staff',
+      requestedDate,
+      clarification_attempts: 0,
+      last_side_question:     null,
+    };
+    return { newState: 'SHOWING_SLOTS', newContext, responseText: '' };
   }
 
   // ── Fast path: parseo determinista ────────────────────────────────────────

@@ -120,6 +120,15 @@ export const LifestyleBotContextSchema = z.object({
    */
   pendingSlots: z.array(LifestylePendingSlotSchema).optional(),
 
+  /**
+   * Eje de presentación de slots (S5-BOT-04).
+   * 'time' (o ausente) = comportamiento por defecto: en autoAssign se deduplica
+   *   por hora y se ocultan los nombres de barbero.
+   * 'staff' = el cliente quiere elegir/saber el barbero → presentar POR barbero
+   *   (sin deduplicar por hora, mostrando el nombre de cada uno).
+   */
+  presentBy: z.enum(['time', 'staff']).optional(),
+
   // ── Slot elegido y cita ───────────────────────────────────────────────────
 
   /** Slot elegido en ISO 8601 UTC. Se establece en CONFIRMING_APPOINTMENT. */
