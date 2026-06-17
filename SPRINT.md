@@ -957,6 +957,30 @@ COMMIT;
 
 ---
 
+#### S5-BOT-06 — Ruteo del dígito pelado en `routeSlotSelection` (hora-ofrecida > índice > cercana) 🔵 in-progress (2026-06-17, rama `fix/bare-digit-slot-selection`)
+**Origen:** finding "🟠 BUG — número pelado ('12') no se reconoce" (Backlog post-sprint, smoke de A1, 2026-06-17). Tras ofrecer "12, 12:15, 12:30" el cliente responde `"12"` (la hora ofrecida) y el bot NO lo reconoce → cae al clarify. `"a las 12"` SÍ funciona. Diagnóstico read-only previo (2026-06-17) confirmó causa, lugar del fix y casos límite; este es el fix.
+**Causa (recordatorio):** `extractRawTime` exige un marcador ("a las"/`:MM`/pm/am/turno) para leer un número como hora ("decisión e", `:558-562`). `"12"` sin marcador → `extractRawTime` null → `matchNaturalSlot` none → `parseChoice` → índice 12 → fuera de rango (≤3 slots) → clarify. La "decisión e" quedó **obsoleta** tras la presentación natural en prosa (S5-BOT-01): la lista NO se numera (`presentingSlots.ts:430`), así que un dígito pelado es la hora, no el índice.
+**Lugar del fix (least-invasive, confirmado por diagnóstico):** nueva rama en `routeSlotSelection` donde hoy está `parseChoice` (paso 4), DESPUÉS de date_redirect/no_preference/ask_who/matchNaturalSlot. **NO** en `extractRawTime` (haría inalcanzable el índice para todo dígito → rompería el test (e)). Se ALIMENTA el dígito pelado a `resolveTargetMinutes` (se LEE, no se modifica) y se decide la salida por precedencia.
+**Regla de precedencia** (dígito `/^\d{1,2}$/`, N = `pendingSlots.length` ≤3): **exacta-ofrecida > índice > cercana > clarify**:
+- **Exacta-ofrecida:** desambiguar el dígito con `resolveTargetMinutes` contra los `pendingSlots`; si la hora resuelta cae ±5 min de un slot ofrecido → `{action:'select', slot}`. ("1" ante {12,13,15} → 1pm=13:00, ganando al índice.)
+- **Índice:** sin coincidencia de hora y d ∈ [1..N] → `{action:'index', choice:d}` (conserva test (e) "2"→index).
+- **Cercana:** sin coincidencia de hora, no índice válido, y 1 ≤ d ≤ 23 → `{action:'offer_nearest', requestedMinutes, slot}` (reusa el requery de día real de S5-BOT-02, mismo shape que `matchNaturalSlot`, sin duplicar).
+- **Clarify:** d = 0 o d ≥ 24 → cae a `parseChoice` → fuera de rango → clarify (comportamiento actual).
+**Criterios de aceptación:**
+- [ ] "1" ante {12:00,13:00,15:00} → select 13:00 (hora-ofrecida gana al índice).
+- [ ] "2" ante {16:45,17:00,17:15} → index 2 (test (e) intacto).
+- [ ] "12" ante {12:00,12:15,12:30} → select 12:00 (bug original).
+- [ ] "5" ante {17:00,…} → select 17:00 (hoy clarify).
+- [ ] "3" ante {10:00,11:00,12:00} → index 3 (ambiguo no-calza → índice conservador, decisión A).
+- [ ] "6" sin slot de 18:00 → offer_nearest (hora válida no ofrecida → requery).
+- [ ] "0"/"25" → clarify.
+- [ ] No-regresión: "a las 12"→select; "no, a las 6"→corrección (no entra a rama pelada); "5pm"→select; "uno"→index; ask_who (A1) intacto.
+- [ ] `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
+**Frontera dura:** `resolveTargetMinutes`/`extractRawTime`/`matchNaturalSlot`/`parseChoice` byte-idénticos; `offer_nearest` reusa S5-BOT-02 sin duplicar; NO tocar el edge pre-existente "10"→22:00 (ortogonal, ya existía con "a las 10"); NO construir pregunta de desambiguación (tarea futura, fuera de alcance).
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-06-17 — fix del dígito pelado en `routeSlotSelection`).
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
@@ -1093,7 +1117,9 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 
 **Verificado:** PRE-EXISTENTE, ajeno a A1. El guard `ask_who` de A1 exige `?`+token de barbero; "12" no cumple ninguno → pasa intacto al matcher. A1 no tocó `extractRawTime`/`matchNaturalSlot` (frontera explícita). El clarify "viejo" es el único clarify genérico del handler (`:377`); el humano de S5-BOT-03 solo corre en `isNegation`, y "12" no lo es.
 
-**Solución propuesta:** intentar match por **HORA primero** contra las horas de los slots ofrecidos; usar índice solo como fallback cuando el número NO coincida con ninguna hora ofrecida. Toca `extractRawTime`/`matchNaturalSlot` (núcleo de S5-BOT-01, sensible) → **sprint propio con cuidado, antes de A2.**
+**Solución propuesta:** intentar match por **HORA primero** contra las horas de los slots ofrecidos; usar índice solo como fallback cuando el número NO coincida con ninguna hora ofrecida.
+
+**→ Cortado en tarea `S5-BOT-06` (2026-06-17).** Diagnóstico read-only refinó el lugar: NO se toca `extractRawTime`/`matchNaturalSlot` (eso rompería el índice) sino una rama nueva en `routeSlotSelection` que ALIMENTA el dígito a `resolveTargetMinutes` (leer) con precedencia exacta-ofrecida > índice > cercana > clarify. Ver bloque de tarea arriba.
 
 ---
 
