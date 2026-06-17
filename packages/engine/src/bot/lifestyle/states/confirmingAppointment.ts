@@ -616,6 +616,69 @@ export function routeSlotSelection(
   return { action: 'none' };
 }
 
+// ─── Detector de corrección en el cierre (S5-BOT-08) ──────────────────────────
+// Puro y testeable (sin DB/red/LLM). En AWAITING_BOOKING_NAME el cliente puede
+// CORREGIR el resumen final (hora/día/barbero) o CANCELAR en vez de dar un nombre.
+// Default NOMBRE: solo clasifica como corrección ante un marcador inequívoco; todo
+// lo demás cae intacto a la captura de nombre (looksLikeName) → cero regresión.
+// LEE extractRawTime/parseDate como señales — NO los modifica. La conmutación de
+// barbero queda DIFERIDA a A2: aquí 'barber' solo se DETECTA para no mis-guardar
+// "con Carlos" como nombre corrupto.
+
+export type SummaryCorrection = { kind: 'hour' | 'date' | 'barber' | 'cancel' | 'none' };
+
+// Cancelar: keywords ancladas (match completo o por espacios, NO substring).
+const CANCEL_KEYWORDS = ['ya no', 'dejalo', 'olvidalo', 'cancela', 'cancelala', 'cancelalo'];
+
+// Negación / verbo de corrección que acompaña a un token de calendario para
+// distinguir "el lunes no" / "mejor el lunes" (corrección) de un nombre que
+// coincida con un día ("Lunes") o el cliente "mañana".
+const DATE_CORRECTION_MARKER_RE =
+  /\bno\b|\bmejor\b|\bcambi[ao]\b|\bcambiar\b|\bprefiero\b|\ben\s+vez\b|\bque\s+sea\b/;
+
+export function detectsSummaryCorrection(
+  body:  string,
+  slots: LifestylePendingSlot[],
+  now:   Date,
+  tz:    string,
+): SummaryCorrection {
+  const lower = body.trim().toLowerCase();
+  const clean = cleanMessage(body);
+
+  // 1. Cancelar (ancladas): match de mensaje completo o por espacios.
+  const padded = ` ${clean} `;
+  if (CANCEL_KEYWORDS.some((k) => clean === k || padded.includes(` ${k} `))) {
+    return { kind: 'cancel' };
+  }
+
+  // 2. Hora: exige marcador ("a las"/":MM"/pm/am/"de la tarde"). Un nombre nunca
+  //    los lleva. Reusa extractRawTime (lectura).
+  if (extractRawTime(lower) !== null) return { kind: 'hour' };
+
+  // 3. Día: fecha concreta o frase de cambio de día. Un token de calendario SOLO
+  //    ("lunes", "mañana") NO dispara sin negación/verbo de corrección (protege
+  //    al cliente llamado "Abril"/"Lunes"). Reusa parseDate (lectura).
+  const dateProbe     = lower.replace(SHIFT_PHRASE_RE, ' ');
+  const hasDateChange = DATE_CHANGE_KEYWORDS.some((k) => lower.includes(k));
+  const hasConcrete   = parseDate(dateProbe, now, tz) !== null;
+  if (hasDateChange) return { kind: 'date' };
+  if (hasConcrete && DATE_CORRECTION_MARKER_RE.test(lower)) return { kind: 'date' };
+
+  // 4. Barbero: SOLO "con <barbero>" / "mejor con <barbero>" con <barbero> ∈
+  //    pendingSlots. El nombre pelado ("Carlos") NUNCA dispara — es el cliente
+  //    llamándose Carlos. DIFERIDO a A2: solo se detecta, no se conmuta.
+  const norm = normalize(body);
+  if (/\bcon\b/.test(norm)) {
+    const hit = slots.some((s) => {
+      const first = normalize(s.staffName).split(/\s+/)[0] ?? '';
+      return first.length > 2 && new RegExp(`\\bcon\\s+(?:el\\s+|la\\s+)?${first}\\b`).test(norm);
+    });
+    if (hit) return { kind: 'barber' };
+  }
+
+  return { kind: 'none' };
+}
+
 type NaturalMatch =
   | { kind: 'exact';   slot: LifestylePendingSlot }
   | { kind: 'nearest'; requestedMinutes: number; slot: LifestylePendingSlot }

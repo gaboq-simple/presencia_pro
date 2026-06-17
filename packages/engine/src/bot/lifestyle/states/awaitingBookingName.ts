@@ -22,6 +22,7 @@
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { getCatalog } from '../catalog';
 import { logBotError } from '../utils/logger';
+import { handleConfirmingAppointment, detectsSummaryCorrection } from './confirmingAppointment';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_RETRIES = 2;
@@ -214,6 +215,15 @@ export async function handleAwaitingBookingName(
       return buildConfirmedResult(context, nameToUse);
     }
 
+    // ── S5-BOT-08: corrección del resumen (hora/día/barbero/cancelar) ────────
+    // Corre DESPUÉS del "sí" (un sí es confirmación, no corrección) y ANTES del
+    // branch NO y de la captura de nombre. Gana al branch NO solo cuando el "no"
+    // trae payload de corrección ("no, a las 6"); "no" pelado cae al branch NO.
+    const correctionA = detectsSummaryCorrection(body, context.pendingSlots ?? [], msg.timestamp, deps.business.timezone);
+    if (correctionA.kind !== 'none') {
+      return handleSummaryCorrection(correctionA.kind, msg, context, deps);
+    }
+
     // "no" → preguntar directamente
     if (NO_KEYWORDS.some((kw) => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw))) {
       return {
@@ -238,6 +248,12 @@ export async function handleAwaitingBookingName(
 
   // ── Caso B: input directo de nombre ──────────────────────────────────────
 
+  // S5-BOT-08: corrección del resumen también en input directo (sin pre-llenado).
+  const correctionB = detectsSummaryCorrection(body, context.pendingSlots ?? [], msg.timestamp, deps.business.timezone);
+  if (correctionB.kind !== 'none') {
+    return handleSummaryCorrection(correctionB.kind, msg, context, deps);
+  }
+
   if (looksLikeName(body)) {
     return buildConfirmedResult(context, body);
   }
@@ -257,6 +273,54 @@ export async function handleAwaitingBookingName(
     newContext:   { ...context, pendingBookingName: null, clarification_attempts: retries + 1 },
     responseText: 'No capté bien el nombre. A nombre de quien queda la cita?',
   };
+}
+
+// ─── S5-BOT-08: ruteo de la corrección del resumen ───────────────────────────
+// Invariante: corregir un eje nunca borra los otros. Los ejes ya elegidos
+// (serviceId/requestedDate/staffId/autoAssign/pendingSlots) viven en `context`
+// (buildConfirmationResult entró aquí con ...context) → se preservan.
+//   - hora/día: restaurar CONFIRMING_APPOINTMENT y delegar el MISMO msg a
+//     handleConfirmingAppointment en el mismo turno → reusa routeSlotSelection
+//     (select/offer_nearest/ask_hour/date_redirect) sin duplicar. El router
+//     encadena date_redirect → QUALIFYING_DATETIME → SHOWING_SLOTS.
+//   - cancelar: la cita aún NO existe en BD (se crea en CONFIRMED) → solo reset
+//     de contexto, sin DELETE/UPDATE.
+//   - barbero: DIFERIDO a A2; solo se detecta para no mis-guardar como nombre.
+// Coexistencia S5-BOT-03: corrección = avance → resetea clarification_attempts;
+// NUNCA toca rejection_attempts.
+async function handleSummaryCorrection(
+  kind:    'hour' | 'date' | 'barber' | 'cancel',
+  msg:     LifestyleIncomingMessage,
+  context: LifestyleBotContext,
+  deps:    StateHandlerDeps,
+): Promise<StateHandlerResult> {
+  if (kind === 'cancel') {
+    return {
+      newState:     'GREETING',
+      newContext:   { customerId: context.customerId },
+      responseText: 'Sin problema, dejamos el agendamiento por ahora. Aqui estoy cuando quieras agendar.',
+    };
+  }
+
+  if (kind === 'barber') {
+    return {
+      newState:     'AWAITING_BOOKING_NAME',
+      newContext:   { ...context, clarification_attempts: 0 },
+      responseText: 'Para cambiar de barbero lo reagendamos en un momento. Por ahora, a nombre de quien dejo la cita?',
+    };
+  }
+
+  // hora / día: restaurar CONFIRMING_APPOINTMENT preservando los ejes; limpiar
+  // lo del cierre y las banderas de slot. NO tocar rejection_attempts.
+  const restored: LifestyleBotContext = {
+    ...context,
+    pendingBookingName:     null,
+    selectedSlot:           undefined,
+    nearestOfferSlot:       null,
+    pendingDigitDisambig:   null,
+    clarification_attempts: 0,
+  };
+  return handleConfirmingAppointment(msg, restored, deps);
 }
 
 // ─── Builder ──────────────────────────────────────────────────────────────────

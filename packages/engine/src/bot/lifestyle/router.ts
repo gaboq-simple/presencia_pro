@@ -170,6 +170,16 @@ async function routeToHandler(
         }
         return confirmedResult;
       }
+      // S5-BOT-08: corrección de día delegada → handleConfirmingAppointment
+      // devolvió date_redirect (QUALIFYING_DATETIME). Encadenar igual que el
+      // case CONFIRMING_APPOINTMENT para parsear el mismo mensaje sin round-trip.
+      if (result.newState === 'QUALIFYING_DATETIME') {
+        const dtResult = await handleQualifyingDatetime(msg, result.newContext, deps);
+        if (dtResult.newState === 'SHOWING_SLOTS') {
+          return handleShowingSlots(msg, dtResult.newContext, deps);
+        }
+        return dtResult;
+      }
       return result;
     }
 

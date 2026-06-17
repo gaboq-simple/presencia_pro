@@ -1039,6 +1039,9 @@ COMMIT;
 - [ ] No-regresión: nombres legítimos (incl. nombre alterno "a nombre de Y") siguen capturándose; `rejection_attempts` intacto; `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
 
 **Frontera dura:** `routeSlotSelection`/`matchNaturalSlot`/`extractRawTime`/`parseChoice` byte-idénticos (el detector los **lee**, no los modifica); conmutación de barbero NO se construye (es A2); `looksLikeName` actual intacto para todo lo que no matchea marcador.
+
+**🟠 Residual conocido (acotado, resolución en A2 / S5-BOT-05):** la detección de corrección de barbero compara contra `pendingSlots[].staffName` —los barberos **ofrecidos en esta conversación**. Si el cliente dice `"con <barbero que existe en el negocio pero NO se le ofreció>"`, **no dispara** corrección y cae a nombre corrupto (se guarda como `booking_name`). El caso común —`"con <barbero ofrecido>"`— **sí** se intercepta. La resolución completa (conmutar a un barbero no ofrecido, reconsultando su disponibilidad) es parte de **A2 (S5-BOT-05)**. Hasta entonces, hueco conocido, **bajo impacto** (caso raro).
+
 **Prompt:** Diseño registrado por Gabriel (2026-06-17 — corrección en el cierre). Implementación pendiente de su confirmación.
 
 ---
