@@ -1002,6 +1002,7 @@ COMMIT;
 - [ ] `"3"` ante {10:00,11:00,12:00} → `index` (decisión A intacta, NO se vuelve `ask_hour`).
 - [ ] No-regresión S5-BOT-01/02/03/04/06; `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
 **Frontera dura:** `resolveTargetMinutes`/`extractRawTime`/`matchNaturalSlot`/`parseChoice` byte-idénticos; `offer_nearest` reusa S5-BOT-02 sin duplicar; `ask_who` (A1) intacto; `NEAR_TOL` como constante nombrada.
+**Notas de ejecución (2026-06-17):** implementado en rama `feat/digit-disambiguation` (desde `origin/main`, SIN merge). `routeSlotSelection`: rama `(a.5)` entre exacta y índice (banda `EXACT_TOL < bestD ≤ NEAR_TOL`); acción pura `ask_hour`. Handler: bloque de consumo al tope (antes de aceptación de `nearestOfferSlot` y del router) + case `ask_hour`. La lógica de `offer_nearest` se **extrajo** a `handleOfferNearest()` (byte-idéntica salvo rename `route.requestedMinutes`/`route.slot`→params) para que el camino "sí" la reuse sin duplicar. Bandera `pendingDigitDisambig` en `lifestyle.types.ts` junto a `nearestOfferSlot`. Tests: 4 route-level (`slotSelection.test.ts`, incl. críticos "2"/"3"→index) + 6 handler-level (`digitDisambiguation.test.ts`, ciclo ask_hour→sí/no/fall-through, exclusión mutua, no-cruce de contadores). `npm test` **243/243 verdes**; `tsc --noEmit` apps/lifestyle limpio (EXIT 0). Helpers de frontera verificados byte-idénticos por `git diff`. Pendiente: smoke por WhatsApp (Gabriel) antes de merge.
 **Prompt:** Ad-hoc solicitado por Gabriel (2026-06-17 — desambiguación del dígito pelado ambiguo).
 
 ---
