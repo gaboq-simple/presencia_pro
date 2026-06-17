@@ -977,6 +977,7 @@ COMMIT;
 - [ ] No-regresión: "a las 12"→select; "no, a las 6"→corrección (no entra a rama pelada); "5pm"→select; "uno"→index; ask_who (A1) intacto.
 - [ ] `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
 **Frontera dura:** `resolveTargetMinutes`/`extractRawTime`/`matchNaturalSlot`/`parseChoice` byte-idénticos; `offer_nearest` reusa S5-BOT-02 sin duplicar; NO tocar el edge pre-existente "10"→22:00 (ortogonal, ya existía con "a las 10"); NO construir pregunta de desambiguación (tarea futura, fuera de alcance).
+**Notas de ejecución (2026-06-17):** implementado en rama `fix/bare-digit-slot-selection` (desde `origin/main`, SIN merge). Una sola rama nueva en `routeSlotSelection` (paso 4, entre `matchNaturalSlot` y `parseChoice`); helpers internos byte-idénticos (verificado por `git diff`). 12 tests nuevos en `tests/slotSelection.test.ts` (los 8 obligatorios + 4 de no-regresión de frontera). `npm test` **234/234 verdes** (222 previos + 12; el crítico (e) "2"→index intacto); `tsc --noEmit` apps/lifestyle limpio (EXIT 0). Pendiente: smoke por WhatsApp (Gabriel) antes de merge.
 **Prompt:** Ad-hoc solicitado por Gabriel (2026-06-17 — fix del dígito pelado en `routeSlotSelection`).
 
 ---

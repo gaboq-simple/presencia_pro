@@ -212,3 +212,89 @@ test('regresión: texto de corrección de servicio NO se malinterpreta en el rut
 test('regresión: input sin sentido → none (lo maneja el retry/clarify del handler)', () => {
   assert.equal(route('asdfgh').action, 'none');
 });
+
+// ─── S5-BOT-06: dígito pelado (hora-ofrecida > índice > cercana > clarify) ────
+// Precedencia: el dígito desnudo es la HORA que el cliente vio (presentación en
+// prosa SIN numerar), no un índice. Solo cae a índice si NO calza ninguna hora
+// ofrecida, y a "cercana" si tampoco es índice válido pero es una hora plausible.
+
+// {12:00, 13:00, 15:00} — para el misfire "1" debe ganar 1pm al índice 1.
+const trio12 = [slot(1, '12:00'), slot(2, '13:00'), slot(3, '15:00')];
+// {12:00, 12:15, 12:30} — el bug original del smoke.
+const noon15 = [slot(1, '12:00'), slot(2, '12:15'), slot(3, '12:30')];
+// {10:00, 11:00, 12:00} — "3" no calza hora → índice conservador.
+const lateMorning = [slot(1, '10:00'), slot(2, '11:00'), slot(3, '12:00')];
+
+test('(06-crítico) "1" ante {12:00,13:00,15:00} → select 13:00 (hora-ofrecida gana al índice)', () => {
+  const r = route('1', trio12);
+  assert.equal(r.action, 'select');
+  assert.equal((r as { slot: LifestylePendingSlot }).slot.startsAt, '2026-06-15T19:00:00.000Z'); // 13:00 local
+});
+
+test('(06-crítico) "2" ante {16:45,17:00,17:15} → index 2 (NO hay hora 2/14 ofrecida → índice intacto)', () => {
+  const r = route('2', afternoon);
+  assert.equal(r.action, 'index');
+  assert.equal((r as { choice: number }).choice, 2);
+});
+
+test('(06) "12" ante {12:00,12:15,12:30} → select 12:00 (bug original del smoke)', () => {
+  const r = route('12', noon15);
+  assert.equal(r.action, 'select');
+  assert.equal((r as { slot: LifestylePendingSlot }).slot.startsAt, '2026-06-15T18:00:00.000Z'); // 12:00 local
+});
+
+test('(06) "5" ante slots de la tarde → select 17:00 (hoy caía a clarify)', () => {
+  const r = route('5', afternoon);
+  assert.equal(r.action, 'select');
+  assert.equal((r as { slot: LifestylePendingSlot }).slot.startsAt, '2026-06-15T23:00:00.000Z'); // 17:00 local
+});
+
+test('(06) "3" ante {10:00,11:00,12:00} → index 3 (ambiguo no-calza → índice conservador)', () => {
+  const r = route('3', lateMorning);
+  assert.equal(r.action, 'index');
+  assert.equal((r as { choice: number }).choice, 3);
+});
+
+test('(06) "6" ante slots sin las 18:00 → offer_nearest (hora válida no ofrecida → requery)', () => {
+  const r = route('6', afternoon);
+  assert.equal(r.action, 'offer_nearest');
+  const o = r as { requestedMinutes: number; slot: LifestylePendingSlot };
+  assert.equal(o.requestedMinutes, 18 * 60); // 18:00 desambiguado por la tarde
+  assert.equal(o.slot.startsAt, '2026-06-15T23:15:00.000Z'); // 17:15 es el más cercano
+});
+
+test('(06) "0" → índice fuera de rango (el handler lo manda a clarify)', () => {
+  const r = route('0');
+  assert.equal(r.action, 'index');
+  assert.equal((r as { choice: number }).choice, 0);
+});
+
+test('(06) "25" → índice fuera de rango (el handler lo manda a clarify)', () => {
+  const r = route('25');
+  assert.equal(r.action, 'index');
+  assert.equal((r as { choice: number }).choice, 25);
+});
+
+// ─── S5-BOT-06: no-regresión de la frontera dura ──────────────────────────────
+
+test('(06-noreg) "a las 12" sigue siendo select normal (marcador → matcher, no rama pelada)', () => {
+  const r = route('a las 12', noon15);
+  assert.equal(r.action, 'select');
+  assert.equal((r as { slot: LifestylePendingSlot }).slot.startsAt, '2026-06-15T18:00:00.000Z');
+});
+
+test('(06-noreg) "no, a las 6" sigue consumido como corrección por el matcher (offer_nearest)', () => {
+  // No es /^\d{1,2}$/ → nunca entra a la rama pelada; lo consume matchNaturalSlot.
+  const r = route('no, a las 6');
+  assert.equal(r.action, 'offer_nearest');
+});
+
+test('(06-noreg) "uno" sigue índice 1 (palabra, no dígito → parseChoice)', () => {
+  const r = route('uno', trio12);
+  assert.equal(r.action, 'index');
+  assert.equal((r as { choice: number }).choice, 1);
+});
+
+test('(06-noreg) "5pm" sigue select por el matcher (marcador, no rama pelada)', () => {
+  assert.equal(route('5pm').action, 'select');
+});

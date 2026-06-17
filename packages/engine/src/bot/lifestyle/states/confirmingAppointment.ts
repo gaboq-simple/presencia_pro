@@ -506,7 +506,36 @@ export function routeSlotSelection(
   if (match.kind === 'exact')   return { action: 'select', slot: match.slot };
   if (match.kind === 'nearest') return { action: 'offer_nearest', requestedMinutes: match.requestedMinutes, slot: match.slot };
 
-  // 4. Índice numérico como fallback de baja prioridad (decisión e).
+  // 4. Dígito pelado ("12") — precedencia hora-ofrecida > índice > cercana
+  //    (S5-BOT-06). La presentación es prosa SIN numerar (presentingSlots.ts:430),
+  //    así que un dígito desnudo es la HORA que el cliente vio, no un índice: la
+  //    "decisión e" (dígito = índice) quedó obsoleta tras S5-BOT-01. Frontera dura:
+  //    NO se tocan extractRawTime/matchNaturalSlot/resolveTargetMinutes/parseChoice;
+  //    aquí solo ALIMENTAMOS el dígito a resolveTargetMinutes (lectura) y ruteamos.
+  //    Solo dígitos en rango horario (1..23); 0 / ≥24 caen a parseChoice → clarify.
+  const bareDigit = /^\d{1,2}$/.test(lower) ? parseInt(lower, 10) : null;
+  if (bareDigit !== null && bareDigit >= 1 && bareDigit <= 23 && slots.length > 0) {
+    const sorted   = [...slots].sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1));
+    const slotMins = sorted.map((s) => utcToLocalMinutes(new Date(s.startsAt), tz));
+    const target   = resolveTargetMinutes({ hour: bareDigit, minute: 0, explicitPeriod: null }, slotMins);
+
+    let bestIdx = 0;
+    let bestD   = Infinity;
+    slotMins.forEach((m, i) => {
+      const d = Math.abs(m - target);
+      if (d < bestD) { bestD = d; bestIdx = i; }
+    });
+
+    // (a) hora ofrecida: el dígito calza un slot presentado (±5 min) → seleccionar.
+    if (bestD <= EXACT_TOL) return { action: 'select', slot: sorted[bestIdx]! };
+    // (b) índice válido SIN calce de hora: conserva la decisión e para 1..N.
+    if (bareDigit <= slots.length) return { action: 'index', choice: bareDigit };
+    // (c) hora válida NO ofrecida → ofrecer la más cercana (reusa el requery S5-BOT-02).
+    return { action: 'offer_nearest', requestedMinutes: target, slot: sorted[bestIdx]! };
+  }
+
+  // 5. Índice numérico como fallback (decisión e): palabras ("uno"/"dos") y
+  //    dígitos fuera del rango horario (0, ≥24) que parseChoice mapea → índice.
   const choice = parseChoice(body);
   if (choice !== null) return { action: 'index', choice };
 
