@@ -129,6 +129,13 @@ function isNegation(body: string): boolean {
 // Reusa el patrón de presentingSlots.ts (±5 min).
 const EXACT_TOL = 5;
 
+// Banda superior de ambigüedad del dígito pelado (S5-BOT-07). Si un dígito es
+// índice válido [1..N] pero su lectura-hora cae a >EXACT_TOL y ≤NEAR_TOL de un
+// slot ofrecido, es ambiguo (¿el índice o la hora cercana?) → preguntamos la
+// hora en vez de asumir. 60 min es un punto de partida conservador; constante
+// nombrada para ajustarla con datos de smoke sin tocar la lógica.
+const NEAR_TOL = 60;
+
 // Número máximo de intentos de clarificación antes de ir a FALLBACK
 const MAX_CLARIFY_ATTEMPTS = 2;
 
@@ -172,6 +179,34 @@ export async function handleConfirmingAppointment(
 
   const attempts = context.clarification_attempts ?? 0;
 
+  // ── Desambiguación del dígito pelado ambiguo (S5-BOT-07) ──────────────────
+  // El turno anterior preguntamos "¿te refieres a la X?". Resolvemos ANTES de la
+  // aceptación de nearestOfferSlot y del router. Exclusión mutua con S5-BOT-03:
+  // pendingDigitDisambig y nearestOfferSlot nunca están activas a la vez (el
+  // handler ask_hour limpia nearestOfferSlot al setear ésta).
+
+  if (context.pendingDigitDisambig) {
+    const { requestedMinutes, indexChoice } = context.pendingDigitDisambig;
+    const cleared = { ...context, pendingDigitDisambig: null };
+
+    // "sí" → era la HORA: reusar el requery de día real (S5-BOT-02) vía
+    // offer_nearest con la hora guardada, sin duplicar la lógica.
+    if (isAffirmation(msg.body)) {
+      return handleOfferNearest(requestedMinutes, pendingSlots[0]!, cleared, attempts, business, supabase);
+    }
+    // "no" → era el ÍNDICE (default conservador). buildConfirmationResult avanza
+    // y RESETEA rejection_attempts; nunca lo incrementa (NO cruzar contadores).
+    if (isNegation(msg.body)) {
+      const chosen = pendingSlots.find((s) => s.index === indexChoice) ?? pendingSlots[indexChoice - 1];
+      if (chosen) {
+        return buildConfirmationResult(cleared, chosen, business.id, business.timezone, supabase, msg.customerName);
+      }
+    }
+    // Otra cosa ("no, a las 3", "la primera", "3pm") → limpiar la bandera y caer
+    // al ruteo normal; el matcher / parseOrdinal consume la corrección.
+    context = cleared;
+  }
+
   // ── Aceptación del slot cercano ofrecido en el turno anterior (decisión b) ─
 
   if (context.nearestOfferSlot && isAffirmation(msg.body)) {
@@ -208,108 +243,28 @@ export async function handleConfirmingAppointment(
       };
     }
 
-    case 'offer_nearest': {
-      const tz       = business.timezone;
-      const hh       = String(Math.floor(route.requestedMinutes / 60)).padStart(2, '0');
-      const mm       = String(route.requestedMinutes % 60).padStart(2, '0');
-      const reqLabel = formatTimeHuman(`${hh}:${mm}`);
-
-      // Re-consultar la disponibilidad REAL del día (mismo día de los slots ya
-      // mostrados — NO es salto de fecha). El matcher base solo ve los ≤3
-      // pendingSlots presentados; la hora pedida puede existir en el día aunque
-      // no estuviera entre ellos. getAvailableSlots reordena bidireccionalmente
-      // por cercanía a la hora pedida y devuelve ≤3.
-      let realSlots: SlotCandidate[] | null = null;
-      if (context.serviceId && context.requestedDate) {
-        try {
-          const catalog = await getCatalog(business.id, supabase);
-          const service = catalog.find((s) => s.id === context.serviceId);
-          if (service) {
-            const staffToQuery = await getStaffForService(business.id, service.id, supabase);
-            realSlots = await getAvailableSlots({
-              businessId:          business.id,
-              serviceId:           service.id,
-              durationMinutes:     service.duration_minutes,
-              requestedDate:       noonUTCDate(context.requestedDate),
-              shift:               null,
-              preferredStaffId:    context.autoAssign ? null : (context.staffId ?? null),
-              isWalkIn:            false,
-              walkInBufferMinutes: business.walkInBufferMinutes,
-              staffToQuery,
-              supabase,
-              tz,
-              requestedTime:       `${hh}:${mm}`,
-            });
-          }
-        } catch (err) {
-          if (err instanceof SchedulingQueryError) {
-            if (attempts >= 1) {
-              return {
-                newState:     'FALLBACK',
-                newContext:   { ...context, clarification_attempts: 0, nearestOfferSlot: null },
-                responseText: business.fallbackMessage,
-              };
-            }
-            return {
-              newState:     'CONFIRMING_APPOINTMENT',
-              newContext:   { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
-              responseText: SCHEDULING_ERROR_MESSAGE,
-            };
-          }
-          throw err;
-        }
-      }
-
-      // Disponibilidad real recuperada → REEMPLAZAR pendingSlots (≤3, ya
-      // ordenados por cercanía). El primero es el más cercano a la hora pedida.
-      if (realSlots && realSlots.length > 0) {
-        const newPending: LifestylePendingSlot[] = realSlots.map((s, i) => ({
-          index:     i + 1,
-          staffId:   s.staffId,
-          staffName: s.staffName,
-          startsAt:  s.startsAt.toISOString(),
-          endsAt:    s.endsAt.toISOString(),
-        }));
-        const offered     = newPending[0]!;
-        const offeredMin   = utcToLocalMinutes(new Date(offered.startsAt), tz);
-        const isExact      = Math.abs(offeredMin - route.requestedMinutes) <= EXACT_TOL;
-        const offeredTime  = formatTimeHumanFromDate(new Date(offered.startsAt), tz);
-        const staffPart    = context.autoAssign ? '' : ` con ${offered.staffName}`;
-
-        // CRÍTICO (anti Bug-B): aunque la hora pedida exista exacta, NO
-        // auto-confirmar. Presentar y esperar el "sí" explícito del cliente.
-        // El slot ofrecido queda en pendingSlots[0] = nearestOfferSlot, donde
-        // la rama de aceptación (isAffirmation) lo recoge.
-        const responseText = isExact
-          ? `Si, tengo disponible a las ${offeredTime}${staffPart}. Te la agendo?`
-          : `A las ${reqLabel} no tengo disponible${staffPart}. ` +
-            `Lo mas cercano es a las ${offeredTime}. Te sirve?`;
-
-        return {
-          newState:   'CONFIRMING_APPOINTMENT',
-          newContext: {
-            ...context,
-            pendingSlots:           newPending,
-            nearestOfferSlot:       offered.startsAt,
-            clarification_attempts: 0,
-            rejection_attempts:     0,
-          },
-          responseText,
-        };
-      }
-
-      // Sin disponibilidad real recuperable → ofrecer el más cercano de los ya
-      // mostrados (comportamiento previo, conserva el slot en pendingSlots).
-      const nearestTime = formatTimeHumanFromDate(new Date(route.slot.startsAt), tz);
-      const staffPart   = context.autoAssign ? '' : ` con ${route.slot.staffName}`;
+    case 'ask_hour': {
+      // S5-BOT-07: el dígito es índice válido pero su lectura-hora cae cerca (no
+      // exacta) de un slot → ambiguo. Preguntar la hora (solo horas, sin "opción").
+      // CRÍTICO: nearestOfferSlot:null garantiza la exclusión mutua con el gate
+      // de aceptación de S5-BOT-03. NO se toca rejection_attempts.
+      const hh        = String(Math.floor(route.requestedMinutes / 60)).padStart(2, '0');
+      const mm        = String(route.requestedMinutes % 60).padStart(2, '0');
+      const hourLabel = formatTimeHuman(`${hh}:${mm}`);
       return {
         newState:   'CONFIRMING_APPOINTMENT',
-        newContext: { ...context, nearestOfferSlot: route.slot.startsAt, clarification_attempts: 0, rejection_attempts: 0 },
-        responseText:
-          `A las ${reqLabel} no tengo disponible${staffPart}. ` +
-          `Lo mas cercano es a las ${nearestTime}. Te sirve?`,
+        newContext: {
+          ...context,
+          pendingDigitDisambig:   { requestedMinutes: route.requestedMinutes, indexChoice: route.indexChoice },
+          nearestOfferSlot:       null,
+          clarification_attempts: 0,
+        },
+        responseText: `¿Te refieres a la ${hourLabel}?`,
       };
     }
+
+    case 'offer_nearest':
+      return handleOfferNearest(route.requestedMinutes, route.slot, context, attempts, business, supabase);
 
     case 'date_redirect':
       // Re-enrutar a QUALIFYING_DATETIME para que procese el mismo mensaje.
@@ -378,6 +333,116 @@ export async function handleConfirmingAppointment(
       'Disculpa, no te segui bien. Solo dime a que hora te gustaria, ' +
       'por ejemplo "a las 5" o "la mas temprano". Si cualquiera te sirve, ' +
       'dime "cualquiera" y te asigno la primera.',
+  };
+}
+
+// ─── Oferta del slot más cercano (decisión b / requery S5-BOT-02) ────────────
+// Re-consulta la disponibilidad REAL del día (mismo día de los slots mostrados,
+// NO salto de fecha) ordenada por cercanía a la hora pedida y ofrece el más
+// cercano SIN auto-confirmar (anti Bug-B). Extraída para que S5-BOT-07 ("sí"
+// tras ask_hour) reuse exactamente este camino sin duplicar la lógica.
+async function handleOfferNearest(
+  requestedMinutes: number,
+  fallbackSlot:     LifestylePendingSlot,
+  context:          LifestyleBotContext,
+  attempts:         number,
+  business:         StateHandlerDeps['business'],
+  supabase:         StateHandlerDeps['supabase'],
+): Promise<StateHandlerResult> {
+  const tz       = business.timezone;
+  const hh       = String(Math.floor(requestedMinutes / 60)).padStart(2, '0');
+  const mm       = String(requestedMinutes % 60).padStart(2, '0');
+  const reqLabel = formatTimeHuman(`${hh}:${mm}`);
+
+  let realSlots: SlotCandidate[] | null = null;
+  if (context.serviceId && context.requestedDate) {
+    try {
+      const catalog = await getCatalog(business.id, supabase);
+      const service = catalog.find((s) => s.id === context.serviceId);
+      if (service) {
+        const staffToQuery = await getStaffForService(business.id, service.id, supabase);
+        realSlots = await getAvailableSlots({
+          businessId:          business.id,
+          serviceId:           service.id,
+          durationMinutes:     service.duration_minutes,
+          requestedDate:       noonUTCDate(context.requestedDate),
+          shift:               null,
+          preferredStaffId:    context.autoAssign ? null : (context.staffId ?? null),
+          isWalkIn:            false,
+          walkInBufferMinutes: business.walkInBufferMinutes,
+          staffToQuery,
+          supabase,
+          tz,
+          requestedTime:       `${hh}:${mm}`,
+        });
+      }
+    } catch (err) {
+      if (err instanceof SchedulingQueryError) {
+        if (attempts >= 1) {
+          return {
+            newState:     'FALLBACK',
+            newContext:   { ...context, clarification_attempts: 0, nearestOfferSlot: null },
+            responseText: business.fallbackMessage,
+          };
+        }
+        return {
+          newState:     'CONFIRMING_APPOINTMENT',
+          newContext:   { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
+          responseText: SCHEDULING_ERROR_MESSAGE,
+        };
+      }
+      throw err;
+    }
+  }
+
+  // Disponibilidad real recuperada → REEMPLAZAR pendingSlots (≤3, ya ordenados
+  // por cercanía). El primero es el más cercano a la hora pedida.
+  if (realSlots && realSlots.length > 0) {
+    const newPending: LifestylePendingSlot[] = realSlots.map((s, i) => ({
+      index:     i + 1,
+      staffId:   s.staffId,
+      staffName: s.staffName,
+      startsAt:  s.startsAt.toISOString(),
+      endsAt:    s.endsAt.toISOString(),
+    }));
+    const offered     = newPending[0]!;
+    const offeredMin   = utcToLocalMinutes(new Date(offered.startsAt), tz);
+    const isExact      = Math.abs(offeredMin - requestedMinutes) <= EXACT_TOL;
+    const offeredTime  = formatTimeHumanFromDate(new Date(offered.startsAt), tz);
+    const staffPart    = context.autoAssign ? '' : ` con ${offered.staffName}`;
+
+    // CRÍTICO (anti Bug-B): aunque la hora pedida exista exacta, NO
+    // auto-confirmar. Presentar y esperar el "sí" explícito del cliente.
+    // El slot ofrecido queda en pendingSlots[0] = nearestOfferSlot, donde
+    // la rama de aceptación (isAffirmation) lo recoge.
+    const responseText = isExact
+      ? `Si, tengo disponible a las ${offeredTime}${staffPart}. Te la agendo?`
+      : `A las ${reqLabel} no tengo disponible${staffPart}. ` +
+        `Lo mas cercano es a las ${offeredTime}. Te sirve?`;
+
+    return {
+      newState:   'CONFIRMING_APPOINTMENT',
+      newContext: {
+        ...context,
+        pendingSlots:           newPending,
+        nearestOfferSlot:       offered.startsAt,
+        clarification_attempts: 0,
+        rejection_attempts:     0,
+      },
+      responseText,
+    };
+  }
+
+  // Sin disponibilidad real recuperable → ofrecer el más cercano de los ya
+  // mostrados (comportamiento previo, conserva el slot en pendingSlots).
+  const nearestTime = formatTimeHumanFromDate(new Date(fallbackSlot.startsAt), tz);
+  const staffPart   = context.autoAssign ? '' : ` con ${fallbackSlot.staffName}`;
+  return {
+    newState:   'CONFIRMING_APPOINTMENT',
+    newContext: { ...context, nearestOfferSlot: fallbackSlot.startsAt, clarification_attempts: 0, rejection_attempts: 0 },
+    responseText:
+      `A las ${reqLabel} no tengo disponible${staffPart}. ` +
+      `Lo mas cercano es a las ${nearestTime}. Te sirve?`,
   };
 }
 
@@ -453,6 +518,7 @@ export type SelectionRoute =
   | { action: 'offer_nearest'; requestedMinutes: number; slot: LifestylePendingSlot }
   | { action: 'date_redirect' }
   | { action: 'ask_who' }
+  | { action: 'ask_hour';      requestedMinutes: number; indexChoice: number }
   | { action: 'index';         choice: number }
   | { action: 'none' };
 
@@ -528,7 +594,15 @@ export function routeSlotSelection(
 
     // (a) hora ofrecida: el dígito calza un slot presentado (±5 min) → seleccionar.
     if (bestD <= EXACT_TOL) return { action: 'select', slot: sorted[bestIdx]! };
-    // (b) índice válido SIN calce de hora: conserva la decisión e para 1..N.
+    // (a.5) AMBIGUO (S5-BOT-07): el dígito ES índice válido [1..N] PERO su
+    //   lectura-hora cae cerca (no exacta) de un slot ofrecido
+    //   (EXACT_TOL < bestD ≤ NEAR_TOL) → no asumir índice; preguntar la hora.
+    //   La banda exige AMBAS condiciones (índice válido Y bestD en banda); fuera
+    //   de ella el comportamiento de S5-BOT-06 queda intacto.
+    if (bareDigit <= slots.length && bestD <= NEAR_TOL) {
+      return { action: 'ask_hour', requestedMinutes: target, indexChoice: bareDigit };
+    }
+    // (b) índice válido SIN calce de hora (bestD > NEAR_TOL): decisión e para 1..N.
     if (bareDigit <= slots.length) return { action: 'index', choice: bareDigit };
     // (c) hora válida NO ofrecida → ofrecer la más cercana (reusa el requery S5-BOT-02).
     return { action: 'offer_nearest', requestedMinutes: target, slot: sorted[bestIdx]! };
