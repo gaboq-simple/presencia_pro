@@ -982,6 +982,30 @@ COMMIT;
 
 ---
 
+#### S5-BOT-07 — Desambiguación del dígito pelado ambiguo (preguntar la hora, no asumir índice) 🔵 in-progress (2026-06-17, rama `feat/digit-disambiguation`)
+**Origen:** continuación de S5-BOT-06. Aquel resolvió el dígito pelado con precedencia *hora-ofrecida > índice > cercana > clarify*. Queda una **zona gris**: cuando un dígito es índice válido `[1..N]` **y a la vez** su lectura-hora cae *cerca pero no exacta* de un slot ofrecido, la elección índice-vs-hora es genuinamente ambigua y asumir cualquiera puede agendar lo que el cliente no pidió. Ej.: ante "12:00, 12:15, 12:30" el cliente dice `"1"` → como hora resuelve a la 1pm (13:00, `bestD=30`), pero `1` también es índice válido. ¿Quiso la primera opción (12:00) o la 1pm?
+**Regla central (la frontera):** preguntar ⟺ `d ∈ [1..N]` **Y** `EXACT_TOL(5) < bestD ≤ NEAR_TOL`. `NEAR_TOL = 60 min` como **constante nombrada y comentada** (ajustable con datos de smoke). Fuera de la banda: comportamiento de S5-BOT-06 **intacto** (select / índice / offer_nearest / clarify).
+**Disparo:** nueva acción **pura** `{action:'ask_hour', requestedMinutes:target, indexChoice:d}` en `routeSlotSelection`, dentro de la banda. La función sigue pura/testeable.
+**Bandera:** `pendingDigitDisambig: {requestedMinutes, indexChoice} | null` en `lifestyle.types.ts`, modelada junto a `nearestOfferSlot`.
+**Handler `ask_hour`:** setea la bandera, `nearestOfferSlot:null` (CRÍTICO para exclusión mutua), `clarification_attempts:0`, **NO** toca `rejection_attempts`. Copy: `"¿Te refieres a la 1 de la tarde?"` (hora vía `formatTimeHuman`, solo horas, sin "opción").
+**Consumo** (bloque al tope del handler, gateado por `pendingDigitDisambig`, ANTES de la aceptación de `nearestOfferSlot` y del router):
+- `isAffirmation` → camino `offer_nearest` con `requestedMinutes` guardado (reusa el requery de S5-BOT-02, sin duplicar). Limpia la bandera.
+- `isNegation` → `buildConfirmationResult(pendingSlots[indexChoice-1])` (el índice, default conservador). Limpia la bandera.
+- otra cosa ("no, a las 3", "la primera", "3pm") → limpia la bandera, cae a `routeSlotSelection` normal (el matcher/`parseOrdinal` consume la corrección).
+**Coexistencia S5-BOT-03 (crítico):** exclusión mutua de banderas (`pendingDigitDisambig` y `nearestOfferSlot` nunca activas a la vez); se reusan `isAffirmation`/`isNegation` sin redefinir; un "no" resuelve a una **selección** (avance) → `buildConfirmationResult` resetea `rejection_attempts`, nunca lo incrementa. NO cruzar contadores.
+**Criterios de aceptación:**
+- [ ] `"1"` ante {12:00,12:15,12:30} → `ask_hour` (la 1pm, `bestD=30`, en banda).
+- [ ] `"sí"` tras `ask_hour` → `offer_nearest` a la 1pm.
+- [ ] `"no"` tras `ask_hour` → índice 1 (12:00).
+- [ ] `"la primera"` tras `ask_hour` → índice 1 vía fall-through (`parseOrdinal`).
+- [ ] `"2"` ante {10:00,10:15,10:30} → `index` (`bestD=210` fuera de banda, NO pregunta — criterio (e) intacto).
+- [ ] `"3"` ante {10:00,11:00,12:00} → `index` (decisión A intacta, NO se vuelve `ask_hour`).
+- [ ] No-regresión S5-BOT-01/02/03/04/06; `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
+**Frontera dura:** `resolveTargetMinutes`/`extractRawTime`/`matchNaturalSlot`/`parseChoice` byte-idénticos; `offer_nearest` reusa S5-BOT-02 sin duplicar; `ask_who` (A1) intacto; `NEAR_TOL` como constante nombrada.
+**Prompt:** Ad-hoc solicitado por Gabriel (2026-06-17 — desambiguación del dígito pelado ambiguo).
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
