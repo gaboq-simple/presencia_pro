@@ -298,3 +298,38 @@ test('(06-noreg) "uno" sigue índice 1 (palabra, no dígito → parseChoice)', (
 test('(06-noreg) "5pm" sigue select por el matcher (marcador, no rama pelada)', () => {
   assert.equal(route('5pm').action, 'select');
 });
+
+// ─── S5-BOT-07: desambiguación del dígito pelado ambiguo ──────────────────────
+// Banda: preguntar ⟺ d ∈ [1..N] Y EXACT_TOL(5) < bestD ≤ NEAR_TOL(60). Fuera de
+// la banda, S5-BOT-06 queda intacto (criterio (e) "2"→index, decisión A "3"→index).
+
+// {10:00, 10:15, 10:30} — "2" como hora (14:00) cae a bestD=210 → fuera de banda.
+const morning15 = [slot(1, '10:00'), slot(2, '10:15'), slot(3, '10:30')];
+
+test('(07) "1" ante {12:00,12:15,12:30} → ask_hour (1pm, bestD=30, en banda)', () => {
+  const r = route('1', noon15);
+  assert.equal(r.action, 'ask_hour');
+  const a = r as { requestedMinutes: number; indexChoice: number };
+  assert.equal(a.requestedMinutes, 13 * 60); // 13:00 = la 1 de la tarde
+  assert.equal(a.indexChoice, 1);            // índice conservador si dice "no"
+});
+
+test('(07-crítico) "2" ante {10:00,10:15,10:30} → index (bestD=210 fuera de banda, NO ask_hour)', () => {
+  const r = route('2', morning15);
+  assert.equal(r.action, 'index');
+  assert.equal((r as { choice: number }).choice, 2);
+});
+
+test('(07-crítico) "3" ante {10:00,11:00,12:00} → index (decisión A intacta, NO ask_hour)', () => {
+  const r = route('3', lateMorning);
+  assert.equal(r.action, 'index');
+  assert.equal((r as { choice: number }).choice, 3);
+});
+
+test('(07-fallthrough) "la primera" ante {12:00,12:15,12:30} → select 12:00 (parseOrdinal)', () => {
+  // El consumo en el handler limpia la bandera y cae a este ruteo; aquí se
+  // verifica que parseOrdinal resuelve "la primera" al slot índice 1 (12:00).
+  const r = route('la primera', noon15);
+  assert.equal(r.action, 'select');
+  assert.equal((r as { slot: LifestylePendingSlot }).slot.startsAt, '2026-06-15T18:00:00.000Z'); // 12:00 local
+});

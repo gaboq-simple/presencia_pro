@@ -142,6 +142,23 @@ export const LifestyleBotContextSchema = z.object({
    */
   nearestOfferSlot: z.string().datetime().nullable().optional(),
 
+  /**
+   * Desambiguación pendiente del dígito pelado ambiguo (S5-BOT-07).
+   * Se setea cuando un dígito es índice válido [1..N] PERO su lectura como hora
+   * cae cerca (no exacta) de un slot ofrecido (EXACT_TOL < dist ≤ NEAR_TOL): el
+   * bot preguntó "¿te refieres a la X?". El siguiente turno lo resuelve:
+   * "sí" → la HORA (requestedMinutes), "no" → el ÍNDICE (indexChoice).
+   * Exclusión mutua con nearestOfferSlot: nunca ambas activas a la vez.
+   * null/ausente si no hay desambiguación pendiente.
+   */
+  pendingDigitDisambig: z
+    .object({
+      requestedMinutes: z.number().int().nonnegative(),
+      indexChoice:      z.number().int().min(1),
+    })
+    .nullable()
+    .optional(),
+
   /** UUID de la cita creada en la DB — se establece en CONFIRMED. */
   appointmentId: z.string().uuid().optional(),
 
