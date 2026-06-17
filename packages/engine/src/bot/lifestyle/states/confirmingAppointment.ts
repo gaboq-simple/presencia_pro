@@ -192,6 +192,22 @@ export async function handleConfirmingAppointment(
     case 'select':
       return buildConfirmationResult(context, route.slot, business.id, business.timezone, supabase, msg.customerName);
 
+    case 'ask_who': {
+      // S5-BOT-04 (A1): el cliente pregunta CON QUIÉN. Re-presentar los slots
+      // pendientes mencionando el barbero de cada uno, sin auto-confirmar. La
+      // respuesta híbrida fina ("te atendería Andrés; si prefieres, Carlos…")
+      // y su follow-up son A2 — aquí solo dejamos de ocultar el nombre.
+      const tz       = business.timezone;
+      const byBarber = pendingSlots
+        .map((s) => `${s.staffName} a las ${formatTimeHumanFromDate(new Date(s.startsAt), tz)}`)
+        .join(', ');
+      return {
+        newState:   'CONFIRMING_APPOINTMENT',
+        newContext: { ...context, clarification_attempts: 0, nearestOfferSlot: null },
+        responseText: `Tengo ${byBarber}. Con quien prefieres?`,
+      };
+    }
+
     case 'offer_nearest': {
       const tz       = business.timezone;
       const hh       = String(Math.floor(route.requestedMinutes / 60)).padStart(2, '0');
@@ -436,8 +452,21 @@ export type SelectionRoute =
   | { action: 'select';        slot: LifestylePendingSlot }
   | { action: 'offer_nearest'; requestedMinutes: number; slot: LifestylePendingSlot }
   | { action: 'date_redirect' }
+  | { action: 'ask_who' }
   | { action: 'index';         choice: number }
   | { action: 'none' };
+
+// S5-BOT-04: token de "quién / qué barbero / <nombre>" para el guard ask_who.
+// Detecta si el cliente pregunta CON QUIÉN, no solo a qué hora. El "?" solo NO
+// basta (eso lo verifica el caller). Trabaja sobre texto normalizado (ASCII).
+function hasStaffToken(normalizedBody: string, slots: LifestylePendingSlot[]): boolean {
+  if (/\bquien(?:es)?\b|\bque\s+barber[oa]s?\b|\bbarber[oa]s?\b/.test(normalizedBody)) return true;
+  // Nombre concreto de alguno de los barberos ofrecidos.
+  return slots.some((s) => {
+    const name = normalize(s.staffName);
+    return name.length > 2 && new RegExp(`\\b${name}\\b`).test(normalizedBody);
+  });
+}
 
 export function routeSlotSelection(
   body:  string,
@@ -461,6 +490,15 @@ export function routeSlotSelection(
   // 2. No-preferencia pura (sin calificador de turno/extremo → decisión d).
   if (NO_PREFERENCE_KEYWORDS.some((k) => lower.includes(k)) && !SHIFT_OR_EXTREME_RE.test(lower)) {
     return { action: 'no_preference' };
+  }
+
+  // 2.5 Guard de interrogación por barbero (S5-BOT-04): ¿/? + token de barbero
+  //     ("¿a las 12 con quién?", "¿qué barbero?") → ask_who, NO selección. Exige
+  //     el token de barbero: "¿a las 6?" (duda sin barbero) NO dispara (cae al
+  //     matcher). Va ANTES de matchNaturalSlot para ganarle la "?"-selección.
+  //     Frontera: NO toca matchNaturalSlot/extractRawTime; solo antepone el guard.
+  if (/[¿?]/.test(body) && hasStaffToken(normalize(body), slots)) {
+    return { action: 'ask_who' };
   }
 
   // 3. Selección natural: hora / ordinal / difusa.

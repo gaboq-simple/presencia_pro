@@ -96,6 +96,9 @@ export async function handleShowingSlots(
   // noonUTCDate: noon UTC del día local → getDay()/getDate() devuelven weekday/día correcto
   const requestedDate = noonUTCDate(context.requestedDate);
 
+  // S5-BOT-04: bandera de presentación por barbero (no suprime nombres).
+  const presentByStaff = context.presentBy === 'staff';
+
   // ── Retry limit para errores de disponibilidad ────────────────────────────
   // clarification_attempts se reutiliza como contador de reintentos de scheduling.
   // 1er fallo → SHOWING_SLOTS (mismo estado, el usuario puede reintentar escribiendo).
@@ -215,6 +218,7 @@ export async function handleShowingSlots(
         tz:                business.timezone,
         originalDateLabel: formatDateLabel(requestedDate, business.timezone),
         altDateLabel:      formatDateLabel(alt.date, business.timezone),
+        presentByStaff,
       });
       return { newState: 'CONFIRMING_APPOINTMENT', newContext: newCtx, responseText };
     }
@@ -232,9 +236,13 @@ export async function handleShowingSlots(
   // Con autoAssign=true, getAvailableSlots devuelve todos los barberos
   // disponibles. Agrupamos por hora (HH:MM) y nos quedamos con el primero
   // de cada grupo para que el usuario elija HORA, no barbero.
+  //
+  // S5-BOT-04: en modo presentBy='staff' NO deduplicamos por hora — la fuente
+  // ya es un-slot-por-barbero (proyección de getAvailableSlots) y queremos
+  // conservar a TODOS los barberos, incluso si comparten la misma hora.
 
   let displaySlots = slots;
-  if (context.autoAssign) {
+  if (context.autoAssign && !presentByStaff) {
     const seen = new Set<string>();
     displaySlots = slots.filter((s) => {
       const localMin = utcToLocalMinutes(s.startsAt, business.timezone);
@@ -330,6 +338,7 @@ export async function handleShowingSlots(
     tz:                 business.timezone,
     exactMatchMissed,
     requestedTimeLabel,
+    presentByStaff,
   });
 
   return {
@@ -357,19 +366,23 @@ async function generateSlotsMessage(params: {
   altDateLabel?:       string;
   exactMatchMissed?:   boolean;
   requestedTimeLabel?: string;
+  presentByStaff?:     boolean;
 }): Promise<string> {
   const {
     slots, isWalkIn, isReturning, serviceName, staffName, autoAssign,
     anthropicKey, system, businessId, customerPhone, tz,
     originalDateLabel, altDateLabel, exactMatchMissed, requestedTimeLabel,
+    presentByStaff = false,
   } = params;
 
   const isAltDate = !!(originalDateLabel && altDateLabel);
   const fallback  = isAltDate
-    ? buildAltDateFallback(slots, originalDateLabel!, altDateLabel!, autoAssign, tz)
-    : buildSlotsMessage(slots, isWalkIn, autoAssign, tz, exactMatchMissed, requestedTimeLabel);
+    ? buildAltDateFallback(slots, originalDateLabel!, altDateLabel!, autoAssign, tz, presentByStaff)
+    : buildSlotsMessage(slots, isWalkIn, autoAssign, tz, exactMatchMissed, requestedTimeLabel, presentByStaff);
 
-  // El slotsText omite el nombre del barbero cuando autoAssign=true
+  // El slotsText omite el nombre del barbero cuando autoAssign=true, SALVO en
+  // modo presentBy='staff' (S5-BOT-04), donde el nombre es justo lo que el
+  // cliente pidió ver.
   const slotsText = slots
     .map((s, i) => {
       const localDs   = utcToLocalDateStr(s.startsAt, tz);
@@ -377,14 +390,16 @@ async function generateSlotsMessage(params: {
       const dayNum    = parseInt(localDs.split('-')[2]!, 10);
       const monthName = MONTHS_ES[parseInt(localDs.split('-')[1]!, 10) - 1]!;
       const time      = formatTimeHumanFromDate(s.startsAt, tz);
-      const staffPart = autoAssign ? '' : ` con ${s.staffName}`;
+      const staffPart = (autoAssign && !presentByStaff) ? '' : ` con ${s.staffName}`;
       return `Slot ${i + 1}: ${dayName} ${dayNum} de ${monthName} a las ${time}${staffPart}`;
     })
     .join('\n');
 
-  const barberoLine = autoAssign
-    ? '- Barbero: se asignara automaticamente segun disponibilidad (no menciones nombre especifico de barbero)'
-    : `- Barbero: ${staffName ?? 'cualquier barbero disponible (auto-asignado)'}`;
+  const barberoLine = presentByStaff
+    ? '- Barbero: MENCIONA el nombre de cada barbero junto a su horario (ej. "Carlos a las 10, Andres a las 12"). El cliente quiere elegir/saber con quien.'
+    : autoAssign
+      ? '- Barbero: se asignara automaticamente segun disponibilidad (no menciones nombre especifico de barbero)'
+      : `- Barbero: ${staffName ?? 'cualquier barbero disponible (auto-asignado)'}`;
 
   // Nota de hora exacta no disponible — instrucción explícita a Claude
   const exactTimeNote = exactMatchMissed && requestedTimeLabel
@@ -408,9 +423,11 @@ async function generateSlotsMessage(params: {
     'Horarios disponibles:',
     slotsText,
     '',
-    autoAssign
-      ? 'Presenta estos horarios de forma natural. El barbero sera asignado automaticamente — no menciones su nombre. Termina con una pregunta abierta para que el cliente elija el horario. Sin signos de interrogacion al inicio ni exclamaciones al inicio.'
-      : 'Presenta estos horarios de forma natural y calida, sin listarlos como formulario. Termina con una pregunta abierta para que el cliente elija, sin mencionar el numero total de opciones.',
+    presentByStaff
+      ? 'Presenta estos horarios mencionando el NOMBRE del barbero de cada uno (ej. "Carlos a las 10, Andres a las 12"), de forma natural y calida. Termina con una pregunta abierta para que el cliente elija con quien o a que hora. Sin signos de interrogacion ni exclamaciones al inicio.'
+      : autoAssign
+        ? 'Presenta estos horarios de forma natural. El barbero sera asignado automaticamente — no menciones su nombre. Termina con una pregunta abierta para que el cliente elija el horario. Sin signos de interrogacion al inicio ni exclamaciones al inicio.'
+        : 'Presenta estos horarios de forma natural y calida, sin listarlos como formulario. Termina con una pregunta abierta para que el cliente elija, sin mencionar el numero total de opciones.',
   ].filter((l) => l !== null).join('\n');
 
   try {
@@ -454,11 +471,15 @@ export function buildSlotsMessage(
   tz:                  string,
   exactMatchMissed?:   boolean,
   requestedTimeLabel?: string,
+  presentByStaff = false,
 ): string {
+  // S5-BOT-04: en presentBy='staff' NO se suprime el nombre del barbero.
+  const showStaff = !autoAssign || presentByStaff;
+
   if (isWalkIn && slots.length === 1) {
     const slot      = slots[0]!;
     const time      = formatTimeHumanFromDate(slot.startsAt, tz);
-    const staffPart = autoAssign ? '' : ` con ${slot.staffName}`;
+    const staffPart = showStaff ? ` con ${slot.staffName}` : '';
     return `Tenemos disponibilidad ahora mismo${staffPart} a las ${time}. Confirmamos? (si/no)`;
   }
 
@@ -478,7 +499,7 @@ export function buildSlotsMessage(
     const dayNum    = parseInt(localDs.split('-')[2]!, 10);
     const monthName = MONTHS_ES[parseInt(localDs.split('-')[1]!, 10) - 1]!;
     const time      = formatTimeHumanFromDate(slot.startsAt, tz);
-    const staffPart = autoAssign ? '' : ` con ${slot.staffName}`;
+    const staffPart = showStaff ? ` con ${slot.staffName}` : '';
     return `${i + 1}. ${dayName} ${dayNum} de ${monthName} a las ${time}${staffPart}`;
   });
 
@@ -504,11 +525,12 @@ function buildAltDateFallback(
   altDateLabel:      string,
   autoAssign:        boolean,
   tz:                string,
+  presentByStaff = false,
 ): string {
   const times    = slots.map((s) => `las ${formatTimeHumanFromDate(s.startsAt, tz)}`);
   const timesStr = times.length === 1
     ? `a ${times[0]}`
     : times.slice(0, -1).join(', a ') + ` o a ${times[times.length - 1]}`;
-  const staffNote = autoAssign ? '' : ` con ${slots[0]!.staffName}`;
+  const staffNote = (autoAssign && !presentByStaff) ? '' : ` con ${slots[0]!.staffName}`;
   return `Para ${originalDateLabel} no tengo espacio, pero el ${altDateLabel} si hay lugar — ${timesStr}${staffNote}. Te queda alguno?`;
 }
