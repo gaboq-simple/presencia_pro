@@ -32,6 +32,7 @@ import {
   formatTimeHuman,
   buildBookingNameQuestion,
   detectsServiceCorrection,
+  clearBookingSelection,
 } from '../utils';
 import { utcToLocalMinutes, noonUTCDate } from '../tzUtils';
 import { getAvailableSlots, SchedulingQueryError } from '../scheduling';
@@ -151,19 +152,7 @@ export async function handleConfirmingAppointment(
   if (detectsServiceCorrection(msg.body.trim().toLowerCase())) {
     return {
       newState: 'QUALIFYING_SERVICE',
-      newContext: {
-        ...context,
-        serviceId:                    undefined,
-        staffId:                      undefined,
-        requestedDate:                undefined,
-        requestedTime:                undefined,
-        requestedShift:               undefined,
-        pendingSlots:                 undefined,
-        nearestOfferSlot:             null,
-        ambiguous_service_candidates: undefined,
-        clarification_attempts:       0,
-        rejection_attempts:           0,
-      },
+      newContext: { ...context, ...clearBookingSelection() },
       responseText: 'Sin problema. Cual servicio te interesa?',
     };
   }
@@ -199,7 +188,7 @@ export async function handleConfirmingAppointment(
     if (isNegation(msg.body)) {
       const chosen = pendingSlots.find((s) => s.index === indexChoice) ?? pendingSlots[indexChoice - 1];
       if (chosen) {
-        return buildConfirmationResult(cleared, chosen, business.id, business.timezone, supabase, msg.customerName);
+        return buildConfirmationResult(cleared, chosen, business, supabase, msg.customerName);
       }
     }
     // Otra cosa ("no, a las 3", "la primera", "3pm") → limpiar la bandera y caer
@@ -212,7 +201,11 @@ export async function handleConfirmingAppointment(
   if (context.nearestOfferSlot && isAffirmation(msg.body)) {
     const offered = pendingSlots.find((s) => s.startsAt === context.nearestOfferSlot);
     if (offered) {
-      return buildConfirmationResult(context, offered, business.id, business.timezone, supabase, msg.customerName);
+      // El cliente ACEPTA explícitamente el slot ofrecido. Alinear
+      // requestedStaffId al barbero aceptado para que el cierre defensivo no
+      // vuelva a dispararse (evita loop cuando se ofreció a otro barbero).
+      const accepted = { ...context, requestedStaffId: offered.staffId };
+      return buildConfirmationResult(accepted, offered, business, supabase, msg.customerName);
     }
   }
 
@@ -220,12 +213,44 @@ export async function handleConfirmingAppointment(
 
   const route = routeSlotSelection(msg.body, pendingSlots, msg.timestamp, business.timezone);
 
+  // ── Selección de barbero en prosa (S5-BOT-10, BUG 1) ──────────────────────
+  // "Con Carlos" / "Carlos porfa" no tienen rama en routeSlotSelection → caen a
+  // clarify y el barbero se pierde. Anotar requestedStaffId para que el cierre
+  // defensivo valide; si el mensaje NO trae hora/índice (route 'none'),
+  // re-presentar los slots de ESE barbero (presentBy='staff').
+  const roster = context.serviceId
+    ? await getStaffForService(business.id, context.serviceId, supabase)
+    : [];
+  const barberSel = detectBarberSelection(msg.body, roster, pendingSlots, context.presentBy);
+  if (barberSel) {
+    context = { ...context, requestedStaffId: barberSel.staffId };
+    if (route.action === 'none') {
+      return {
+        newState:   'SHOWING_SLOTS',
+        newContext: {
+          ...context,
+          staffId:                barberSel.staffId,
+          autoAssign:             false,
+          presentBy:              'staff',
+          pendingSlots:           undefined,
+          nearestOfferSlot:       null,
+          clarification_attempts: 0,
+        },
+        responseText: '',
+      };
+    }
+  }
+
   switch (route.action) {
-    case 'no_preference':
-      return buildConfirmationResult(context, pendingSlots[0]!, business.id, business.timezone, supabase, msg.customerName);
+    case 'no_preference': {
+      // "Cualquiera" abandona la preferencia de barbero: limpiar requestedStaffId
+      // para que el cierre defensivo no se dispare con el primer slot.
+      const noPref = { ...context, requestedStaffId: undefined, autoAssign: true };
+      return buildConfirmationResult(noPref, pendingSlots[0]!, business, supabase, msg.customerName);
+    }
 
     case 'select':
-      return buildConfirmationResult(context, route.slot, business.id, business.timezone, supabase, msg.customerName);
+      return buildConfirmationResult(context, route.slot, business, supabase, msg.customerName);
 
     case 'ask_who': {
       // S5-BOT-04 (A1): el cliente pregunta CON QUIÉN. Re-presentar los slots
@@ -288,7 +313,7 @@ export async function handleConfirmingAppointment(
       if (route.choice >= 1 && route.choice <= pendingSlots.length) {
         const chosen = pendingSlots.find((s) => s.index === route.choice);
         if (chosen) {
-          return buildConfirmationResult(context, chosen, business.id, business.timezone, supabase, msg.customerName);
+          return buildConfirmationResult(context, chosen, business, supabase, msg.customerName);
         }
       }
       break; // fuera de rango → cae a la lógica de clarificación
@@ -305,6 +330,23 @@ export async function handleConfirmingAppointment(
 
   if (isNegation(msg.body)) {
     return buildRejectionResult(context, pendingSlots, business);
+  }
+
+  // ── Meta-frustración (S5-BOT-10, DECISIÓN C) ──────────────────────────────
+  // "Ya te dije" / "eso pregunté": el cliente siente que se ignora su respuesta.
+  // En vez de repetir la pregunta genérica, RE-PRESENTAR los horarios concretos
+  // pendientes para que elija sin reformular.
+  if (detectMetaFrustration(msg.body)) {
+    const tz    = business.timezone;
+    const times = pendingSlots.map((s) => formatTimeHumanFromDate(new Date(s.startsAt), tz));
+    const offer = times.length === 1
+      ? `a las ${times[0]}`
+      : `a las ${times.slice(0, -1).join(', a las ')} o a las ${times[times.length - 1]}`;
+    return {
+      newState:   'CONFIRMING_APPOINTMENT',
+      newContext: { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
+      responseText: `Perdona la confusion. Tengo ${offer}. Cual prefieres?`,
+    };
   }
 
   // ── Input no reconocido: retry antes de FALLBACK (BUG 2) ──────────────────
@@ -367,7 +409,9 @@ async function handleOfferNearest(
           durationMinutes:     service.duration_minutes,
           requestedDate:       noonUTCDate(context.requestedDate),
           shift:               null,
-          preferredStaffId:    context.autoAssign ? null : (context.staffId ?? null),
+          // S5-BOT-10: honrar el barbero PEDIDO por encima de autoAssign para no
+          // ofrecer (y luego cerrar) con un barbero distinto al solicitado.
+          preferredStaffId:    context.requestedStaffId ?? (context.autoAssign ? null : (context.staffId ?? null)),
           isWalkIn:            false,
           walkInBufferMinutes: business.walkInBufferMinutes,
           staffToQuery,
@@ -409,7 +453,9 @@ async function handleOfferNearest(
     const offeredMin   = utcToLocalMinutes(new Date(offered.startsAt), tz);
     const isExact      = Math.abs(offeredMin - requestedMinutes) <= EXACT_TOL;
     const offeredTime  = formatTimeHumanFromDate(new Date(offered.startsAt), tz);
-    const staffPart    = context.autoAssign ? '' : ` con ${offered.staffName}`;
+    // Mostrar el barbero si el cliente lo pidió (requestedStaffId) o si NO es
+    // auto-assign; ocultarlo solo en auto-assign sin barbero pedido.
+    const staffPart    = (context.requestedStaffId || !context.autoAssign) ? ` con ${offered.staffName}` : '';
 
     // CRÍTICO (anti Bug-B): aunque la hora pedida exista exacta, NO
     // auto-confirmar. Presentar y esperar el "sí" explícito del cliente.
@@ -436,7 +482,7 @@ async function handleOfferNearest(
   // Sin disponibilidad real recuperable → ofrecer el más cercano de los ya
   // mostrados (comportamiento previo, conserva el slot en pendingSlots).
   const nearestTime = formatTimeHumanFromDate(new Date(fallbackSlot.startsAt), tz);
-  const staffPart   = context.autoAssign ? '' : ` con ${fallbackSlot.staffName}`;
+  const staffPart   = (context.requestedStaffId || !context.autoAssign) ? ` con ${fallbackSlot.staffName}` : '';
   return {
     newState:   'CONFIRMING_APPOINTMENT',
     newContext: { ...context, nearestOfferSlot: fallbackSlot.startsAt, clarification_attempts: 0, rejection_attempts: 0 },
@@ -614,6 +660,81 @@ export function routeSlotSelection(
   if (choice !== null) return { action: 'index', choice };
 
   return { action: 'none' };
+}
+
+// ─── Detector de selección de barbero en CONFIRMING (S5-BOT-10, BUG 1) ────────
+// Puro y testeable (sin DB/red/LLM). El cliente puede nombrar un barbero DURANTE
+// la confirmación ("Con Carlos", "Carlos porfa"). routeSlotSelection no tiene una
+// rama para esto → cae a clarify y el staffId se pierde. Este detector reconoce
+// la INTENCIÓN de barbero para anotar requestedStaffId y re-presentar slots.
+//
+// DECISIÓN B (frontera anti-homonimia):
+//   Regla 1 ("con <nombre>"): preposición EXPLÍCITA → se resuelve contra el
+//     roster completo (el cliente puede pedir un barbero aún no presentado).
+//   Regla 2 (nombre pelado "Carlos"): SOLO si el bot acaba de presentar slots
+//     POR barbero (presentBy='staff'), y solo contra los barberos OFRECIDOS.
+//     Así "Mayo"/"Junio"/"Ángel" no se malinterpretan como barbero fuera de ese
+//     contexto.
+
+type RosterEntry = { id: string; name: string };
+
+function resolveRosterName(token: string, roster: RosterEntry[]): RosterEntry | null {
+  const t = normalize(token).replace(/[¿?¡!.,;:]/g, '').trim();
+  if (t.length < 3) return null;
+  // Exacto
+  const exact = roster.find((r) => normalize(r.name) === t);
+  if (exact) return exact;
+  // Contención en ambos sentidos ("carlos porfa" ⊇ "carlos"; "carl" ⊆ "carlos")
+  const contained = roster.find((r) => {
+    const n = normalize(r.name);
+    return t.includes(n) || n.includes(t);
+  });
+  if (contained) return contained;
+  // Primera palabra del nombre del barbero como palabra dentro del token
+  const firstName = roster.find((r) => {
+    const first = normalize(r.name.split(' ')[0] ?? '');
+    return first.length > 2 && new RegExp(`\\b${first}\\b`).test(t);
+  });
+  return firstName ?? null;
+}
+
+export function detectBarberSelection(
+  body:         string,
+  roster:       RosterEntry[],
+  offeredSlots: LifestylePendingSlot[],
+  presentBy?:   'time' | 'staff',
+): { staffId: string; staffName: string } | null {
+  const n = normalize(body);
+
+  // Regla 1: "con <nombre>" contra el roster completo.
+  const conMatch = /\bcon\s+(.+)$/.exec(n);
+  if (conMatch) {
+    const r = resolveRosterName(conMatch[1]!, roster);
+    if (r) return { staffId: r.id, staffName: r.name };
+  }
+
+  // Regla 2: nombre pelado SOLO con presentBy='staff', contra los ofrecidos.
+  if (presentBy === 'staff') {
+    const offeredRoster: RosterEntry[] = offeredSlots.map((s) => ({ id: s.staffId, name: s.staffName }));
+    const r = resolveRosterName(body, offeredRoster);
+    if (r) return { staffId: r.id, staffName: r.name };
+  }
+
+  return null;
+}
+
+// ─── Detector de meta-frustración (S5-BOT-10, DECISIÓN C) ─────────────────────
+// El cliente señala que ya respondió ("ya te dije", "eso pregunté"). En vez de
+// repetir la pregunta genérica de clarificación, re-presentamos los horarios
+// concretos pendientes. Anclado por espacios (no substring crudo).
+const META_KEYWORDS = [
+  'ya te dije', 'ya lo dije', 'ya respondi', 'eso pregunte', 'eso te pregunte',
+  'eso dije', 'desde el inicio', 'desde el principio', 'ya te respondi',
+];
+
+function detectMetaFrustration(body: string): boolean {
+  const n = ` ${cleanMessage(body)} `;
+  return META_KEYWORDS.some((k) => n.includes(` ${k} `));
 }
 
 // ─── Detector de corrección en el cierre (S5-BOT-08) ──────────────────────────
@@ -837,11 +958,23 @@ function parseFuzzy(
 async function buildConfirmationResult(
   context:      LifestyleBotContext,
   chosen:       LifestylePendingSlot,
-  businessId:   string,
-  tz:           string,
+  business:     StateHandlerDeps['business'],
   supabase:     StateHandlerDeps['supabase'],
   customerName: string | null,
 ): Promise<StateHandlerResult> {
+  const businessId = business.id;
+  const tz         = business.timezone;
+
+  // ── Cierre defensivo (S5-BOT-10, DECISIÓN A) ──────────────────────────────
+  // Si el cliente pidió un barbero concreto (requestedStaffId) y el slot que se
+  // va a cerrar es de OTRO barbero, NUNCA agendar en silencio: el matcher por
+  // hora pudo haber elegido el slot de otro. Se ofrece mantener al barbero
+  // pedido en otro horario si hay disponibilidad real; si no, se ofrece al
+  // barbero del slot de forma EXPLÍCITA y se espera el "sí".
+  if (context.requestedStaffId && chosen.staffId !== context.requestedStaffId) {
+    return buildBarberMismatchResult(context, chosen, business, supabase);
+  }
+
   const catalog = await getCatalog(businessId, supabase);
   const service = catalog.find((s) => s.id === context.serviceId);
   const svcName = service?.name ?? 'el servicio';
@@ -876,6 +1009,93 @@ async function buildConfirmationResult(
     newState:     'AWAITING_BOOKING_NAME',
     newContext,
     responseText: `Perfecto, aqui los detalles:\n\n${summary}\n\n${nameQuestion}`,
+  };
+}
+
+// ─── Cierre defensivo: barbero pedido ≠ barbero del slot (S5-BOT-10) ───────────
+// Se invoca SOLO desde buildConfirmationResult cuando requestedStaffId ≠ chosen.
+// Refinamiento 3: si el barbero pedido TIENE disponibilidad real ese día, se le
+// ofrece mantenerlo en otro horario; solo si no hay, se ofrece al barbero del
+// slot de forma explícita (nearestOfferSlot) y se espera la aceptación.
+async function buildBarberMismatchResult(
+  context:  LifestyleBotContext,
+  chosen:   LifestylePendingSlot,
+  business: StateHandlerDeps['business'],
+  supabase: StateHandlerDeps['supabase'],
+): Promise<StateHandlerResult> {
+  const tz         = business.timezone;
+  const roster     = context.serviceId
+    ? await getStaffForService(business.id, context.serviceId, supabase)
+    : [];
+  const requested  = roster.find((r) => r.id === context.requestedStaffId);
+  const reqName    = requested?.name ?? 'ese barbero';
+  const chosenTime = formatTimeHumanFromDate(new Date(chosen.startsAt), tz);
+
+  // Intentar mantener al barbero pedido en otro horario del mismo día.
+  let requestedSlots: SlotCandidate[] = [];
+  if (context.serviceId && context.requestedDate && requested) {
+    try {
+      const catalog = await getCatalog(business.id, supabase);
+      const service = catalog.find((s) => s.id === context.serviceId);
+      if (service) {
+        requestedSlots = await getAvailableSlots({
+          businessId:          business.id,
+          serviceId:           service.id,
+          durationMinutes:     service.duration_minutes,
+          requestedDate:       noonUTCDate(context.requestedDate),
+          shift:               null,
+          preferredStaffId:    requested.id,
+          isWalkIn:            false,
+          walkInBufferMinutes: business.walkInBufferMinutes,
+          staffToQuery:        [requested],
+          supabase,
+          tz,
+        });
+      }
+    } catch (err) {
+      if (!(err instanceof SchedulingQueryError)) throw err;
+      // Error de query → caer a la oferta del barbero del slot.
+    }
+  }
+
+  if (requestedSlots.length > 0) {
+    const newPending: LifestylePendingSlot[] = requestedSlots.slice(0, 3).map((s, i) => ({
+      index:     i + 1,
+      staffId:   s.staffId,
+      staffName: s.staffName,
+      startsAt:  s.startsAt.toISOString(),
+      endsAt:    s.endsAt.toISOString(),
+    }));
+    const times = newPending.map((s) => formatTimeHumanFromDate(new Date(s.startsAt), tz));
+    const offer = times.length === 1
+      ? `a las ${times[0]}`
+      : `a las ${times.slice(0, -1).join(', a las ')} o a las ${times[times.length - 1]}`;
+    return {
+      newState:   'CONFIRMING_APPOINTMENT',
+      newContext: {
+        ...context,
+        pendingSlots:           newPending,
+        presentBy:              'staff',
+        nearestOfferSlot:       null,
+        clarification_attempts: 0,
+        rejection_attempts:     0,
+      },
+      responseText: `Con ${reqName} no tengo a esa hora, pero si lo tengo ${offer}. Te acomoda alguna?`,
+    };
+  }
+
+  // Sin disponibilidad del barbero pedido → ofrecer al del slot, esperando "sí".
+  return {
+    newState:   'CONFIRMING_APPOINTMENT',
+    newContext: {
+      ...context,
+      nearestOfferSlot:       chosen.startsAt,
+      clarification_attempts: 0,
+      rejection_attempts:     0,
+    },
+    responseText:
+      `No tengo a ${reqName} disponible ese dia. ${chosen.staffName} si esta a las ${chosenTime}. ` +
+      `Te la agendo con ${chosen.staffName}?`,
   };
 }
 

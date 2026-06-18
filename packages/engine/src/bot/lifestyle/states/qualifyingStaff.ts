@@ -62,6 +62,7 @@ export async function handleQualifyingStaff(
         ...context,
         serviceId:                    undefined,
         staffId:                      undefined,
+        requestedStaffId:             undefined,
         ambiguous_service_candidates: undefined,
         clarification_attempts:       0,
       },
@@ -279,10 +280,13 @@ export async function handleQualifyingStaff(
 // ─── Builders de resultado ────────────────────────────────────────────────────
 
 function buildAutoAssignResult(context: LifestyleBotContext): StateHandlerResult {
+  // "Cualquiera" borra la intención de barbero: requestedStaffId no sobrevive
+  // a un auto-assign explícito (S5-BOT-10).
   const newContext: LifestyleBotContext = {
     ...context,
     autoAssign:             true,
     staffId:                undefined,
+    requestedStaffId:       undefined,
     clarification_attempts: 0,
     last_side_question:     null,
   };
@@ -304,6 +308,7 @@ function buildStaffSelectedResult(
   const newContext: LifestyleBotContext = {
     ...context,
     staffId:                staff.id,
+    requestedStaffId:       staff.id,
     autoAssign:             false,
     clarification_attempts: 0,
     last_side_question:     null,

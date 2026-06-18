@@ -20,7 +20,7 @@ import { getCatalog, getStaffForService } from '../catalog';
 import { logBot } from '../../../utils/logger';
 import { FORMATTING_RULES } from '../prompt';
 import { getAvailableSlots, findSlotsInNextDays, SchedulingQueryError } from '../scheduling';
-import { formatTimeHumanFromDate, formatTimeHuman, buildBookingNameQuestion, detectsServiceCorrection } from '../utils';
+import { formatTimeHumanFromDate, formatTimeHuman, buildBookingNameQuestion, detectsServiceCorrection, clearBookingSelection } from '../utils';
 import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '../tzUtils';
 import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -67,17 +67,7 @@ export async function handleShowingSlots(
   if (detectsServiceCorrection(msg.body.trim().toLowerCase())) {
     return {
       newState: 'QUALIFYING_SERVICE',
-      newContext: {
-        ...context,
-        serviceId:                    undefined,
-        staffId:                      undefined,
-        requestedDate:                undefined,
-        requestedTime:                undefined,
-        requestedShift:               undefined,
-        pendingSlots:                 undefined,
-        ambiguous_service_candidates: undefined,
-        clarification_attempts:       0,
-      },
+      newContext: { ...context, ...clearBookingSelection() },
       responseText: 'Sin problema. Cual servicio te interesa?',
     };
   }
