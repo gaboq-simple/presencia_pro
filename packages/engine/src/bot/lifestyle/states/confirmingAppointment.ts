@@ -664,17 +664,16 @@ export function detectsSummaryCorrection(
   if (hasDateChange) return { kind: 'date' };
   if (hasConcrete && DATE_CORRECTION_MARKER_RE.test(lower)) return { kind: 'date' };
 
-  // 4. Barbero: SOLO "con <barbero>" / "mejor con <barbero>" con <barbero> ∈
-  //    pendingSlots. El nombre pelado ("Carlos") NUNCA dispara — es el cliente
-  //    llamándose Carlos. DIFERIDO a A2: solo se detecta, no se conmuta.
+  // 4. Barbero (S5-BOT-08b, contención): "con <token>" — "con" como PALABRA
+  //    COMPLETA seguida de al menos un token. Cubre tanto "con <barbero ofrecido>"
+  //    como "con <barbero NO ofrecido>" ("Con Carlos" en una cita de Andrés) y
+  //    "con el otro" → se DETECTA como intento de cambio de barbero para NO
+  //    mis-guardarlo como nombre corrupto ("Con"). La conmutación real es A2.
+  //    Frontera dura: "con" SOLO como palabra completa seguida de espacio+token,
+  //    NUNCA como prefijo → "Concepción"/"Conrado"/"Constanza" siguen siendo
+  //    nombres válidos (no llevan "con" + espacio); "Carlos" pelado tampoco dispara.
   const norm = normalize(body);
-  if (/\bcon\b/.test(norm)) {
-    const hit = slots.some((s) => {
-      const first = normalize(s.staffName).split(/\s+/)[0] ?? '';
-      return first.length > 2 && new RegExp(`\\bcon\\s+(?:el\\s+|la\\s+)?${first}\\b`).test(norm);
-    });
-    if (hit) return { kind: 'barber' };
-  }
+  if (/\bcon\s+\S+/.test(norm)) return { kind: 'barber' };
 
   return { kind: 'none' };
 }

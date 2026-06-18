@@ -1048,7 +1048,7 @@ COMMIT;
 
 ---
 
-#### S5-BOT-08b — Fix corrupción `"con Carlos"` en el cierre (barbero NO ofrecido) ⚪ todo
+#### S5-BOT-08b — Fix corrupción `"con Carlos"` en el cierre (barbero NO ofrecido) 🟢 done (2026-06-17, rama `fix/s5-bot-08b-con-token`, SIN merge)
 **Prioridad:** media-baja.
 **Origen:** bug residual hallado en el smoke de S5-BOT-08 (2026-06-17). Cuando la cita es con Andrés y el cliente dice `"Con Carlos"` en el cierre (`AWAITING_BOOKING_NAME`), el detector de corrección de barbero NO dispara porque compara `<barbero>` contra `pendingSlots[].staffName` (los **ofrecidos en esta conversación**), y Carlos no está entre ellos → cae a `looksLikeName`, `cleanBookingName` pela "Carlos" y guarda el nombre corrupto `"Con"`.
 
@@ -1059,8 +1059,11 @@ COMMIT;
 - `"con X"` donde X es barbero **NUNCA** se guarda como nombre.
 
 **Criterios de aceptación:**
-- [ ] `"Con Carlos"` en el cierre (cita con Andrés) → NO se guarda `"Con"` como nombre; se reconoce como intento de cambio de barbero y se responde sin agendar basura.
-- [ ] No-regresión: nombres legítimos ("Carlos", "Abril", "Juan Pablo García") siguen capturándose; los casos ya verdes de S5-BOT-08 (hora/día/cancelar/`"con <barbero ofrecido>"`) intactos.
+- [x] `"Con Carlos"` en el cierre (cita con Andrés) → NO se guarda `"Con"` como nombre; se reconoce como intento de cambio de barbero y se responde sin agendar basura.
+- [x] No-regresión: nombres legítimos ("Carlos", "Abril", "Juan Pablo García") siguen capturándose; los casos ya verdes de S5-BOT-08 (hora/día/cancelar/`"con <barbero ofrecido>"`) intactos.
+
+**Notas de ejecución (2026-06-17):** opción (c) — contención mínima, sin conmutación real (diferida a A2). Rama `fix/s5-bot-08b-con-token` desde `origin/main`, SIN merge. Cambio único en `detectsSummaryCorrection` (`confirmingAppointment.ts`): la rama `'barber'` pasó del match contra `pendingSlots[].staffName` a un patrón genérico `/\bcon\s+\S+/` — "con" como PALABRA COMPLETA seguida de ≥1 token. Cubre barbero ofrecido **y** NO ofrecido (`"Con Carlos"` en cita de Andrés) y genéricos (`"con el otro"`). El handler `handleSummaryCorrection(kind='barber')` ya respondía reconociendo el intento sin guardar nada (intacto). Frontera dura verificada con tests: `"Concepción"`/`"Conrado"`/`"Constanza"` → `none` (nombres; "con" como prefijo NO dispara porque exige `\s` después); `"Carlos"` pelado → `none`. Tests: +10 (`bookingNameCorrection.test.ts`). `npm test` **273/273 verdes**; `tsc --noEmit` apps/lifestyle limpio (EXIT 0). Pendiente: smoke por WhatsApp (Gabriel).
+**Prompt:** Ad-hoc inline de Gabriel (2026-06-17 — opción c, contención del mis-guardado).
 
 ---
 
