@@ -79,6 +79,17 @@ export const LifestyleBotContextSchema = z.object({
   staffId: z.string().uuid().optional(),
 
   /**
+   * Verdad-de-terreno de la INTENCIÓN de barbero del cliente (S5-BOT-10).
+   * Distinto de staffId (sobrecargado: pick + objetivo de query, lo borra el
+   * fallback de auto-assign). requestedStaffId vive y muere con serviceId/staffId:
+   * se setea cuando el cliente elige barbero explícitamente y se limpia SOLO vía
+   * clearBookingSelection() (corrección de servicio / reset / auto-assign).
+   * Usado por buildConfirmationResult como guarda del cierre defensivo: nunca
+   * cerrar con un barbero distinto al solicitado sin aceptación explícita.
+   */
+  requestedStaffId: z.string().uuid().optional(),
+
+  /**
    * true si el cliente no especificó barbero ("cualquiera" / "no importa").
    * El estado SHOWING_SLOTS usa round-robin ponderado cuando autoAssign=true.
    */

@@ -1,5 +1,37 @@
 // ─── Lifestyle Bot — Shared Utilities ─────────────────────────────────────────
 
+import type { LifestyleBotContext } from '../../types/lifestyle.types';
+
+// ─── Reinicio de la selección de reserva (S5-BOT-10) ──────────────────────────
+
+/**
+ * Subconjunto del contexto que borra la SELECCIÓN de reserva del cliente
+ * (servicio + barbero + fecha/turno + slots) y resetea los contadores.
+ *
+ * Punto único de verdad del ciclo de vida de `requestedStaffId`: la intención
+ * de barbero vive y muere junto con serviceId/staffId. En vez de 5 resets
+ * dispersos, los handlers que reinician el flujo (corrección de servicio en
+ * SHOWING_SLOTS / CONFIRMING_APPOINTMENT) hacen spread de este helper. El reset
+ * por inactividad/estado terminal (handler.ts → context={}) ya lo cubre por
+ * borrado total. Invariante: requestedStaffId NUNCA sobrevive una corrección
+ * de servicio ni un /reset.
+ */
+export function clearBookingSelection(): Partial<LifestyleBotContext> {
+  return {
+    serviceId:                    undefined,
+    staffId:                      undefined,
+    requestedStaffId:             undefined,
+    requestedDate:                undefined,
+    requestedTime:                undefined,
+    requestedShift:               undefined,
+    pendingSlots:                 undefined,
+    nearestOfferSlot:             null,
+    ambiguous_service_candidates: undefined,
+    clarification_attempts:       0,
+    rejection_attempts:           0,
+  };
+}
+
 // ─── Detección de corrección de servicio ──────────────────────────────────────
 
 const SERVICE_CORRECTION_KEYWORDS = [

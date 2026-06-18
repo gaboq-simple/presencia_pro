@@ -1121,6 +1121,67 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
+#### S5-BOT-10 — Barbero perdido + cierre que auto-agenda un barbero no aceptado (BUG 1 + BUG 2) 🔵 in-progress (impl. 2026-06-18, PR abierto)
+**Origen:** smoke de S5-BOT-09 (2026-06-18). Dos defectos de la misma costura en `CONFIRMING_APPOINTMENT`, se arreglan en **una sola rama** (componen entre sí). Diagnóstico read-only confirmado contra código.
+
+**BUG 1 — barbero perdido:** `routeSlotSelection` (`confirmingAppointment.ts:537-617`) no tiene eje de barbero en prosa. "Con Carlos" → cae a `matchNaturalSlot` → `none` → clarify de hora. El `staffId` queda sin setear.
+
+**BUG 2 — cierre auto-agendado no aceptado:** con `autoAssign`, `handleOfferNearest` (`:344-447`) re-consulta todos los barberos y toma `newPending[0]`; `buildConfirmationResult` (`:837-880`) cierra leyendo `chosen.staffName` **sin invariante** que valide que ese barbero fue pedido/aceptado. Único choke point de TODAS las confirmaciones.
+
+**DECISIÓN A — cierre defensivo (crítico). Confirmado: SÍ.**
+- Campo nuevo `requestedStaffId` en `LifestyleBotContext` (separado de `staffId`, que está sobrecargado y se borra en `presentingSlots.ts:167`). Es el ground-truth de "¿el cliente pidió a alguien?".
+- Guard en `buildConfirmationResult` (choke point universal, NO en `handleOfferNearest`): si `requestedStaffId` set y `chosen.staffId !== requestedStaffId` → NO cerrar; explicitar sustitución y preguntar. Si coincide → cerrar normal. Si `requestedStaffId` undefined (auto-assign legítimo) → **cerrar callado**.
+- `buildConfirmationResult` ya es async + supabase: resuelve nombres con `getStaffForService`.
+
+**DECISIÓN B — reconocimiento de barbero (frontera fina). Firmada: actuar solo post-`none`, sin desplazar la clasificación existente.**
+- Detector **puro** `detectBarberSelection(body, roster)` **invocado desde el handler** (donde hay roster real vía `getStaffForService`), NO como param de `routeSlotSelection` (no contaminar su superficie pura de tests).
+- **Regla 1 (fuerte, cualquier estado):** `\bcon\s+` + token que resuelve contra el roster real (reusa `resolveStaff`). "con calma/gusto/permiso" → no resuelven → no dispara. "concuerdo"/"Conrado" → sin `con`+espacio → no dispara.
+- **Regla 2 (token pelado) — ACOTADA (afinación de Gabriel, anti-homonimia):** dispara SOLO si `context.presentBy === 'staff'` **Y** el token matchea un `staffName` presente en los `pendingSlots` actuales (las opciones recién ofrecidas). Default conservador: en presentación time-axis/autoAssign (nombres ocultos), un nombre pelado tipo "mayo"/"ángel" NO dispara. Trade-off explícito: "Carlos porfa" en autoAssign cae a clarify; "con Carlos" sigue funcionando.
+- **Anotar siempre** `requestedStaffId` ante un `con <staff>` validado, **aunque haya hora** ("a las 5 con Carlos") → la hora gana en el router pero el cierre defensivo (A) atrapa el mismatch. **Actuar** (re-rutear a `SHOWING_SLOTS` con `staffId=barbero, autoAssign=false`) solo cuando el router dio `none`/clarify (sin hora competidora).
+
+**DECISIÓN C — meta/frustración ("4 eso pregunté desde el inicio"). Firmada: sin clasificador de emociones.**
+- Reformular el clarify de input-no-reconocido (`:325-336`): si hay `pendingSlots`, re-presentar las **horas concretas** en vez del genérico "dime a qué hora".
+- Guard de marcador meta (keywords deterministas: `ya te dije`, `eso pregunte`, `desde el inicio`, `ya respondi`, `ya lo dije`) → salto a re-presentación concreta + acercar handoff. Sin modelo de emoción.
+
+**Afinación 1 — ciclo de vida de `requestedStaffId` como invariante explícito (riesgo principal a 12 meses):**
+- Regla única: `requestedStaffId` **vive y muere con `serviceId`** (es parte de la selección de la reserva).
+- **Centralizar** el wipe en un helper `clearBookingSelection(context)` que defina UNA vez el set de campos borrados (`serviceId, staffId, requestedStaffId, requestedDate, requestedTime, requestedShift, pendingSlots, nearestOfferSlot, clarification_attempts, rejection_attempts`), usado por los tres bloques de corrección-de-servicio (`confirmingAppointment:151`, `showingSlots:67`, `qualifyingStaff:58`) y el reset/GREETING. Así el campo no puede olvidarse en ningún reset.
+- Las dos transiciones staff-específicas (no-preferencia explícita; aceptación de sustitución) manejan `requestedStaffId` local y explícitamente.
+- **Test no-negociable:** `requestedStaffId` NO sobrevive a un `/reset` ni a una corrección de servicio.
+
+**Afinación 3 — copy del cierre defensivo ofrece mantener al barbero pedido (mejora de experiencia, no bloqueante):**
+- Si el re-query de B ya trajo slots del barbero pedido (Carlos tiene otros huecos ese día) → presentarlos directo (caso ideal: el cliente conserva a Carlos, sin sustitución).
+- Si el guard sí dispara y hay disponibilidad real de Carlos a la mano → copy rico:
+  *"No tengo a Carlos a esa hora. Te puedo dar a Andrés a las 5:15, o a Carlos a las 6:30. ¿Qué prefieres?"*
+- Si Carlos no tiene huecos ese día → copy actual (ya cumple el invariante):
+  *"No tengo a Carlos disponible ese día. Andrés sí está a las 5:15. ¿Te la agendo con él?"*
+- NO agregar query extra incondicional en `buildConfirmationResult`; el copy rico es condicional a que la disponibilidad de Carlos ya esté a la mano (o, si se implementa query scoped, gateado solo a la rama de sustitución).
+- Aceptación de sustitución ("sí") → set `requestedStaffId = offered.staffId` antes de cerrar (el guard pasa).
+
+**Criterios de aceptación:**
+- [ ] "Con Carlos" en autoAssign re-consulta y ofrece slots de Carlos (BUG 1).
+- [ ] Falsos positivos ("con calma", "con gusto", "concuerdo") NO se tratan como barbero.
+- [ ] Regla 2 (nombre pelado) dispara solo en `presentBy='staff'` contra opciones ofrecidas.
+- [ ] El cierre nunca agenda un barbero distinto al pedido sin preguntar (BUG 2); auto-assign legítimo cierra callado.
+- [ ] `requestedStaffId` no sobrevive a `/reset` ni a corrección de servicio (test).
+- [ ] Clarify no re-pregunta la hora ya dada; marcador meta acerca el handoff.
+- [ ] No-regresión: `QUALIFYING_STAFF` (resolveStaff), dígito pelado/ordinales/corrección hora-día (S5-BOT-01..08), aceptación nearestOffer/digit-disambig. `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
+
+**Archivos:** `lifestyle.types.ts` (campo `requestedStaffId`); `confirmingAppointment.ts` (detector puro, anotar/actuar barbero, guard del cierre, clarify+meta, helper `clearBookingSelection`); `qualifyingStaff.ts` (set `requestedStaffId` al elegir, limpiar en no-preferencia); `presentingSlots.ts` (preservar `requestedStaffId` en fallback `:167`); tests del detector + invariante de ciclo de vida.
+
+**Frontera dura:** NO tocar `matchNaturalSlot`/`extractRawTime`/`resolveTargetMinutes`/`parseChoice`/`routeSlotSelection` (su clasificación existente); la rama de barbero se inserta en el handler, post-`none`.
+
+**Implementación:** rama propia (separada de `fix/s5-bot-09-apertura-natural`, que mergea por su cuenta). Claude Code no mergea — PR para revisión de Gabriel.
+
+**Prompt:** Diseño cerrado por Gabriel (2026-06-18 — read-only, con tres afinaciones: ciclo de vida de requestedStaffId centralizado, regla 2 anti-homonimia, copy con salida a barbero pedido). Implementación pendiente de arranque.
+
+---
+
+#### S5-BOT-11 — Acuse Sonnet inventa slots en la apertura (BUG 3) ⚪ todo
+**Origen:** smoke de S5-BOT-09 (2026-06-18). Complemento directo de S5-BOT-09 (la pieza de acuse Sonnet enuncia/insinúa horarios que aún no se calcularon). Se mantiene como **tarea propia** (una-rama-un-problema) en vez de colarse en el PR de 09. Diseño read-only pendiente — diagnosticar antes de implementar.
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
