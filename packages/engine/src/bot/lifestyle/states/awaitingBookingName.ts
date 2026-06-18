@@ -303,10 +303,15 @@ async function handleSummaryCorrection(
   }
 
   if (kind === 'barber') {
+    // Copy honesto (S5-BOT-08b): la opción (c) NO conmuta de barbero (eso es A2),
+    // así que no prometemos un reagendamiento. Ofrecemos las dos salidas reales —
+    // confirmar con el barbero actual o reiniciar para elegir otro — con el nombre
+    // del barbero vigente interpolado desde pendingSlots.
+    const barberoActual = context.pendingSlots?.[0]?.staffName ?? 'el barbero asignado';
     return {
       newState:     'AWAITING_BOOKING_NAME',
       newContext:   { ...context, clarification_attempts: 0 },
-      responseText: 'Para cambiar de barbero lo reagendamos en un momento. Por ahora, a nombre de quien dejo la cita?',
+      responseText: `Por ahora no puedo cambiar de barbero en este paso. ¿Confirmo tu cita con ${barberoActual}, o prefieres empezar de nuevo para elegir a otro?`,
     };
   }
 
