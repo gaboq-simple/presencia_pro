@@ -1048,7 +1048,7 @@ COMMIT;
 
 ---
 
-#### S5-BOT-08b — Fix corrupción `"con Carlos"` en el cierre (barbero NO ofrecido) 🟢 done (2026-06-17, rama `fix/s5-bot-08b-con-token`, SIN merge)
+#### S5-BOT-08b — Fix corrupción `"con Carlos"` en el cierre (barbero NO ofrecido) 🟢 done (2026-06-17, mergeado a main vía PR #23 detección `"con <X>"` + PR #24 copy honesto)
 **Prioridad:** media-baja.
 **Origen:** bug residual hallado en el smoke de S5-BOT-08 (2026-06-17). Cuando la cita es con Andrés y el cliente dice `"Con Carlos"` en el cierre (`AWAITING_BOOKING_NAME`), el detector de corrección de barbero NO dispara porque compara `<barbero>` contra `pendingSlots[].staffName` (los **ofrecidos en esta conversación**), y Carlos no está entre ellos → cae a `looksLikeName`, `cleanBookingName` pela "Carlos" y guarda el nombre corrupto `"Con"`.
 
