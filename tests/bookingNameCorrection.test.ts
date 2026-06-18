@@ -174,6 +174,41 @@ test('detector: nombre legítimo "Juan Pablo García" → none', () => {
   assert.equal(detectsSummaryCorrection('Juan Pablo García', SLOTS, NOW, TZ).kind, 'none');
 });
 
+// ─── S5-BOT-08b: "con <token>" detecta barbero aunque NO esté en pendingSlots ──
+// SLOTS = Carlos; aquí el cliente nombra a un barbero NO ofrecido (Andrés) o usa
+// un genérico ("el otro"). "con" como PALABRA COMPLETA + token → barber. Frontera
+// dura: "con" como prefijo de un nombre NUNCA dispara (Concepción/Conrado/Constanza).
+
+test('detector S5-BOT-08b: "Con Carlos" (barbero NO ofrecido) → barber, NO corrompe nombre', () => {
+  // cita con Andrés (slots distintos), pero probamos contra SLOTS=Carlos: el
+  // patrón genérico "con <token>" dispara sin depender de pendingSlots.
+  assert.equal(detectsSummaryCorrection('Con Carlos', [pslot(1, '13:00')], NOW, TZ).kind, 'barber');
+});
+
+test('detector S5-BOT-08b: "Con Andrés" (no está en slots de Carlos) → barber', () => {
+  assert.equal(detectsSummaryCorrection('Con Andrés', SLOTS, NOW, TZ).kind, 'barber');
+});
+
+test('detector S5-BOT-08b: "con el otro" → barber', () => {
+  assert.equal(detectsSummaryCorrection('con el otro', SLOTS, NOW, TZ).kind, 'barber');
+});
+
+test('detector S5-BOT-08b FRONTERA: "Concepción" → none (nombre válido, "con" es prefijo)', () => {
+  assert.equal(detectsSummaryCorrection('Concepción', SLOTS, NOW, TZ).kind, 'none');
+});
+
+test('detector S5-BOT-08b FRONTERA: "Conrado" → none (nombre válido, "con" es prefijo)', () => {
+  assert.equal(detectsSummaryCorrection('Conrado', SLOTS, NOW, TZ).kind, 'none');
+});
+
+test('detector S5-BOT-08b FRONTERA: "Constanza" → none (nombre válido, "con" es prefijo)', () => {
+  assert.equal(detectsSummaryCorrection('Constanza', SLOTS, NOW, TZ).kind, 'none');
+});
+
+test('detector S5-BOT-08b FRONTERA: "Carlos" pelado → none (sin "con", no dispara)', () => {
+  assert.equal(detectsSummaryCorrection('Carlos', SLOTS, NOW, TZ).kind, 'none');
+});
+
 // ─── Cableado: nombres legítimos siguen capturándose (cero regresión) ─────────
 
 test('cliente llamado "Carlos" → se guarda como nombre (Caso B)', async () => {
@@ -192,6 +227,12 @@ test('nombre de 1-4 palabras "Juan Pablo García" → se guarda (Caso B)', async
   const r = await handle('Juan Pablo García', ctxDirect(), makeDeps());
   assert.equal(r.newState, 'CONFIRMED');
   assert.equal(r.newContext.bookingName, 'Juan Pablo García');
+});
+
+test('S5-BOT-08b: cliente "Concepción" → se guarda como nombre (NO confundido con "con X")', async () => {
+  const r = await handle('Concepción', ctxDirect(), makeDeps());
+  assert.equal(r.newState, 'CONFIRMED');
+  assert.equal(r.newContext.bookingName, 'Concepción');
 });
 
 // ─── Cableado: correcciones ───────────────────────────────────────────────────
