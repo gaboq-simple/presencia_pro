@@ -1067,6 +1067,43 @@ COMMIT;
 
 ---
 
+#### S5-BOT-09 — Preámbulo robótico en la apertura del flujo de agendamiento (saludo-en-medio + eco doble) ⚪ todo
+**Origen:** smoke por WhatsApp (2026-06-18). El mensaje de apertura del flujo de agendamiento suena a piezas pre-armadas concatenadas: trae un saludo incrustado a mitad y repite la intención dos o tres veces. Ejemplo confirmado: *"Perfecto, corte con Andrés. Déjame checar… **Hola, qué gusto verte de nuevo. Vi que quieres un corte con Andrés**…"*. Diagnóstico de diseño read-only (2026-06-18).
+
+**Síntomas (dos, distintos):**
+1. **Saludo-en-medio:** un saludo completo ("Hola, qué gusto verte de nuevo…") aparece **en medio** del mensaje, después del acuse y del "déjame checar", en vez de al inicio (o de no aparecer si ya hubo saludo).
+2. **Eco doble:** la intención del cliente ("corte con Andrés [el martes]") se re-menciona **dos o tres veces** en el mismo mensaje.
+
+**Causa raíz — dos generativas concatenadas:** el mensaje de apertura **no** es una sola pieza, son **dos llamadas LLM pegadas**:
+- **Pieza 1 (acuse, Sonnet):** confirma el eje elegido + frase puente ("Perfecto, corte con Andrés. Déjame checar…").
+- **Pieza 2 (slots, Haiku):** `generateSlotsMessage` (o equivalente) genera la presentación de horarios.
+- **El saludo cae en medio porque la Pieza 2 (Haiku) saluda desde cero:** comparte el **mismo system prompt** que incluye la **persona de saludo**, y **no recibe el historial** de la conversación → cree que está abriendo la charla y vuelve a saludar + vuelve a hacer eco de la intención. Como se concatena **después** del acuse de la Pieza 1, el saludo queda físicamente a mitad del mensaje.
+- **El eco se duplica** porque **cada pieza re-menciona la intención** por su cuenta: la Pieza 1 la acusa ("corte con Andrés") y la Pieza 2 la vuelve a enunciar al no saber que ya se dijo ("Vi que quieres un corte con Andrés…").
+
+**Alcance sistémico (no es solo la apertura):**
+- **Leak de saludo:** el saludo se filtra en **TODAS las rutas que entran a `SHOWING_SLOTS`** (no solo desde GREETING), porque la Pieza 2 saluda siempre que se la invoca sin historial.
+- **Doble-acuse:** la concatenación acuse+slots produce eco redundante al menos en **GREETING→SLOTS** y **QUALIFYING_STAFF→SLOTS** (y en cualquier transición que encadene un acuse de Sonnet con la presentación de slots de Haiku).
+
+**Rediseño propuesto:**
+- **`generateSlotsMessage` = presentador puro:** que produzca **solo** la tabla/lista de horarios — **sin saludo, sin eco de intención**. Es un componente de presentación, no un turno conversacional nuevo.
+- **Acuse y saludo, una sola vez, en la Pieza 1:** el saludo (cuando corresponda: primer contacto vs recurrente) y el acuse de intención viven **exclusivamente** en la pieza de apertura. La presentación de slots se encadena debajo sin volver a saludar ni re-enunciar.
+- **Eliminar "déjame checar" al encadenar:** el puente "déjame checar…" deja de tener sentido si la presentación de slots viene pegada en el mismo mensaje; quitarlo evita el efecto "pieza intermedia".
+- **Preferir prompt acotado sobre instrucción negativa:** en vez de instruir a Haiku "NO saludes / NO repitas la intención" (frágil), darle un **prompt acotado** cuyo rol sea estrictamente presentar horarios (sin la persona de saludo, sin pedirle que abra conversación). Acotar el rol es más robusto que prohibir conductas.
+
+**Distinción primer contacto vs recurrente:** el saludo ("qué gusto verte de nuevo" / saludo de primer contacto) se decide **una vez** en la Pieza 1 según si es cliente nuevo o conocido; nunca lo decide la pieza de slots.
+
+**Criterios de aceptación:**
+- [ ] El mensaje de apertura es **un solo hilo**: saludo (si corresponde) → acuse de intención (una vez) → presentación de horarios. Sin saludo en medio, sin eco redundante.
+- [ ] La intención se menciona **una sola vez** en todo el mensaje.
+- [ ] El saludo aparece **a lo sumo una vez** y **solo al inicio**; no se filtra desde la pieza de slots en ninguna ruta a `SHOWING_SLOTS`.
+- [ ] No-regresión: distinción primer contacto vs recurrente preservada; un máximo de una pregunta por mensaje; `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
+
+**Frontera:** este diseño afecta cómo se **ensambla** el mensaje (rol de cada pieza generativa), no la lógica de cálculo de slots. Verificar que el mismo patrón de concatenación (acuse Sonnet + generativa Haiku sin historial) no reintroduzca saludo-en-medio/eco en otros estados (confirmación, reconsulta).
+
+**Prompt:** Diseño registrado por Gabriel (2026-06-18 — preámbulo robótico de la apertura). Implementación pendiente de su confirmación.
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero
