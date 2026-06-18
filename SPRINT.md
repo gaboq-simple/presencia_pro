@@ -1067,7 +1067,7 @@ COMMIT;
 
 ---
 
-#### S5-BOT-09 — Preámbulo robótico en la apertura del flujo de agendamiento (saludo-en-medio + eco doble) ⚪ todo
+#### S5-BOT-09 — Preámbulo robótico en la apertura del flujo de agendamiento (saludo-en-medio + eco doble) 🟡 en progreso (2026-06-18)
 **Origen:** smoke por WhatsApp (2026-06-18). El mensaje de apertura del flujo de agendamiento suena a piezas pre-armadas concatenadas: trae un saludo incrustado a mitad y repite la intención dos o tres veces. Ejemplo confirmado: *"Perfecto, corte con Andrés. Déjame checar… **Hola, qué gusto verte de nuevo. Vi que quieres un corte con Andrés**…"*. Diagnóstico de diseño read-only (2026-06-18).
 
 **Síntomas (dos, distintos):**
@@ -1100,7 +1100,24 @@ COMMIT;
 
 **Frontera:** este diseño afecta cómo se **ensambla** el mensaje (rol de cada pieza generativa), no la lógica de cálculo de slots. Verificar que el mismo patrón de concatenación (acuse Sonnet + generativa Haiku sin historial) no reintroduzca saludo-en-medio/eco en otros estados (confirmación, reconsulta).
 
-**Prompt:** Diseño registrado por Gabriel (2026-06-18 — preámbulo robótico de la apertura). Implementación pendiente de su confirmación.
+**Diseño cerrado (2026-06-18) — confirmado contra el código read-only:**
+
+Causa raíz precisa: el "FIX 3 — anti re-saludo" (`greeting.ts:389`, inyecta historial a la Pieza 1) **nunca se aplicó a la Pieza 2** (`presentingSlots.ts:440` llama Haiku con un solo `user` turn, sin historial). Y el system compartido **le ordena saludar**: `prompt.ts:79` ("Cuando el usuario llegue por primera vez, salúdalo…"), `:90–94` (ejemplos de saludo, incl. "que gusto verte de nuevo"), `:110–118` (Flujo paso 1 = Saludo). Por eso una instrucción negativa ("no saludes") sería frágil: nadaría contra el resto del prompt. Se acota el rol en vez de prohibir conductas.
+
+Alcance de la implementación (5 puntos):
+1. **`generateSlotsMessage` arma un system prompt mínimo** (rol presentador + `FORMATTING_RULES`), **no** `buildSystemPrompt(business)` (`presentingSlots.ts:215`, `:335`). Rol: "Eres el componente que presenta horarios. No saludas, no te presentas, no repites lo que el cliente ya pidió. Recibes horas con su fecha y las presentas cálidamente, cerrando con una sola pregunta."
+2. **Extraer las reglas de formato a una constante `FORMATTING_RULES`** (única fuente de verdad) que importen tanto el prompt principal (`prompt.ts:71–86`, sin cambiar el texto resultante) como el system acotado.
+3. **Regla de factorización de fecha** en el rol presentador: si todos los slots caen el mismo día → mencionar el día una sola vez al frente y luego solo horas; si hay días distintos → agrupar por día; nunca repetir el mismo día por slot. El día ya llega al `userMessage` (vía `slotsText`, `presentingSlots.ts:386–396`/`:424`, y vía `originalDateLabel`/`altDateLabel` en alt-date) — no hay dependencia previa.
+4. **Quitar "déjame checar"** de la instrucción Sonnet (`greeting.ts:302`) y del fallback determinista (`greeting.ts:305`) del caso `full`, atado a la decisión de encadenado de cada ruta (hoy: greeting `full` siempre encadena slots → siempre fuera).
+5. **Conservar la mención del barbero** cuando `presentByStaff` (no romper S5-BOT-04).
+
+Frontera de implementación: NO tocar el `userMessage` (`presentingSlots.ts:412–431`), ni el cálculo de slots, ni los fallbacks deterministas (`buildSlotsMessage`/`buildAltDateFallback`, que ya son presentadores puros).
+
+Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (saludo legítimo una vez al inicio); #2a QUALIFYING_STAFF→SLOTS barbero nombrado + fecha pre-cargada (doble-acuse); #2c presentBy='staff' (nombres de barbero — S5-BOT-04); #3/#6 QUALIFYING_DATETIME→SLOTS y reentrada SHOWING_SLOTS (sin saludo); #4/#5 corrección de día (CONFIRMING/BOOKING_NAME→DATETIME→SLOTS) en sub-casos mismo-día (slots disponibles) y alt-date (día reconsultado sin dispo).
+
+**Implementación:** rama `fix/s5-bot-09-apertura-natural` (commits de código). Este registro de diseño va directo a main. PR queda abierto para revisión de Gabriel — Claude Code no mergea.
+
+**Prompt:** Diseño registrado por Gabriel (2026-06-18 — preámbulo robótico de la apertura). Implementación en curso.
 
 ---
 
