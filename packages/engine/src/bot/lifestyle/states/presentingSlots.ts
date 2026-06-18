@@ -18,13 +18,31 @@ import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
 import { getCatalog, getStaffForService } from '../catalog';
 import { logBot } from '../../../utils/logger';
-import { buildSystemPrompt } from '../prompt';
+import { FORMATTING_RULES } from '../prompt';
 import { getAvailableSlots, findSlotsInNextDays, SchedulingQueryError } from '../scheduling';
 import { formatTimeHumanFromDate, formatTimeHuman, buildBookingNameQuestion, detectsServiceCorrection } from '../utils';
 import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '../tzUtils';
 import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+
+// S5-BOT-09: system prompt ACOTADO para el presentador de slots.
+// La presentación de horarios es un componente de presentación, NO un turno
+// conversacional nuevo. Se le da SOLO el rol de presentador + las reglas de
+// formato compartidas (FORMATTING_RULES) — sin la persona de saludo del prompt
+// principal — para que no salude ni haga eco de la intención del cliente.
+// Acotar el rol es más robusto que prohibir conductas ("no saludes" es frágil
+// frente a un system que en otras partes ordena saludar).
+const SLOTS_PRESENTER_SYSTEM = `Eres el componente que presenta horarios disponibles de un negocio de citas.
+No saludas, no te presentas, no repites lo que el cliente ya pidió. Recibes una lista de horas con su fecha y las presentas de forma cálida y natural, cerrando con UNA sola pregunta para que el cliente elija.
+
+## Factorización de fecha
+- Si todos los horarios caen el mismo día, menciona el día UNA sola vez al frente y luego solo las horas.
+- Si hay horarios en días distintos, agrúpalos por día.
+- Nunca repitas el mismo día en cada horario.
+
+## REGLAS DE FORMATO
+${FORMATTING_RULES}`;
 
 // Mensaje al usuario cuando los queries de disponibilidad fallan
 const SCHEDULING_ERROR_MESSAGE =
@@ -212,7 +230,7 @@ export async function handleShowingSlots(
         staffName,
         autoAssign:        contextAfterSlots.autoAssign ?? false,
         anthropicKey,
-        system:            buildSystemPrompt(business),
+        system:            SLOTS_PRESENTER_SYSTEM,
         businessId:        business.id,
         customerPhone:     msg.customerPhone,
         tz:                business.timezone,
@@ -332,7 +350,7 @@ export async function handleShowingSlots(
     staffName,
     autoAssign:         context.autoAssign ?? false,
     anthropicKey,
-    system:             buildSystemPrompt(business),
+    system:             SLOTS_PRESENTER_SYSTEM,
     businessId:         business.id,
     customerPhone:      msg.customerPhone,
     tz:                 business.timezone,

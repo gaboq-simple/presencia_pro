@@ -298,11 +298,10 @@ export async function handleGreeting(
         nextState: 'SHOWING_SLOTS',
         sonnetInstruction:
           `El cliente quiere ${resolvedService!.name} con ${resolvedStaff!.name} para ${dateLabel}. `
-          + `Confirma servicio, barbero y dia en una sola linea. `
-          + `Termina diciendo que vas a revisar los horarios disponibles, algo como "dejame checar..." para indicar que ya estas buscando. `
+          + `Confirma servicio, barbero y dia en una sola linea. No anuncies que vas a revisar horarios — los horarios se presentan a continuacion en el mismo mensaje. `
           + `Maximo 2 lineas. Sin signos de interrogacion al inicio ni exclamaciones al inicio.`,
         deterministicFallback:
-          `${resolvedService!.name} con ${resolvedStaff!.name} para ${dateLabel}, anotado. Dejame checar los horarios disponibles...`,
+          `${resolvedService!.name} con ${resolvedStaff!.name} para ${dateLabel}, anotado.`,
       };
       break;
     }

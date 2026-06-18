@@ -15,6 +15,24 @@ import {
 } from './businessContext';
 
 /**
+ * Reglas de formato compartidas — única fuente de verdad.
+ *
+ * Las consume tanto el system prompt principal (buildSystemPrompt) como el
+ * system acotado del presentador de slots (generateSlotsMessage). Son reglas
+ * puramente de FORMATO, neutrales al contexto: no incluyen persona de saludo
+ * ni instrucciones conductuales (esas viven inline en el prompt principal, no
+ * en el presentador — ver S5-BOT-09).
+ */
+export const FORMATTING_RULES = `- NUNCA uses ¿ ni ¡ — solo signos de cierre (? y !)
+- FORMATO DE HORA: Siempre usa hora natural en espanol: "5 de la tarde", "10 de la manana", "1:30 de la tarde". NUNCA uses AM/PM ni formato 24 horas (no "17:00", no "5:00 PM").
+- Mensajes cortos — máximo 3 líneas por mensaje
+- Sin markdown ni asteriscos — esto se envía como texto plano por WhatsApp.
+- Respuestas de máximo 3-4 líneas para mensajes de saludo o confirmación.
+- Para listas de opciones usa números simples: "1. Opción A"
+- Nunca uses listas con guiones en los mensajes al cliente — solo números.
+- Un pensamiento por mensaje — no sobrecargues al cliente con información.`;
+
+/**
  * Construye el system prompt con la identidad y reglas del bot
  * basado en la configuración del negocio.
  *
@@ -69,21 +87,12 @@ ${businessContextBlock}
 - Si el cliente intenta negociar precios, responde: "Los precios son los que el sistema tiene registrados."
 
 ## REGLAS DE FORMATO
-- NUNCA uses ¿ ni ¡ — solo signos de cierre (? y !)
-- FORMATO DE HORA: Siempre usa hora natural en espanol: "5 de la tarde", "10 de la manana", "1:30 de la tarde". NUNCA uses AM/PM ni formato 24 horas (no "17:00", no "5:00 PM").
+${FORMATTING_RULES}
 - NUNCA repitas el mismo mensaje textual que mandaste antes
 - Cuando no entiendas algo, reformula la pregunta de forma distinta cada vez — nunca copies el mensaje anterior
 - Tono: informal, cálido, mexicano — como un asistente real por WhatsApp, no un formulario
-- Mensajes cortos — máximo 3 líneas por mensaje
 - Si el usuario ya mencionó información útil (servicio, día, barbero), úsala — no la preguntes de nuevo
 - Cuando el usuario llegue por primera vez, salúdalo con calidez y confirma que con gusto lo atiendes antes de hacer preguntas
-
-## Formato de respuesta
-- Sin markdown ni asteriscos — esto se envía como texto plano por WhatsApp.
-- Respuestas de máximo 3-4 líneas para mensajes de saludo o confirmación.
-- Para listas de opciones usa números simples: "1. Opción A"
-- Nunca uses listas con guiones en los mensajes al cliente — solo números.
-- Un pensamiento por mensaje — no sobrecargues al cliente con información.
 
 ## Tono y ejemplos de respuesta
 
