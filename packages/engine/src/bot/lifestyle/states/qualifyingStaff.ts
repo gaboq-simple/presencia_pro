@@ -33,6 +33,10 @@ import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandler
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
+// Intentos totales de clarificación antes de escalar a FALLBACK.
+// Exportado para el test de relación de caps (S5-BOT-12).
+export const MAX_TOTAL_ATTEMPTS = 5;
+
 // Keywords que indican "no tengo preferencia".
 // S5-BOT-04: se quitaron 'libre' y 'disponible' — eran falsos positivos por
 // match substring (":129"): "¿qué barbero está disponible?" se leía como "el
@@ -250,7 +254,6 @@ export async function handleQualifyingStaff(
   // ── REPEAT_OPTIONS ────────────────────────────────────────────────────────
   // Si se superó MAX_TOTAL_ATTEMPTS → escalar a FALLBACK con agente humano.
 
-  const MAX_TOTAL_ATTEMPTS = 5;
   if ((clarResult.updatedContext.clarification_attempts ?? 0) >= MAX_TOTAL_ATTEMPTS) {
     return {
       newState:     'FALLBACK',

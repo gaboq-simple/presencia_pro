@@ -137,8 +137,9 @@ const EXACT_TOL = 5;
 // nombrada para ajustarla con datos de smoke sin tocar la lógica.
 const NEAR_TOL = 60;
 
-// Número máximo de intentos de clarificación antes de ir a FALLBACK
-const MAX_CLARIFY_ATTEMPTS = 2;
+// Número máximo de intentos de clarificación antes de ir a FALLBACK.
+// Exportado para que el test de relación de caps (S5-BOT-12) lo importe real.
+export const MAX_CLARIFY_ATTEMPTS = 2;
 
 export async function handleConfirmingAppointment(
   msg:     LifestyleIncomingMessage,
@@ -207,6 +208,15 @@ export async function handleConfirmingAppointment(
       const accepted = { ...context, requestedStaffId: offered.staffId };
       return buildConfirmationResult(accepted, offered, business, supabase, msg.customerName);
     }
+  }
+
+  // ── P1: afirmación tras presentación con UN solo slot (S5-BOT-12) ──────────
+  // La presentación de slots NO setea nearestOfferSlot, así que un "Sí" tras una
+  // sola opción caía al clarify genérico. Si hay exactamente un slot pendiente,
+  // una afirmación lo acepta. Con múltiples slots NO se auto-selecciona: se
+  // re-presenta concreto más abajo (post-router) para que el cliente elija.
+  if (!context.nearestOfferSlot && pendingSlots.length === 1 && isAffirmation(msg.body)) {
+    return buildConfirmationResult(context, pendingSlots[0]!, business, supabase, msg.customerName);
   }
 
   // ── Ruteo determinista de la selección ────────────────────────────────────
@@ -346,6 +356,21 @@ export async function handleConfirmingAppointment(
       newState:   'CONFIRMING_APPOINTMENT',
       newContext: { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
       responseText: `Perdona la confusion. Tengo ${offer}. Cual prefieres?`,
+    };
+  }
+
+  // ── P1: afirmación ambigua con múltiples slots (S5-BOT-12) ────────────────
+  // "Sí" / "va" / "dale" sin señal de selección y con varias opciones: el cliente
+  // quiere agendar pero no dijo cuál. Re-presentar las horas concretas (sin
+  // auto-seleccionar) en vez del clarify genérico.
+  if (isAffirmation(msg.body) && pendingSlots.length > 1) {
+    const tz    = business.timezone;
+    const times = pendingSlots.map((s) => formatTimeHumanFromDate(new Date(s.startsAt), tz));
+    const offer = `a las ${times.slice(0, -1).join(', a las ')} o a las ${times[times.length - 1]}`;
+    return {
+      newState:   'CONFIRMING_APPOINTMENT',
+      newContext: { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
+      responseText: `Claro. Tengo ${offer}. ¿Cuál te late?`,
     };
   }
 

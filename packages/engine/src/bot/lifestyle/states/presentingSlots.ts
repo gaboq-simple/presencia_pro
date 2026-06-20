@@ -413,7 +413,7 @@ async function generateSlotsMessage(params: {
   const exactTimeNote = exactMatchMissed && requestedTimeLabel
     ? [
         `- IMPORTANTE: El cliente pidio una cita "a las ${requestedTimeLabel}" pero ese horario exacto NO esta disponible.`,
-        `  Comunica esto PRIMERO de forma directa, sin disculpas. Ejemplo para 2 alternativas: "A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano es a las [hora1] o a las [hora2]. Cual prefieres?" Ejemplo para 1 alternativa: "A las ${requestedTimeLabel} no tengo disponible, pero tengo a las [hora]. Te queda bien?"`,
+        `  Comunica esto PRIMERO de forma directa, sin disculpas. Ejemplo para 2 alternativas: "A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano es a las [hora1] o a las [hora2]. Cual prefieres?" Ejemplo para 1 alternativa: "A las ${requestedTimeLabel} no tengo disponible, pero tengo a las [hora]. ¿Te late?"`,
       ].join('\n')
     : null;
 
@@ -495,7 +495,7 @@ export function buildSlotsMessage(
   if (exactMatchMissed && requestedTimeLabel) {
     const altTimes = slots.map((s) => `las ${formatTimeHumanFromDate(s.startsAt, tz)}`);
     if (altTimes.length === 1) {
-      return `A las ${requestedTimeLabel} no tengo disponible, pero tengo a ${altTimes[0]}. Te queda bien?`;
+      return `A las ${requestedTimeLabel} no tengo disponible, pero tengo a ${altTimes[0]}. ¿Te late?`;
     }
     const timesStr = altTimes.slice(0, -1).join(', a ') + ` o a ${altTimes[altTimes.length - 1]}`;
     return `A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano es a ${timesStr}. Cual prefieres?`;
@@ -540,5 +540,5 @@ function buildAltDateFallback(
     ? `a ${times[0]}`
     : times.slice(0, -1).join(', a ') + ` o a ${times[times.length - 1]}`;
   const staffNote = (autoAssign && !presentByStaff) ? '' : ` con ${slots[0]!.staffName}`;
-  return `Para ${originalDateLabel} no tengo espacio, pero el ${altDateLabel} si hay lugar — ${timesStr}${staffNote}. Te queda alguno?`;
+  return `Para ${originalDateLabel} no tengo espacio, pero el ${altDateLabel} si hay lugar — ${timesStr}${staffNote}. ¿Te late alguno?`;
 }
