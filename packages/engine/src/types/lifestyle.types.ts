@@ -237,6 +237,17 @@ export const LifestyleBotContextSchema = z.object({
   rejection_attempts: z.number().int().nonnegative().optional(),
 
   /**
+   * Contador de escape ESTRUCTURAL: turnos consecutivos SIN progreso real
+   * dentro del flujo de agendamiento. A diferencia de clarification_attempts /
+   * rejection_attempts, ninguna rama de clarify puede resetearlo — lo calcula
+   * el wrapper de dispatch() por delta de estado/contexto, no la cooperación de
+   * los handlers. Se incrementa por defecto y solo se resetea ante progreso real
+   * (avance de estado en el orden canónico o un campo de la reserva recién
+   * llenado). Al alcanzar STRUCTURAL_CAP, dispatch() fuerza ESCALATED.
+   */
+  no_progress_streak: z.number().int().nonnegative().optional(),
+
+  /**
    * Última side question del cliente (texto tal cual), o null si no hubo.
    * Se resetea a null cuando el estado avanza.
    */

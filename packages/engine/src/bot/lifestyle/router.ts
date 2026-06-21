@@ -29,14 +29,77 @@ import { answerSideQuestion as buildDerivaAnswer } from './businessContext';
 import { formatTimeHumanFromDate }     from './utils';
 import type { LifestyleIncomingMessage, ServiceRow, StateHandlerDeps, StateHandlerResult } from './types';
 
+// ─── Contador de escape estructural (S5-BOT-12) ───────────────────────────────
+// Orden canónico del flujo de agendamiento. Un avance en este orden = progreso.
+const CANONICAL_FLOW: readonly LifestyleBotState[] = [
+  'GREETING',
+  'QUALIFYING_SERVICE',
+  'QUALIFYING_STAFF',
+  'QUALIFYING_DATETIME',
+  'SHOWING_SLOTS',
+  'QUALIFYING_WAITLIST',
+  'CONFIRMING_APPOINTMENT',
+  'AWAITING_CONFIRMATION',
+  'AWAITING_BOOKING_NAME',
+  'CONFIRMED',
+];
+
+// Estados donde el contador de escape aplica: la costura de agendamiento donde
+// viven los bucles (ask_who en confirmingAppointment, barbero en awaitingBookingName).
+const BOOKING_STATES: ReadonlySet<LifestyleBotState> = new Set([
+  'QUALIFYING_SERVICE',
+  'QUALIFYING_STAFF',
+  'QUALIFYING_DATETIME',
+  'SHOWING_SLOTS',
+  'QUALIFYING_WAITLIST',
+  'CONFIRMING_APPOINTMENT',
+  'AWAITING_CONFIRMATION',
+  'AWAITING_BOOKING_NAME',
+]);
+
+// Campos de la reserva cuyo llenado (de vacío a valor) cuenta como progreso real.
+const PROGRESS_FIELDS = [
+  'serviceId',
+  'staffId',
+  'requestedDate',
+  'requestedTime',
+  'requestedShift',
+  'selectedSlot',
+  'bookingName',
+] as const;
+
+/**
+ * Cap de escape ESTRUCTURAL. Debe ser estrictamente mayor que cualquier cap
+ * por-estado (MAX_TOTAL_ATTEMPTS = 5, etc.) para que un estado siempre tenga
+ * la oportunidad de escalar por su cuenta antes de que el contador global lo
+ * fuerce — el global es la red de seguridad, no el primer recurso.
+ * Blindado por test (cap-relationship): STRUCTURAL_CAP > max(caps per-estado).
+ */
+export const STRUCTURAL_CAP = 6;
+
+function canonicalIndex(state: LifestyleBotState): number {
+  return CANONICAL_FLOW.indexOf(state);
+}
+
+function hasNewFieldFilled(prev: LifestyleBotContext, next: LifestyleBotContext): boolean {
+  return PROGRESS_FIELDS.some((field) => {
+    const before = prev[field];
+    const after  = next[field];
+    const wasEmpty   = before === undefined || before === null;
+    const nowFilled  = after !== undefined && after !== null;
+    return wasEmpty && nowFilled;
+  });
+}
+
 export async function dispatch(
   state: LifestyleBotState,
   msg: LifestyleIncomingMessage,
   context: LifestyleBotContext,
   deps: StateHandlerDeps,
 ): Promise<StateHandlerResult> {
+  let result: StateHandlerResult;
   try {
-    return await routeToHandler(state, msg, context, deps);
+    result = await routeToHandler(state, msg, context, deps);
   } catch {
     // Nunca crash — captura cualquier error de handler y transiciona a FALLBACK
     return {
@@ -45,6 +108,34 @@ export async function dispatch(
       responseText: deps.business.fallbackMessage,
     };
   }
+
+  // ── Contador de escape estructural (S5-BOT-12) ──────────────────────────────
+  // Solo aplica cuando el turno se RECIBIÓ dentro de la costura de agendamiento.
+  // El progreso lo computa este wrapper por DELTA (no la cooperación de los
+  // handlers): forwardMove (avance en el orden canónico) o newFieldFilled (campo
+  // de la reserva recién llenado). Falla seguro hacia el escalado: ninguna rama
+  // de clarify puede resetearlo porque no lo conoce.
+  if (!BOOKING_STATES.has(state)) return result;
+
+  const forwardMove    = canonicalIndex(result.newState) > canonicalIndex(state);
+  const newFieldFilled = hasNewFieldFilled(context, result.newContext);
+  const leftBookingFlow = !BOOKING_STATES.has(result.newState);
+
+  // Progreso real, o el flujo ya salió de la costura (CONFIRMED/FALLBACK/…) → reset.
+  if (forwardMove || newFieldFilled || leftBookingFlow) {
+    return { ...result, newContext: { ...result.newContext, no_progress_streak: 0 } };
+  }
+
+  // Sin progreso y aún dentro del flujo → incrementar.
+  const streak = (context.no_progress_streak ?? 0) + 1;
+  if (streak >= STRUCTURAL_CAP) {
+    return {
+      newState:     'ESCALATED',
+      newContext:   { ...result.newContext, no_progress_streak: streak },
+      responseText: result.responseText,
+    };
+  }
+  return { ...result, newContext: { ...result.newContext, no_progress_streak: streak } };
 }
 
 async function routeToHandler(

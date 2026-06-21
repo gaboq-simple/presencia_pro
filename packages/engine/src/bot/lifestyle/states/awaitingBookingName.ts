@@ -25,7 +25,8 @@ import { logBotError } from '../utils/logger';
 import { handleConfirmingAppointment, detectsSummaryCorrection } from './confirmingAppointment';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
-const MAX_RETRIES = 2;
+// Exportado para el test de relación de caps (S5-BOT-12).
+export const MAX_RETRIES = 2;
 
 const YES_KEYWORDS = [
   'sí', 'si', 'simon', 'yes', 'claro', 'correcto', 'exacto', 'ok', 'dale',

@@ -1182,6 +1182,37 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
+#### S5-BOT-12 — Contador de escape estructural + P1 (afirmación tras presentación) 🔵 in-progress (impl. 2026-06-20, rama `fix/rama1-contador-escape-p1`)
+**Origen:** "Rama 1 hotfix" — diseño read-only aprobado por Gabriel (2026-06-20) con tres ajustes. Dos bucles de la costura de agendamiento podían repetirse indefinidamente porque ramas de clarify reseteaban `clarification_attempts:0` cada turno (ask_who en `confirmingAppointment.ts:255-269`; barbero en `awaitingBookingName.ts:305-316`), de modo que el cap por-estado nunca subía. P1: el gate de afirmación exigía `nearestOfferSlot`, que la presentación de slots nunca setea → un "Sí" tras presentar caía a clarify.
+
+**DECISIÓN — contador de escape estructural (no parche):**
+- Campo nuevo `no_progress_streak` en `LifestyleBotContext` (separado de `clarification_attempts`, `rejection_attempts`, `fallbackAttempts`, `confirmationRetries` — todos sobrecargados o de propósito acotado). Es el ground-truth de "¿este turno hubo progreso real?".
+- **Choke point único:** se calcula en `router.ts → dispatch()`, que devuelve el resultado final encadenado (date_redirect→datetime→slots resuelve en un turno). El wrapper compara `(prevState, prevContext)` contra `(result.newState, newContext)` por **delta** — el progreso lo computa el wrapper, NO la cooperación de las ramas. Falla seguro hacia el escalado.
+- Señales de reset (ajuste 1 de Gabriel — `newSlotsPresented` EXCLUIDA): solo `forwardMove` (avance en el orden canónico de estados) o `newFieldFilled` (se llenó un campo de la reserva). Presentar slots es oferta del bot, no progreso del cliente; un re-query con set marginalmente distinto NO debe resetear.
+- `STRUCTURAL_CAP = 6`, aplicado solo dentro de `bookingStates`. Al alcanzarlo → fuerza `ESCALATED`. Ninguna rama de clarify puede resetearlo porque no lo conoce.
+- **Ajuste 2 (mandato):** test que blinda `STRUCTURAL_CAP > max(caps per-estado)` importando los caps reales (no hardcodeados) → exige exportar `MAX_TOTAL_ATTEMPTS` (qualifyingStaff/Datetime/Service), `MAX_CLARIFY_ATTEMPTS` (confirmingAppointment), `MAX_RETRIES` (awaitingBookingName).
+
+**P1 — generalización del gate de afirmación (`confirmingAppointment.ts`):**
+- Aceptar si `nearestOfferSlot` set **O** `pendingSlots.length === 1`. Si hay múltiples slots y no hay `nearestOfferSlot` → re-presentar opciones concretas (copy CDMX), nunca auto-seleccionar.
+- **Ajuste 3 (copy CDMX):** sustituir "¿Te queda?"/"¿Te queda alguno?" (suena a traducción) por "¿Te late?", "¿Te sirve?", "¿Te parece?", "¿Va?". Solo fraseo, no lógica.
+
+**Frontera dura:** NO tocar las dos ramas de bucle (`confirmingAppointment.ts:255-269` ask_who; `awaitingBookingName.ts:305-316` barbero) — el contador global las neutraliza sin acoplarse a ellas. NO tocar `routeSlotSelection`/`matchNaturalSlot`/`offer_nearest` real-day.
+
+**Criterios de aceptación:**
+- [ ] `no_progress_streak` se incrementa por defecto y solo resetea ante `forwardMove`/`newFieldFilled`.
+- [ ] Al alcanzar `STRUCTURAL_CAP=6` dentro de bookingStates → `ESCALATED`.
+- [ ] "Sí" tras presentación con un solo slot lo acepta; con múltiples re-presenta concreto (copy CDMX), sin auto-seleccionar.
+- [ ] Test: `STRUCTURAL_CAP > max(todos los caps per-estado importados)`.
+- [ ] No-regresión: `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
+
+**Archivos:** `lifestyle.types.ts` (campo `no_progress_streak`); `router.ts` (wrapper del contador en `dispatch()`); `confirmingAppointment.ts` (gate P1 generalizado + copy CDMX, export `MAX_CLARIFY_ATTEMPTS`); `awaitingBookingName.ts` (export `MAX_RETRIES`); `qualifyingStaff.ts`/`qualifyingDatetime.ts`/`qualifyingService.ts` (export `MAX_TOTAL_ATTEMPTS`); `presentingSlots.ts` (copy CDMX en `buildAltDateFallback`); test del contador + relación de caps.
+
+**Implementación:** rama propia `fix/rama1-contador-escape-p1` desde `origin/main @ 02edb3f`. Claude Code no mergea — PR para revisión de Gabriel; Gabriel corre las 4 rutas de smoke antes del merge.
+
+**Prompt:** Diseño read-only aprobado por Gabriel (2026-06-20) con tres ajustes incorporados.
+
+---
+
 #### S4-OPS-02 — Restore drill desde backup ⚪ todo
 **Criterios de aceptación:**
 - [ ] Restaurar un dump cifrado en un proyecto Supabase staging desde cero

@@ -48,6 +48,10 @@ const DAY_MAP: Record<string, number> = {
 
 const FLOW_QUESTION = 'Para que dia prefieres tu cita? Puedes decirme el dia de la semana o fecha, y si prefieres manana o tarde.';
 
+// Intentos totales de clarificación antes de escalar a FALLBACK.
+// Exportado para el test de relación de caps (S5-BOT-12).
+export const MAX_TOTAL_ATTEMPTS = 5;
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function handleQualifyingDatetime(
@@ -243,7 +247,6 @@ export async function handleQualifyingDatetime(
   // ── CLARIFY o REPEAT_OPTIONS ──────────────────────────────────────────────
   // Si se superó MAX_TOTAL_ATTEMPTS → escalar a FALLBACK con agente humano.
 
-  const MAX_TOTAL_ATTEMPTS = 5;
   if ((clarResult.updatedContext.clarification_attempts ?? 0) >= MAX_TOTAL_ATTEMPTS) {
     return {
       newState:     'FALLBACK',

@@ -32,6 +32,10 @@ const MAX_SERVICES_PER_MESSAGE = 4;
 const FLOW_QUESTION = 'Que servicio te interesa?';
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
+// Intentos totales de clarificación antes de escalar a FALLBACK.
+// Exportado para el test de relación de caps (S5-BOT-12).
+export const MAX_TOTAL_ATTEMPTS = 5;
+
 export async function handleQualifyingService(
   msg: LifestyleIncomingMessage,
   context: LifestyleBotContext,
@@ -190,7 +194,6 @@ export async function handleQualifyingService(
 
   const fallbackCtx = repeatFallbackContext(clarResult, attempts);
 
-  const MAX_TOTAL_ATTEMPTS = 5;
   if ((fallbackCtx.clarification_attempts ?? 0) >= MAX_TOTAL_ATTEMPTS) {
     return {
       newState:     'FALLBACK',
