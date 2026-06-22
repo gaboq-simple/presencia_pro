@@ -14,7 +14,6 @@
 // Si no se reconoce la fecha en ningún path: permanece en QUALIFYING_DATETIME.
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
-import { classifyIntent } from '../classifier';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import {
   handleClassification,
@@ -176,7 +175,7 @@ export async function handleQualifyingDatetime(
   const recentHistory   = (context.messages ?? []).slice(-2);
   const attempts        = context.clarification_attempts ?? 0;
 
-  const classification = await classifyIntent({
+  const classification = await deps.classifier.classifyIntent({
     userMessage:      msg.body,
     availableOptions: datetimeOptions,
     flowQuestion:     FLOW_QUESTION,

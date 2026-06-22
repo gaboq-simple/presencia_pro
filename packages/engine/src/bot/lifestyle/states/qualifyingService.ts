@@ -14,7 +14,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { getCatalog } from '../catalog';
-import { classifyIntent } from '../classifier';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import {
   handleClassification,
@@ -97,7 +96,7 @@ export async function handleQualifyingService(
   const recentHistory   = (context.messages ?? []).slice(-2);
   const attempts        = context.clarification_attempts ?? 0;
 
-  const classification = await classifyIntent({
+  const classification = await deps.classifier.classifyIntent({
     userMessage:      msg.body,
     availableOptions: optionNames,
     flowQuestion:     FLOW_QUESTION,

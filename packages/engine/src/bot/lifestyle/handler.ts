@@ -21,6 +21,7 @@ import {
   shouldResetConversation,
 } from './context';
 import { dispatch } from './router';
+import { classifyIntent, classifyMultiIntent } from './classifier';
 import { selectModel } from './modelRouter';
 import { withRetry } from '../../utils/retry';
 import { logBotError } from '../../utils/logger';
@@ -137,6 +138,7 @@ export async function handleLifestyleMessage(
     supabase,
     anthropicKey,
     model,
+    classifier: { classifyIntent, classifyMultiIntent },
   });
 
   // ── 4b. Acumular historial de conversación ────────────────────────────────

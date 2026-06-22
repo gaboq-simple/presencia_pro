@@ -21,8 +21,7 @@ import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
 import type { LifestyleBotContext, LifestyleBotState } from '../../../types/lifestyle.types';
 import { buildSystemPrompt } from '../prompt';
 import { logBot } from '../../../utils/logger';
-import { classifyMultiIntent, classifyIntent } from '../classifier';
-import type { MultiIntentClassification } from '../classifier';
+import type { MultiIntentClassification } from '../types';
 import {
   logClassifierOutput,
   buildSingleClassifierMetadata,
@@ -125,7 +124,7 @@ export async function handleGreeting(
 
   let multi: MultiIntentClassification = { unclear: true };
   if (services.length > 0) {
-    multi = await classifyMultiIntent({
+    multi = await deps.classifier.classifyMultiIntent({
       userMessage:  msg.body,
       services:     services.map((s) => s.name),
       staff:        allStaff.map((s) => s.name),
@@ -237,7 +236,7 @@ export async function handleGreeting(
     if (route.mode === 'answer') {
       answer = route.text;
     } else {
-      const haikuAnswer = await classifyIntent({
+      const haikuAnswer = await deps.classifier.classifyIntent({
         userMessage:      multi.sideQuestion.question,
         availableOptions: [],
         flowQuestion:     'El cliente hizo una pregunta sobre el negocio.',
