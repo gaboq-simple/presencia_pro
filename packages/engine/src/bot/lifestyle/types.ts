@@ -111,10 +111,28 @@ export type StateHandlerResult = {
   readonly responseText: string;
 };
 
+/**
+ * Clasificadores inyectables (R1 — Pieza A).
+ * Producción inyecta la implementación real (`./classifier`); los tests inyectan
+ * un mock determinista sin red. NO se cambia la firma de los clasificadores —
+ * solo QUIÉN los provee. Mata el acoplamiento handler↔classifier que impedía el
+ * e2e del happy-path.
+ */
+export type ClassifierFns = {
+  readonly classifyIntent:      typeof import('./classifier').classifyIntent;
+  readonly classifyMultiIntent: typeof import('./classifier').classifyMultiIntent;
+};
+
+/** Re-export del tipo de resultado multi-intent para que los handlers no
+ * importen directamente de './classifier' (preserva la frontera de inyección). */
+export type { MultiIntentClassification } from './classifier';
+
 export type StateHandlerDeps = {
   readonly business: LifestyleBusinessConfig;
   readonly supabase: import('@supabase/supabase-js').SupabaseClient;
   readonly anthropicKey: string;
   /** Model ID pre-seleccionado por modelRouter.selectModel() — los state handlers lo consumen sin decidirlo. */
   readonly model: string;
+  /** Clasificadores inyectables. Producción = impl real; tests = mock sin red. */
+  readonly classifier: ClassifierFns;
 };

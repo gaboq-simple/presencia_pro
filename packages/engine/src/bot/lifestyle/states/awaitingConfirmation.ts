@@ -13,7 +13,6 @@
 //   Ambiguo → incrementa confirmationRetries. Tras 2 intentos: FALLBACK.
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
-import { classifyIntent } from '../classifier';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import { buildSideQuestionResponse } from '../clarification';
 import { getCatalog } from '../catalog';
@@ -105,7 +104,7 @@ export async function handleAwaitingConfirmation(
   });
   const recentHistory   = (context.messages ?? []).slice(-2);
 
-  const classification = await classifyIntent({
+  const classification = await deps.classifier.classifyIntent({
     userMessage:      msg.body,
     availableOptions: ['sí, confirmar', 'no, cancelar'],
     flowQuestion:     FLOW_QUESTION,

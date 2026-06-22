@@ -14,7 +14,6 @@
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { sendWhatsAppMeta }         from '../../../notifications/whatsapp';
 import { notifyWaitlist }           from '../scheduling';
-import { classifyIntent }           from '../classifier';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
 import { getCatalog }               from '../catalog';
 import { buildBusinessContext }     from '../businessContext';
@@ -267,7 +266,7 @@ export async function handleConfirmationResponse(
     });
     const recentHistory   = (context.messages ?? []).slice(-2);
 
-    const classification = await classifyIntent({
+    const classification = await deps.classifier.classifyIntent({
       userMessage:      msg.body,
       availableOptions: ['sí, confirmar', 'no, cancelar'],
       flowQuestion:     'Confirmas o cancelas tu cita?',
