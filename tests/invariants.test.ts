@@ -5,7 +5,7 @@
 // Inv. 1 — No-bucle / progreso-o-escape (wrapper dispatch() + STRUCTURAL_CAP).
 // Inv. 2 — Toda salida no vacía es coherente con el estado (≤1 "?", sin saludo
 //          con history no vacío).
-// Inv. 3 — Caso "A las 10:15" (Q4b producción): RED hasta R2 (test.skip).
+// Inv. 3 — Caso "A las 10:15" (Q4b producción): VERDE desde R2 (intérprete).
 // Inv. 4 — Exclusión de banderas efímeras: nearestOfferSlot × pendingDigitDisambig
 //          nunca ambas no-nulas tras un dispatch().
 //
@@ -221,15 +221,17 @@ for (const c of COHERENCE_CASES) {
   });
 }
 
-// ─── Inv. 3 — Caso "A las 10:15" (Q4b producción) — RED hasta R2 ───────────────
-// Una hora pura sin día NO debe perderse ni escalar: el intérprete (R2) debe
-// CAPTURAR la hora. Hoy el classifier la marca UNCLEAR (conf 0.6) → bug. Este
-// test afirma el comportamiento OBJETIVO, no el actual; queda skip hasta R2.
-test.skip('Inv.3 "A las 10:15" captura la hora sin UNCLEAR (RED hasta R2)', async () => {
+// ─── Inv. 3 — Caso "A las 10:15" (Q4b producción) — VERDE desde R2 ─────────────
+// Una hora pura sin día NO debe perderse ni escalar: el intérprete (R2) CAPTURA
+// la hora (extractRawTime → resolveInterpretedTime: minutos>0 → literal "10:15")
+// y, al faltar el día, lo guarda en requestedTime y pregunta SOLO el día
+// (qualifyingDatetime C2.1), sin UNCLEAR/FALLBACK. Antes el classifier la marcaba
+// UNCLEAR (conf 0.6) → bug. Invertido a verde en R2 C2.
+test('Inv.3 "A las 10:15" captura la hora sin UNCLEAR (VERDE desde R2)', async () => {
   const deps = makeDeps();
   const r = await dispatch('QUALIFYING_DATETIME', makeMsg('A las 10:15'), { serviceId: SVC, staffId: CARLOS }, deps);
 
-  // Objetivo R2: la hora queda capturada como dato neutral.
+  // La hora queda capturada como dato neutral.
   assert.equal(r.newContext.requestedTime, '10:15', 'la hora 10:15 debe capturarse en requestedTime');
   // Y nunca se pierde escalando ni cayendo a fallback por "no entendí".
   assert.notEqual(r.newState, 'FALLBACK');

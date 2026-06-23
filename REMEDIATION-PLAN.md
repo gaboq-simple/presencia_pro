@@ -527,3 +527,32 @@ el smoke final.
   OK). Bugs en vivo confirmando diagnóstico: default silencioso de fecha
   (qualifyingStaff.ts:108/:150 → Imagen 1) y parsers de hora dispersos ("7 pm"
   perdido vs "1 pm" ok). R2 detallado con estos 3 casos como smoke objetivo.
+- **2026-06-22** — R2 C2 (cura de raíz de la hora). **C2.1:** QUALIFYING_DATETIME
+  lee `deps.interpretation.time`; captura hora-sin-día (pregunta solo el día,
+  conserva la hora en `requestedTime`); aparca período ambiguo (1–6 en punto sin
+  período → pregunta "¿mañana o tarde?" vía `pendingPeriodTime`, sin adivinar
+  PM). `parseTimeFromText` borrado de datetime. **C2.2 (auditoría read-only):**
+  mapeo de TODOS los caminos fecha/hora dispersos (TABLA 1 fecha, TABLA 2 hora).
+  Decisión **P3 = (b)** — cura de raíz: greeting deja su `parseTime` propio y
+  consume el MISMO intérprete + la MISMA política (`resolveInterpretedTime`,
+  exportada desde qualifyingDatetime). **UN solo parser de hora en todo el FSM.**
+  `parseTime` de greeting BORRADO. *Esto adelanta lo que "R2 — Lo que NO se toca"
+  (línea 514) difería a R4/R5; se adelantó por decisión explícita del sprint
+  (la dispersión de hora era la enfermedad real, no un getTodayStr suelto).* La
+  lógica de `greetCase` queda EQUIVALENTE: solo cambia la FUENTE de
+  `parsedTimeStr` (timeMatch→interpretation), sigue ramificando por su presencia.
+  **C2.3:** Inv.3 ("A las 10:15") invertida a VERDE. **C2.4:**
+  `tests/timePolicyR2.test.ts` — 5 casos vía `dispatch()` (sin fecha → pregunta
+  día; "7 pm" → 19:00; "5pm" pegado → PM explícito 17:00 directo; "a las 5" →
+  ambiguo + resolución por período; greeting "a las 7 pm" → 19:00 = misma
+  política). **Fix 5pm (decisión de producto):** en `extractRawTime` el marcador
+  pm/am usaba `\b` (word-boundary) que NO matchea el dígito pegado ("5pm"); se
+  cambió a lookbehind negativo de letra `(?<![a-z])` → "5pm"/"5am"/"5p.m." dan
+  período explícito igual que "5 pm", sin romper "a las 5"/"10:15"/"de la tarde".
+  Malla: **343 tests verde, tsc 0.** **Deuda P2 (NO resolver ahora):** la intent de
+  disponibilidad de FASE B está DUPLICADA en 2 archivos — qualifyingStaff.ts
+  (bloques AVAILABILITY + wantsStaffAxis, ambos `?? getTodayStr`) y
+  qualifyingDatetime.ts (bloque availability). Mostrar "hoy" en FASE B es
+  intencional y consistente; consolidar los 3 sitios en una sola fuente es
+  trabajo futuro, fuera de C2. **Pendiente:** smoke WhatsApp (5 casos en el
+  número Meta de TEST) — bloqueado blando por el canal de staging.
