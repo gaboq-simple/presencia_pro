@@ -18,7 +18,10 @@ import { utcToLocalMinutes } from '../tzUtils';
 import type { SlotCandidate } from '../types';
 
 // Umbrales (tunables en smoke sin tocar la lógica).
-export const LIST_ALL_MAX        = 4;  // pocos (≤4) → listar todos
+// LIST_ALL_MAX acotado a 3: en modo list se arman pendingSlots con index 1..N, y
+// LifestylePendingSlotSchema.index es .max(3) — un 4º slot rompería el safeParse del
+// contexto. Invariante blindado en tests/honestAvailability.test.ts.
+export const LIST_ALL_MAX        = 3;  // pocos (≤3) → listar todos
 export const REPRESENTATIVE_COUNT = 3; // muchos → N espaciados
 
 export type FranjaHint = {
@@ -27,7 +30,7 @@ export type FranjaHint = {
 };
 
 export type PresentationDecision =
-  | { mode: 'list';           show: SlotCandidate[] }  // listar (Haiku puede redactar sobre ESTA decisión)
+  | { mode: 'list';           show: SlotCandidate[] }  // listar todos (plantilla determinista — NO LLM)
   | { mode: 'representative'; show: SlotCandidate[] }  // muestra + "o prefieres otra hora" (plantilla determinista)
   | { mode: 'ask-franja' };                            // pregunta binaria (plantilla determinista)
 
@@ -132,6 +135,28 @@ const REPRESENTATIVE_TEMPLATES = [
 export function buildRepresentativeMessage(times: string[], variant = 0): string {
   const idx = ((variant % REPRESENTATIVE_TEMPLATES.length) + REPRESENTATIVE_TEMPLATES.length) % REPRESENTATIVE_TEMPLATES.length;
   return REPRESENTATIVE_TEMPLATES[idx]!(times);
+}
+
+// Modo LIST: muestra TODOS los slots de la franja (son pocos). Cierra con
+// "¿cuál prefieres?" — NO "o prefieres otra hora": no oculta nada DENTRO de la
+// franja mostrada. `otherFranja` (si la OTRA franja tiene slots sin mostrar) agrega
+// una coda honesta para no esconder que existe. `times` ya vienen formateadas.
+const LIST_TEMPLATES = [
+  (ts: string[], coda: string) => `Para ese día tengo a las ${joinTimes(ts)}${coda}. ¿Cuál prefieres?`,
+  (ts: string[], coda: string) => `Tengo estos horarios: a las ${joinTimes(ts)}${coda}. ¿Cuál te queda mejor?`,
+  (ts: string[], coda: string) => `Puedo a las ${joinTimes(ts)}${coda}. ¿Con cuál te acomodo?`,
+];
+
+export function buildListMessage(
+  times: string[],
+  variant = 0,
+  otherFranja: 'morning' | 'afternoon' | null = null,
+): string {
+  const coda = otherFranja === 'morning' ? ', o también por la mañana'
+             : otherFranja === 'afternoon' ? ', o también por la tarde'
+             : '';
+  const idx = ((variant % LIST_TEMPLATES.length) + LIST_TEMPLATES.length) % LIST_TEMPLATES.length;
+  return LIST_TEMPLATES[idx]!(times, coda);
 }
 
 function joinTimes(ts: string[]): string {
