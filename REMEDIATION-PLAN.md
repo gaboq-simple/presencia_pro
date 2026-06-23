@@ -709,5 +709,156 @@ tipos en los tests rompa el build. Eso habría detectado esto solo. El fix de lo
   respecto a lo diagnosticado; este commit lo reconcilia). Malla: **349 tests
   verde** (347 R3 + 2 nuevos; R1/R2/R3 intactos), **app tsc 0**. (Deuda de infra
   destapada por este sprint: ver "Deuda de infra — el gate de tipos en CI" arriba.)
-  **Pendiente:** smoke WhatsApp. Sin merge hasta el OK del smoke. **NO incluye** el
-  PASO 3 estratégico (revisar el envío/scope de recordatorios) — sprint aparte.
+  **Smoke en vivo (2026-06-23): PASÓ** — negocia 5pm → agenda 5pm (ya no 10).
+  **PR #33 mergeado a main** (`55d7a32`). El smoke reveló 2 hallazgos nuevos
+  (Hallazgo A: side-question ignorada en CONFIRMING; Hallazgo B: modificación
+  post-CONFIRMED reinicia la conversación) → materia prima de R4 (sección abajo).
+  **NO incluye** el PASO 3 estratégico (revisar el envío/scope de recordatorios) —
+  sprint aparte.
+
+---
+
+# SPRINT R4 — Migración incremental de estados al intérprete (Decisión 1, aplicación)
+
+> **Reconciliación 2026-06-23.** R3 cerrado y el fix de confianza confirmado en
+> smoke → R4 se detalla (convención del plan: cada sprint se detalla al cerrar el
+> anterior). **Cambio respecto al plan original:** R4 deja de ser un solo paso
+> grande ("Migrar estados al intérprete (CONFIRMING + QUALIFYING_*)"); se ejecuta
+> **INCREMENTAL, un estado/concern por sub-sprint** (R4.1–R4.6), cada uno con su
+> rama, diff review y smoke. **Punto de corte go-live-ready (§3): al cerrar R4.**
+
+## R4 — Por qué incremental
+
+CONFIRMING_APPOINTMENT es el foco caliente (43 self-loops
+`CONFIRMING→CONFIRMING` en bot_logs; el bug de confianza vivió ahí). Migrarlo de
+un golpe junto al resto repetiría el riesgo que R2 evitó con el estrangulamiento.
+Cada sub-sprint migra UN estado a **consumir `deps.interpretation`** (en vez de
+re-parsear el mensaje crudo con su propio parser), con la malla (349 tests) como
+red. La *política* sensible al estado (¿"va" cuenta como sí aquí?, desambiguación
+AM/PM contra slots reales) se queda en el estado; la *interpretación* neutral se
+comparte. El orden lo dicta el riesgo: primero el estado más caliente y más
+cubierto por tests.
+
+## R4 — Regla de oro y disciplina por sub-sprint
+
+- **Cada sub-sprint:** rama propia → malla verde → smoke del flujo afectado →
+  merge → y recién el siguiente. Nunca dos en vuelo.
+- **Migración = "leer del intérprete en vez de parsear crudo", preservando el
+  comportamiento** — salvo donde el smoke marcó bug (Hallazgos A/B, que sí cambian
+  comportamiento, y van en R4.5/R4.6).
+- **Si el intérprete difiere del parser viejo: PARAR y decidir, no absorber en
+  silencio.** Una divergencia es un hallazgo (¿cuál es correcto?), no un detalle a
+  tragar. Mismo principio que R2 con el caso "5pm".
+
+## R4 — Materia prima: 2 hallazgos del smoke (2026-06-23)
+
+Ambos descubiertos en el smoke del fix de confianza. No son regresiones del fix
+(la guarda no los introdujo) — son gaps preexistentes que el smoke iluminó.
+
+### Hallazgo A — side-question ignorada en CONFIRMING_APPOINTMENT
+
+**Síntoma (smoke):** en CONFIRMING, si el cliente pregunta algo fuera del flujo
+(precio, dirección, duración) en lugar de elegir/confirmar el slot, el bot **no
+responde la pregunta**: la trata como selección no reconocida y cae a clarify.
+
+**Causa (código):** `handleConfirmingAppointment` rutea por detectsServiceCorrection
+→ pendingDigitDisambig → nearestOfferSlot → P1 afirmación → routeSlotSelection →
+barberSel → switch. **No hay rama de side-question.** El `containsSideQuestion` /
+`answerSideQuestion` del router existe SOLO en el branch `CONFIRMED`
+([`router.ts`](packages/engine/src/bot/lifestyle/router.ts) caso CONFIRMED), no
+en CONFIRMING. Una pregunta legítima muere en el clarify de selección. (El único
+rastro de side-question en CONFIRMING es `last_side_question: null`, un reset de
+contexto — no un handler.)
+
+**Destino en R4: R4.5** (NO R4.1). El Hallazgo A se cura en el sub-sprint de
+side-question unificada, no al migrar CONFIRMING. R4.5 expone
+`interpretation.hasSideQuestion` + un handler compartido para que TODOS los estados
+(incl. CONFIRMING) deriven la pregunta fuera-de-flujo antes de tratar el mensaje
+como selección. Cura estructural en un solo lugar, no un parche por estado.
+
+### Hallazgo B — modificación post-CONFIRMED reinicia la conversación
+
+**Síntoma (smoke):** tras una cita CONFIRMED, si el cliente pide cambiarla
+("mejor a las 6", "cambiar la hora"), el bot **cancela la cita y arranca un
+agendamiento desde cero** ("Listo, cancelé tu cita… ¿Qué servicio necesitas?") —
+pierde servicio/barbero/fecha ya conocidos.
+
+**Mecanismo (código, [`router.ts`](packages/engine/src/bot/lifestyle/router.ts)):**
+en CONFIRMED, `isModificationIntent` → `handleModificationOrCancellation('modification', …)`
+hace `UPDATE status=cancelled` y retorna `{ newState: 'GREETING', newContext:
+{ customerId } }` con copy "vamos a agendar una nueva". Por diseño, modificación =
+cancelar + reiniciar. No existe un camino que conserve el contexto y solo cambie
+el eje pedido (hora/día).
+
+**Destino en R4: R4.6** (el más delicado — toca CONFIRMED). Una modificación
+debería **reagendar conservando lo que no cambia** (mismo servicio/barbero, nueva
+hora), reabriendo con la hora nueva, no borrar todo. Misma clase de "corrección
+preservando ejes" que ya existe en CONFIRMING (S5-BOT-08).
+
+## R4.1 — Migrar confirmingAppointment al intérprete
+
+**Qué:** CONFIRMING deja de leer el mensaje con sus listas propias de afirmación y
+su parser de hora (`extractRawTime` / `resolveTargetMinutes` / `routeSlotSelection`,
+el "parser 3" que R2 promovió como base del intérprete) y **consume
+`interpretation.affirmation` e `interpretation.time`**. La política de desambiguación
+AM/PM contra slots reales se queda en el estado. Es el estado más caliente (el del
+bug de confianza).
+
+**SOLO afirmación/hora — NO side-question.** El Hallazgo A (side-question en
+CONFIRMING) NO se toca aquí: se cura de raíz en **R4.5** (side-question unificada).
+R4.1 no debe hacer dos cosas distintas.
+
+**Frontera:** NO se borran los parsers viejos hasta que el estado migrado pase
+smoke (estrangulamiento, como R2). NO se toca scheduling.ts ni el ensamblado del
+router (R6). Malla 349 verde + smoke dirigido como gate.
+
+**Riesgo:** medio-alto (el estado más caliente). Mitigación: malla + smoke +
+migrar SOLO este estado en R4.1.
+
+## R4.2 — qualifyingStaff
+
+Consume `interpretation.affirmation` y la no-preferencia ("cualquiera", "el que
+sea") desde el intérprete, en vez de su detección propia.
+
+## R4.3 — awaitingConfirmation + awaitingBookingName
+
+Afirmación/negación + corrección de resumen (hora/día/barbero/cancelar) desde el
+intérprete. Es el cierre del flujo legacy. (Aquí cabe el residual S5-BOT-08b:
+"con &lt;barbero&gt;" contra la lista de staff del negocio, no solo `pendingSlots`.)
+
+## R4.4 — waitlist + qualifyingService
+
+Completar afirmación/negación desde el intérprete en los dos estados que faltan.
+
+## R4.5 — Side-question unificada en todos los estados (cura el Hallazgo A)
+
+Una sola vía de side-question en **TODOS** los estados (incl. CONFIRMING) vía
+`interpretation.hasSideQuestion` + un handler compartido. Hoy la side-question solo
+se atiende en CONFIRMED; CONFIRMING (y otros) la ignoran y la pregunta muere en
+clarify. R4.5 la cura **de raíz**, en un solo lugar, no por estado. (Por eso R4.1
+NO la toca.)
+
+## R4.6 — Modificación post-CONFIRMED que preserva contexto (cura el Hallazgo B)
+
+Tras CONFIRMED, "cambiar mi cita a las 6" debe **MODIFICAR** (reabrir la cita con
+la hora nueva, conservando servicio/barbero/fecha), no cancelar + GREETING. **El
+más delicado: toca CONFIRMED.** Reusa el patrón de corrección por ejes de S5-BOT-08.
+
+(QUALIFYING_DATETIME y el `parseTime` de greeting **ya** se migraron en R2 — no
+entran a R4.)
+
+## Bitácora — reconciliación del plan (R4 + hallazgos del smoke)
+
+- **2026-06-23** — `docs/reconcile-plan`. El plan en main quedó atrás respecto a
+  lo diagnosticado en los smokes. Reconciliado: (a) bitácora del fix de confianza
+  actualizada (smoke PASÓ, #33 mergeado); (b) sección R4 incremental con su
+  fundamento + regla de oro (rama/malla/smoke/merge por sub-sprint; divergencia
+  intérprete↔parser = parar y decidir); (c) los 2 hallazgos del smoke (A
+  side-question en CONFIRMING → cura en R4.5; B modificación post-CONFIRMED reinicia
+  → cura en R4.6) documentados como materia prima, con síntoma + causa de código
+  verificada; (d) los 6 sub-sprints **R4.1–R4.6 anclados** con el desglose de
+  Gabriel. **Corrección aplicada:** R4.1 NO toca side-question (solo afirmación/hora);
+  el Hallazgo A se cura SOLO en R4.5 — la nota previa que lo ponía en R4.1 y R4.5 a
+  la vez era imprecisa. Commit de SOLO documentación (SPRINT.md + REMEDIATION-PLAN.md);
+  sin tocar código. R4.1 arranca como sprint de código aparte, tras mergear esta
+  reconciliación.
