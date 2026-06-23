@@ -862,3 +862,43 @@ entran a R4.)
   la vez era imprecisa. Commit de SOLO documentación (SPRINT.md + REMEDIATION-PLAN.md);
   sin tocar código. R4.1 arranca como sprint de código aparte, tras mergear esta
   reconciliación.
+
+---
+
+## HALLAZGO de producto — representación parcial de disponibilidad
+
+Síntoma (smoke R4.1): cliente pide día, "¿qué horarios tiene Andrés?" → bot ofrece
+solo los 3 más tempranos ("10 o 12"). Pregunta "¿no hay a las 8?" → "no, lo más
+cercano es 10" — FALSO, sí había 8pm. El cliente insiste y aparece. Sin insistir,
+cita perdida.
+
+Causa raíz (scheduling.ts:616): slice(0, MAX_SLOTS_TO_RETURN=3). Sin requestedTime
+ordena cronológico y toma los 3 más tempranos; con requestedTime reordena por
+cercanía. El bot está ciego a su agenda completa: se queda con 3 antes de razonar.
+"Lo más cercano es 10" = de los 3 cargados, no de toda la agenda → afirmación falsa.
+Primo del bug de confianza (habla con certeza de lo que no verificó).
+
+Hallazgo acoplado: "a las 8" sin period → 8am cuando el cliente quería 8pm (negocio
+abre hasta 23:00). Desambiguación AM/PM necesita criterio contextual, no default AM.
+
+## DISEÑO — Disponibilidad honesta (decisiones de producto de Gabriel)
+
+Plantillas deterministas (NO LLM). Comportamiento por FORMA de la disponibilidad.
+Dos franjas: mañana / tarde-noche (corte ~14:00).
+
+Árbol de decisión (ante "¿qué horarios hay?", barbero+día definidos):
+1. ¿Cliente dio pista (franja/hora)? → filtrar a eso, ir a paso 3. No re-preguntar.
+2. ¿Slots en AMBAS franjas? No → listar directo esa franja. Sí → preguntar binario
+   "¿mañana o más tarde?", filtrar, paso 3.
+3. Mostrar subconjunto de UNA franja: pocos (≤3-4) → listar todos; muchos → muestra
+   representativa (3 espaciados + "o preferís otra hora").
+
+Regla maestra: nunca mostrar >~3-4 horas de golpe; nunca afirmar una franja sin
+slots; preguntar franja solo cuando reparte lista larga.
+
+Cambio técnico raíz: separar "qué hay disponible" (forma completa: cuántos, qué
+franjas) de "qué muestro" (acotado). scheduling devuelve la forma; presentingSlots
+decide. Arregla también el "lo más cercano" falso. Riesgo medio-alto (toca
+scheduling.ts núcleo + presentingSlots).
+
+---
