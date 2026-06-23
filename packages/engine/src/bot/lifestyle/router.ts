@@ -24,6 +24,7 @@ import { handleQualifyingService }     from './states/qualifyingService';
 import { handleQualifyingStaff }       from './states/qualifyingStaff';
 import { handleShowingSlots }          from './states/presentingSlots';
 import { getCatalog }                  from './catalog';
+import { interpret }                   from './interpreter';
 import { buildSystemPrompt }           from './prompt';
 import { answerSideQuestion as buildDerivaAnswer } from './businessContext';
 import { formatTimeHumanFromDate }     from './utils';
@@ -97,9 +98,22 @@ export async function dispatch(
   context: LifestyleBotContext,
   deps: StateHandlerDeps,
 ): Promise<StateHandlerResult> {
+  // ── Intérprete de turno único (R2, Pieza B) ─────────────────────────────────
+  // Interpreta el mensaje del turno UNA sola vez, antes del switch de estado, y
+  // se inyecta inmutable en `deps`. Determinista (cero LLM). El encadenamiento de
+  // estados dentro de routeToHandler reusa estos mismos `deps` → interpret() NO
+  // se recomputa por eslabón. En R2 ningún handler lo consume aún (estrangulamiento
+  // gradual: la infra primero, los consumidores en Pieza C).
+  const interpretation = interpret({
+    message:  msg.body,
+    now:      msg.timestamp,
+    timezone: deps.business.timezone,
+  });
+  const handlerDeps: StateHandlerDeps = { ...deps, interpretation };
+
   let result: StateHandlerResult;
   try {
-    result = await routeToHandler(state, msg, context, deps);
+    result = await routeToHandler(state, msg, context, handlerDeps);
   } catch {
     // Nunca crash — captura cualquier error de handler y transiciona a FALLBACK
     return {

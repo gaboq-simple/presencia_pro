@@ -30,7 +30,7 @@ import {
 import { buildBusinessContext } from '../businessContext';
 import { routeSideQuestion, derivaFallback, composeGreetingSideAnswer, refineTopic, closingForTopic } from '../sideQuestion';
 import { getCatalog, getActiveStaff } from '../catalog';
-import { parseDate } from './qualifyingDatetime';
+import { parseDate, resolveInterpretedTime } from './qualifyingDatetime';
 import { formatTimeHuman } from '../utils';
 import { buildDefaultGreetingPlan, buildGenerativeMessages, type ConvTurn } from '../continuity';
 import type { LifestyleIncomingMessage, ServiceRow, StaffRow, StateHandlerDeps, StateHandlerResult } from '../types';
@@ -159,14 +159,25 @@ export async function handleGreeting(
     : null;
   const parsedDate = dateExpr ? parseDate(dateExpr.toLowerCase(), msg.timestamp, deps.business.timezone) : null;
 
+  // R2 P3(b): la HORA se LEE del intérprete determinista (computado 1×/turno en
+  // dispatch) y se resuelve con la POLÍTICA ÚNICA del FSM (resolveInterpretedTime,
+  // compartida con QUALIFYING_DATETIME). Antes greeting tenía su propio parseTime
+  // que adivinaba 1–6→PM, divergiendo de datetime; ahora ambos usan el MISMO
+  // parser (extractRawTime) + la MISMA política:
+  //  - hora resuelta (period explícito | minutos | hora ≥ 7) → "HH:MM".
+  //  - hora ambigua (1–6 en punto sin período) → NO se adivina: parsedTimeStr=null
+  //    (no se hornea un PM falso). La fuente cambia; la LÓGICA de greetCase queda
+  //    equivalente porque sigue ramificando por la PRESENCIA de parsedTimeStr.
+  // El TURNO (shift "por la tarde") sigue viniendo del clasificador: es una señal
+  // distinta de la hora-reloj y el intérprete neutro no captura turnos sueltos.
   const timeConfident = (multi.timeMatch?.confidence ?? 0) >= CONFIDENCE_THRESHOLD;
   const shiftRaw      = timeConfident ? multi.timeMatch!.shift : undefined;
-  const timeValueRaw  = timeConfident ? (multi.timeMatch!.value ?? null) : null;
 
-  // Intentar parsear timeMatch.value a HH:MM (ej: "a las 5" → "17:00")
-  const parsedTimeStr: string | null = timeValueRaw ? parseTime(timeValueRaw) : null;
+  const interpretedTime = deps.interpretation?.time ?? null;
+  const timeRes         = interpretedTime ? resolveInterpretedTime(interpretedTime) : null;
+  const parsedTimeStr: string | null = timeRes?.kind === 'resolved' ? timeRes.hhmm : null;
 
-  // Derivar shift: desde HH:MM parseado (preciso) o desde shift del clasificador
+  // Derivar shift: desde HH:MM resuelto (preciso) o desde el turno del clasificador
   let parsedShift: 'morning' | 'afternoon' | null = null;
   if (parsedTimeStr) {
     const hour = parseInt(parsedTimeStr.split(':')[0]!, 10);
@@ -426,36 +437,6 @@ export async function handleGreeting(
 function buildPrivacyNotice(): string {
   const privacyUrl = process.env['PRIVACY_POLICY_URL'] ?? 'https://zentriq.mx/aviso-de-privacidad';
   return `Al continuar, aceptas nuestro aviso de privacidad: ${privacyUrl}`;
-}
-
-/**
- * Parsea una expresión de hora en español a formato "HH:MM".
- * Reconoce: "a las 5", "a la 1", "a las 10:30", con indicadores de turno.
- * Heurística: horas 1–6 sin contexto explícito de mañana/tarde → PM.
- * Retorna null si no se puede extraer una hora válida.
- */
-function parseTime(value: string): string | null {
-  const lower = value.toLowerCase();
-  const isMorning   = /\b(mañana|manana|am|de la mañana|de la manana|matutino)\b/.test(lower);
-  const isAfternoon = /\b(tarde|pm|de la tarde|vespertino)\b/.test(lower);
-
-  const match = lower.match(/a\s+las?\s+(\d{1,2})(?::(\d{2}))?/);
-  if (!match) return null;
-
-  let hour      = parseInt(match[1]!, 10);
-  const minutes = match[2] ? parseInt(match[2], 10) : 0;
-
-  if (isAfternoon && hour < 12) {
-    hour += 12;
-  } else if (isMorning) {
-    // mantener como está
-  } else if (hour >= 1 && hour <= 6) {
-    // sin contexto: horas 1–6 → tarde (PM)
-    hour += 12;
-  }
-
-  if (hour < 0 || hour > 23 || minutes < 0 || minutes > 59) return null;
-  return `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 /**

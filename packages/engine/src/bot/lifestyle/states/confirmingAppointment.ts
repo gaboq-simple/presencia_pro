@@ -37,6 +37,14 @@ import {
 import { utcToLocalMinutes, noonUTCDate } from '../tzUtils';
 import { getAvailableSlots, SchedulingQueryError } from '../scheduling';
 import { parseDate } from './qualifyingDatetime';
+import {
+  normalize,
+  cleanMessage,
+  isAffirmation,
+  isNegation,
+  extractRawTime,
+  resolveTargetMinutes,
+} from '../interpreter';
 import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
 
 // Mensaje al usuario cuando los queries de disponibilidad fallan (reusa el
@@ -74,57 +82,6 @@ const SHIFT_PHRASE_RE = /\b(de|por|en)\s+la\s+(tarde|mañana|manana|noche)\b/g;
 // no-preferencia sino una preferencia de turno/extremo (decisión d).
 const SHIFT_OR_EXTREME_RE =
   /(\b(de|por|en)\s+la\s+(tarde|mañana|manana|noche)\b|\bm[aá]s\s+(temprano|tarde)\b|\btemprano\b)/;
-
-// Normaliza para matchear: minúsculas + NFD + strip de diacríticos (mismo
-// patrón que sideQuestion.ts). Trabajamos con listas ASCII puras para evitar
-// el bug de acento ("sí" no matcheaba con \b) y NO usamos \b (su boundary
-// falla antes de caracteres acentuados / es la fuente del bug).
-function normalize(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
-// Limpia para comparar mensaje completo: normaliza, quita puntuación y colapsa
-// espacios. Permite el match exacto de tokens cortos.
-function cleanMessage(body: string): string {
-  return normalize(body).replace(/[¿?¡!.,;:]/g, '').replace(/\s+/g, ' ').trim();
-}
-
-// Afirmaciones para aceptar el slot cercano ofrecido (decisión b, follow-up).
-// Tokens cortos/ambiguos → SOLO match de mensaje completo (evita aceptar
-// "¿va a estar?" por contener "va"). Para "si" además evita tragarse
-// "si, a las 6" (eso es una corrección, la consume el router downstream).
-const AFFIRM_FULL = ['si', 'va', 'ok', 'okay', 'sale', 'vale'];
-// Afirmaciones largas/distintivas → anclaje por espacios (no substring crudo).
-const AFFIRM_ANCHORED = [
-  'simon', 'dale', 'claro', 'perfecto', 'correcto', 'afirmativo',
-  'de acuerdo', 'me sirve', 'orale',
-];
-
-function isAffirmation(body: string): boolean {
-  const n = cleanMessage(body);
-  if (AFFIRM_FULL.includes(n)) return true;
-  const padded = ` ${n} `;
-  return AFFIRM_ANCHORED.some((k) => padded.includes(` ${k} `));
-}
-
-// Negaciones claras. Cortas/ambiguas → match de mensaje completo. La distintiva
-// "negativo" → anclaje por espacios. Las negaciones IMPLÍCITAS ("que amable",
-// "a la vuelta", "luego", "asi esta bien gracias") NO se fuerzan aquí: caen al
-// clarify natural. Esta detección corre SOLO downstream del router (cuando
-// devuelve 'none'); las correcciones tipo "no, a las 6" ya las consumió el
-// matcher natural antes de llegar aquí.
-const NEGATION_FULL = ['no', 'nel', 'ahorita no', 'no gracias'];
-const NEGATION_ANCHORED = ['negativo'];
-
-function isNegation(body: string): boolean {
-  const n = cleanMessage(body);
-  if (NEGATION_FULL.includes(n)) return true;
-  const padded = ` ${n} `;
-  return NEGATION_ANCHORED.some((k) => padded.includes(` ${k} `));
-}
 
 // Tolerancia (min) para considerar que una hora pedida "matchea" un slot.
 // Reusa el patrón de presentingSlots.ts (±5 min).
@@ -862,81 +819,6 @@ function matchNaturalSlot(
   if (fuzzy) return { kind: 'exact', slot: fuzzy };
 
   return { kind: 'none' };
-}
-
-type RawTime = { hour: number; minute: number; explicitPeriod: 'am' | 'pm' | null };
-
-/**
- * Parser de hora LOCAL (este sprint). Solo devuelve hora cuando hay un MARCADOR
- * de hora ("a las"/"las"/":MM"/pm/am/"de la tarde"). Un dígito desnudo ("5")
- * NO es hora → se trata como índice (decisión e).
- */
-function extractRawTime(lower: string): RawTime | null {
-  const pm = /\b(pm|p\.?\s?m\.?)\b/.test(lower) || /(de|por|en)\s+la\s+(tarde|noche)/.test(lower);
-  const am = /\b(am|a\.?\s?m\.?)\b/.test(lower) || /(de|por|en)\s+la\s+(mañana|manana)/.test(lower);
-
-  let hour:    number | null = null;
-  let minute = 0;
-
-  // 1. "HH:MM"
-  let m = lower.match(/\b(\d{1,2}):(\d{2})\b/);
-  if (m) {
-    hour   = parseInt(m[1]!, 10);
-    minute = parseInt(m[2]!, 10);
-  } else {
-    // 2. "5pm" / "5 pm" / "5am"
-    m = lower.match(/\b(\d{1,2})\s*(?:pm|p\.?\s?m\.?|am|a\.?\s?m\.?)\b/);
-    if (m) {
-      hour = parseInt(m[1]!, 10);
-    } else {
-      // 3. "a las 5" / "a la 1" / "las 5" / "el de las 5"
-      m = lower.match(/\b(?:a\s+)?las?\s+(\d{1,2})\b/);
-      if (m) {
-        hour = parseInt(m[1]!, 10);
-      } else if (pm || am) {
-        // 4. número suelto con marcador de turno ("5 de la tarde")
-        m = lower.match(/\b(\d{1,2})\b/);
-        if (m) hour = parseInt(m[1]!, 10);
-      }
-    }
-  }
-
-  if (hour === null) return null;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-
-  return { hour, minute, explicitPeriod: pm ? 'pm' : am ? 'am' : null };
-}
-
-/**
- * Desambigua AM/PM contra los slots reales (decisión f): si "5" es ambiguo,
- * elige la interpretación (5 AM / 5 PM) cuyo slot más cercano esté más cerca.
- * NO usa heurística fija "1-6 → PM".
- */
-function resolveTargetMinutes(raw: RawTime, slotMins: number[]): number {
-  let h = raw.hour;
-  let candidates: number[];
-
-  if (raw.explicitPeriod === 'pm') {
-    if (h < 12) h += 12;
-    candidates = [h];
-  } else if (raw.explicitPeriod === 'am') {
-    if (h === 12) h = 0;
-    candidates = [h];
-  } else if (h === 0 || h >= 13 || h === 12) {
-    candidates = [h];
-  } else {
-    candidates = [h, h + 12]; // 1..11 → ambiguo
-  }
-
-  let best  = candidates[0]!;
-  let bestD = Infinity;
-  for (const c of candidates) {
-    const t = c * 60 + raw.minute;
-    let d = Infinity;
-    for (const sm of slotMins) d = Math.min(d, Math.abs(sm - t));
-    if (d < bestD) { bestD = d; best = c; }
-  }
-  return best * 60 + raw.minute;
 }
 
 /** "la primera"→0, "segunda"→1, "tercera"→2, "el último"→n-1. 0-based. */

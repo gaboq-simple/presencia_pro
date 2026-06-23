@@ -58,6 +58,37 @@ export async function handleQualifyingDatetime(
   context: LifestyleBotContext,
   deps:    StateHandlerDeps,
 ): Promise<StateHandlerResult> {
+  // ── R2 C2.1: resolución de hora ambigua aparcada ─────────────────────────
+  // Si un turno previo detectó una hora 1–6 sin am/pm ("a las 5") y preguntamos
+  // el período, ESTE turno lo resuelve ("de la tarde" → 17:00). Corre ANTES del
+  // early-return de requestedDate (la fecha pudo aparcarse junto a la hora). Si
+  // este turno no trae período, soltamos la hora aparcada y reinterpretamos normal.
+  if (context.pendingPeriodTime) {
+    const period = detectPeriodFromReply(msg.body);
+    if (period) {
+      const { hour, minute } = context.pendingPeriodTime;
+      const resolvedHour = period === 'afternoon' && hour < 12 ? hour + 12 : hour;
+      const newContext: LifestyleBotContext = {
+        ...context,
+        requestedTime:          fmtTime(resolvedHour, minute),
+        requestedShift:         period,
+        pendingPeriodTime:      undefined,
+        clarification_attempts: 0,
+        last_side_question:     null,
+      };
+      if (newContext.requestedDate) {
+        return { newState: 'SHOWING_SLOTS', newContext, responseText: '' };
+      }
+      return {
+        newState:     'QUALIFYING_DATETIME',
+        newContext,
+        responseText: buildDayOnlyQuestion(),
+      };
+    }
+    // Sin período en este turno → soltar la hora aparcada y seguir el flujo normal.
+    context = { ...context, pendingPeriodTime: undefined };
+  }
+
   // ── Fast path: fecha y hora ya resueltas desde greeting ─────────────────
   // El router encadena QUALIFYING_DATETIME → SHOWING_SLOTS al ver responseText ''
 
@@ -115,21 +146,68 @@ export async function handleQualifyingDatetime(
   if (AFTERNOON_KEYWORDS.some((kw) => lower.includes(kw))) shift = 'afternoon';
   else if (MORNING_KEYWORDS.some((kw) => lower.includes(kw))) shift = 'morning';
 
-  const parsedDate = parseDate(lower, msg.timestamp, deps.business.timezone);
+  // R2 C1: el date se LEE del intérprete (computado 1×/turno en dispatch) en vez
+  // de re-parsear crudo. Valor idéntico (interpret() llama al mismo parseDate; el
+  // único delta es un .trim() irrelevante para .includes()/regex). El fallback a
+  // parseDate cubre call-sites sin interpretation (deps armadas a mano).
+  const parsedDate = deps.interpretation?.date
+    ?? parseDate(lower, msg.timestamp, deps.business.timezone);
 
-  if (parsedDate) {
-    const parsedTimeStr = parseTimeFromText(lower);
-    let resolvedShift = shift;
-    if (parsedTimeStr) {
-      const hour = parseInt(parsedTimeStr.split(':')[0]!, 10);
-      resolvedShift = hour >= 13 ? 'afternoon' : 'morning';
+  // R2 C2.1: la hora también se LEE del intérprete (ya no parseTimeFromText). La
+  // resolución AM/PM es política de estado: período explícito (am/pm) se respeta;
+  // una hora 1–6 EN PUNTO sin marcador es ambigua y se PREGUNTA (no se adivina con
+  // heurística fija). Con minutos ("10:15") u hora ≥ 7 se toma literal (reloj 24h).
+  const interpretedTime = deps.interpretation?.time ?? null;
+  const timeRes = interpretedTime ? resolveInterpretedTime(interpretedTime) : null;
+
+  // Hora ambigua → aparcar (conservando la fecha si vino) y preguntar el período.
+  if (timeRes?.kind === 'ambiguous') {
+    const newContext: LifestyleBotContext = {
+      ...context,
+      isWalkIn:               false,
+      ...(parsedDate ? { requestedDate: parsedDate } : {}),
+      pendingPeriodTime:      { hour: timeRes.hour, minute: timeRes.minute },
+      clarification_attempts: 0,
+      last_side_question:     null,
+    };
+    return {
+      newState:     'QUALIFYING_DATETIME',
+      newContext,
+      responseText: buildPeriodQuestion(),
+    };
+  }
+
+  // Hora resuelta: con fecha → avanzar a slots; SIN fecha → guardar la hora y
+  // preguntar SOLO el día (R2 C2.1: la hora ya no se pierde por falta de día).
+  if (timeRes?.kind === 'resolved') {
+    const resolvedShift: 'morning' | 'afternoon' =
+      parseInt(timeRes.hhmm.split(':')[0]!, 10) >= 13 ? 'afternoon' : 'morning';
+    const newContext: LifestyleBotContext = {
+      ...context,
+      isWalkIn:               false,
+      ...(parsedDate ? { requestedDate: parsedDate } : {}),
+      requestedShift:         resolvedShift,
+      requestedTime:          timeRes.hhmm,
+      clarification_attempts: 0,
+      last_side_question:     null,
+    };
+    if (parsedDate) {
+      return { newState: 'SHOWING_SLOTS', newContext, responseText: '' };
     }
+    return {
+      newState:     'QUALIFYING_DATETIME',
+      newContext,
+      responseText: buildDayOnlyQuestion(),
+    };
+  }
+
+  // Sin hora pero con fecha → avanzar a slots con el shift de keywords (igual que antes).
+  if (parsedDate) {
     const newContext: LifestyleBotContext = {
       ...context,
       isWalkIn:               false,
       requestedDate:          parsedDate,
-      requestedShift:         resolvedShift,
-      ...(parsedTimeStr ? { requestedTime: parsedTimeStr } : {}),
+      requestedShift:         shift,
       clarification_attempts: 0,
       last_side_question:     null,
     };
@@ -262,27 +340,55 @@ export async function handleQualifyingDatetime(
   };
 }
 
-// ─── Parseo de hora ───────────────────────────────────────────────────────────
+// ─── Resolución de hora (R2 C2.1) ─────────────────────────────────────────────
+// POLÍTICA ÚNICA de hora del FSM (R2 C2/P3b): tanto QUALIFYING_DATETIME como
+// GREETING resuelven la hora cruda del intérprete con ESTA función. No hay un
+// segundo parser de hora con política propia (antes greeting.parseTime adivinaba
+// 1–6→PM, divergiendo de aquí). Un solo parser (extractRawTime en interpreter.ts)
+// + una sola política de resolución (esta).
+
+export type TimeResolution =
+  | { kind: 'resolved';  hhmm: string }
+  | { kind: 'ambiguous'; hour: number; minute: number };
 
 /**
- * Parsea "a las N" / "a las HH:MM" del texto en español a "HH:MM".
- * Heurística: horas 1–6 sin contexto → PM.
+ * Resuelve la hora cruda del intérprete a "HH:MM" (24h) o señala ambigüedad.
+ * - period explícito (am/pm) → se respeta.
+ * - period null + (minutos > 0 | hora 0 | hora ≥ 7) → literal (lectura de reloj 24h).
+ * - period null + hora 1–6 EN PUNTO → ambigua (AM/PM): se pregunta el período.
+ * NO usa la heurística fija "1–6 → PM" del parser viejo (era la fuente del bug
+ * 5am↔5pm); en su lugar pregunta cuando no puede decidir sin contexto de slots.
  */
-function parseTimeFromText(lower: string): string | null {
-  const isMorning   = /\b(am|de la ma[ñn]ana|matutino)\b/.test(lower);
-  const isAfternoon = /\b(tarde|pm|de la tarde|vespertino)\b/.test(lower);
+export function resolveInterpretedTime(
+  time: { hour: number; minute: number; period: 'am' | 'pm' | null },
+): TimeResolution {
+  let h = time.hour;
+  const m = time.minute;
+  if (time.period === 'pm') { if (h < 12) h += 12; return { kind: 'resolved', hhmm: fmtTime(h, m) }; }
+  if (time.period === 'am') { if (h === 12) h = 0;  return { kind: 'resolved', hhmm: fmtTime(h, m) }; }
+  if (m > 0 || h === 0 || h >= 7) return { kind: 'resolved', hhmm: fmtTime(h, m) };
+  return { kind: 'ambiguous', hour: h, minute: m };
+}
 
-  const match = lower.match(/a\s+las?\s+(\d{1,2})(?::(\d{2}))?/);
-  if (!match) return null;
+function fmtTime(h: number, m: number): string {
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
-  let hour      = parseInt(match[1]!, 10);
-  const minutes = match[2] ? parseInt(match[2], 10) : 0;
+// Detecta el período del turno-respuesta a "¿mañana o tarde?". Normaliza (sin
+// diacríticos) para aceptar "de la mañana"/"en la tarde"/"tarde"/am/pm.
+function detectPeriodFromReply(body: string): 'morning' | 'afternoon' | null {
+  const norm = body.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (/tarde|noche|\bpm\b/.test(norm))         return 'afternoon';
+  if (/manana|matutin|\bam\b/.test(norm))      return 'morning';
+  return null;
+}
 
-  if (isAfternoon && hour < 12) hour += 12;
-  else if (!isMorning && hour >= 1 && hour <= 6) hour += 12;
+function buildDayOnlyQuestion(): string {
+  return 'Perfecto. Para que dia te gustaria? Puedes decirme el dia de la semana o una fecha (ej. "este viernes").';
+}
 
-  if (hour < 0 || hour > 23 || minutes < 0 || minutes > 59) return null;
-  return `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+function buildPeriodQuestion(): string {
+  return 'Para esa hora, prefieres en la manana o en la tarde?';
 }
 
 // ─── Parseo de fecha ──────────────────────────────────────────────────────────

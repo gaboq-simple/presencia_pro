@@ -3,6 +3,9 @@
 // No se re-exportan desde el index del engine — son privados a este módulo.
 
 import type { LifestyleBotContext, LifestyleBotState } from '../../types/lifestyle.types';
+// `import type` (erased en runtime) evita un ciclo: interpreter.ts importa valores
+// de states/qualifyingDatetime, que a su vez importa de aquí.
+import type { Interpretation } from './interpreter';
 
 // ─── Incoming message ─────────────────────────────────────────────────────────
 
@@ -135,4 +138,13 @@ export type StateHandlerDeps = {
   readonly model: string;
   /** Clasificadores inyectables. Producción = impl real; tests = mock sin red. */
   readonly classifier: ClassifierFns;
+  /**
+   * Interpretación CRUDA del turno (R2 — intérprete de turno único). La inyecta
+   * `dispatch()` una sola vez por turno, antes del switch de estado. Opcional a
+   * nivel de tipo para que los call-sites que construyen deps a mano (tests de
+   * handler directo) sigan compilando; en el flujo real SIEMPRE está presente.
+   * En R2 ningún handler la consume todavía (Pieza B = solo cablear; los
+   * consumidores llegan en Pieza C). Inmutable.
+   */
+  readonly interpretation?: Interpretation;
 };
