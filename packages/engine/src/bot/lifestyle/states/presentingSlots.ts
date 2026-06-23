@@ -19,7 +19,7 @@ import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/l
 import { getCatalog, getStaffForService } from '../catalog';
 import { logBot } from '../../../utils/logger';
 import { FORMATTING_RULES } from '../prompt';
-import { getAvailableSlots, getDayAvailability, findSlotsInNextDays, SchedulingQueryError } from '../scheduling';
+import { getAvailableSlots, getDayAvailability, findSlotsInNextDays, SchedulingQueryError, AFTERNOON_CUTOFF } from '../scheduling';
 import type { DayAvailability } from '../scheduling';
 import {
   decidePresentation,
@@ -27,6 +27,7 @@ import {
   parseFranjaReply,
   buildFranjaQuestion,
   buildRepresentativeMessage,
+  buildListMessage,
   type FranjaHint,
 } from './slotPresentation';
 import { formatTimeHumanFromDate, formatTimeHuman, detectsServiceCorrection, clearBookingSelection } from '../utils';
@@ -398,7 +399,7 @@ async function handleHonestAvailability(
   staffForService: StaffRow[],
   requestedDate:   Date,
 ): Promise<StateHandlerResult> {
-  const { business, supabase, anthropicKey } = deps;
+  const { business, supabase } = deps;
   const tz = business.timezone;
   const schedulingRetries = context.clarification_attempts ?? 0;
 
@@ -504,24 +505,25 @@ async function handleHonestAvailability(
     return { newState: 'CONFIRMING_APPOINTMENT', newContext, responseText };
   }
 
-  // Listar pocos → Haiku redacta sobre la decisión YA tomada (no decide disponibilidad).
-  const staffName = staffForService.find((s) => s.id === context.staffId)?.name ?? null;
-  const responseText = await generateSlotsMessage({
-    slots:              decision.show,
-    isWalkIn:           false,
-    isReturning:        !!context.customerId,
-    serviceName:        service.name,
-    staffName,
-    autoAssign:         false,
-    anthropicKey,
-    system:             SLOTS_PRESENTER_SYSTEM,
-    businessId:         business.id,
-    customerPhone:      msg.customerPhone,
-    tz,
-    exactMatchMissed,
-    requestedTimeLabel,
-    presentByStaff:     context.presentBy === 'staff',
-  });
+  // Listar pocos → plantilla determinista (NO Haiku). El camino honesto NO hace una
+  // segunda pasada por generateSlotsMessage: ahí Haiku fusionaba su propia lista de
+  // horarios tempranos (doble lista contradictoria) e inventaba un "lo más cercano es
+  // X" falso. decision.show ya viene ordenada (cronológica, o por cercanía si hubo
+  // requestedTime). El preámbulo honesto sale del exactMatchMissed contra shape.all.
+  const shownMins    = decision.show.map((s) => utcToLocalMinutes(s.startsAt, tz));
+  const allMorning   = shownMins.every((m) => m <  AFTERNOON_CUTOFF);
+  const allAfternoon = shownMins.every((m) => m >= AFTERNOON_CUTOFF);
+  // Coda honesta: si la franja mostrada es una sola y la OTRA tiene slots sin
+  // mostrar, ofrecerla — no esconder que existe.
+  const otherFranja: 'morning' | 'afternoon' | null =
+      (allAfternoon && shape.morning.length   > 0) ? 'morning'
+    : (allMorning   && shape.afternoon.length > 0) ? 'afternoon'
+    : null;
+  const times    = decision.show.map((s) => formatTimeHumanFromDate(s.startsAt, tz));
+  const listBody = buildListMessage(times, shape.total, otherFranja);
+  const responseText = (exactMatchMissed && requestedTimeLabel)
+    ? `A las ${requestedTimeLabel} no tengo disponible. ${listBody}`
+    : listBody;
   return { newState: 'CONFIRMING_APPOINTMENT', newContext, responseText };
 }
 
