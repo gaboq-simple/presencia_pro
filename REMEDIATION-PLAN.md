@@ -589,3 +589,125 @@ el smoke final.
   (R4) ni se tocó el ensamblado del router (R6). Malla: **347 tests verde, tsc 0**
   (343 R2 + 4 nuevos; R1/R2 intactos). **Pendiente:** smoke WhatsApp (4 casos
   objetivo) en el número Meta de TEST. Sin commit ni merge hasta el OK del smoke.
+
+---
+
+# BUG CRÍTICO (smoke R3) — La confirmación pasiva secuestra el "sí" del flujo activo
+
+> Hallazgo del smoke de R3. **Bug de confianza:** el cliente negocia y acepta una
+> hora, y el bot agenda OTRA. Severidad alta (rompe la promesa central del
+> producto: lo que el cliente dice ≠ lo que el bot hace). Fix acotado y aislado en
+> `rama fix/passive-confirm-guard`: una guarda de prioridad en el choke-point del
+> router. NO toca el envío de recordatorios (eso es trabajo estratégico aparte).
+
+## Síntoma
+
+En CONFIRMING_APPOINTMENT, tras negociar un slot único (p. ej. el bot propone las
+17:00 y el cliente responde **"sí"**), el bot **no agenda las 17:00**: confirma una
+cita preexistente del cliente que cae en las próximas 3h (p. ej. las 10:00) y
+responde *"Perfecto! Te esperamos a las 10:00"*. **Dice 5pm, agenda 10.**
+
+## Causa raíz (mecanismo en código)
+
+El handler pasivo de recordatorios corre **antes del switch de estado**, en TODO
+mensaje, y hace short-circuit:
+
+- [`router.ts`](packages/engine/src/bot/lifestyle/router.ts) — `routeToHandler`
+  llamaba `handleConfirmationResponse(msg, context, deps)` **antes** del `switch`;
+  si devuelve no-null, `return` inmediato → el handler del estado nunca ve el
+  mensaje.
+- [`confirmationResponse.ts`](packages/engine/src/bot/lifestyle/states/confirmationResponse.ts)
+  busca la cita confirmed/pending **más próxima dentro de 3h**
+  (`.in('status',['confirmed','pending']).gte(now).lte(now+3h)`) y, ante un "sí",
+  la confirma con el `timeStr` de **esa** cita — no del slot negociado.
+- El "sí" suelto no matchea las frases-keyword del pasivo → cae a su clasificador,
+  que en producción (LLM) devuelve `CONFIRM_YES` alto → confirma. (Por eso el bug
+  es invisible a un test con key vacía: hay que mockear el clasificador.)
+
+Es la misma enfermedad estructural del diagnóstico (§1): una invariante de
+prioridad ("el flujo activo manda sobre el pasivo") que **nadie imponía desde un
+punto central** — el pasivo asumía prioridad absoluta sin preguntar si había un
+flujo vivo.
+
+## Validación — tres vías independientes
+
+1. **Smoke en vivo (WhatsApp).** Captura del smoke R3: cliente acepta el slot
+   negociado, el bot confirma una hora distinta. El síntoma reportado.
+2. **Lectura de código.** Trazado de `routeToHandler`: la llamada pasiva precede
+   al `switch` y hace `return` si no-null; `handleConfirmationResponse` confirma la
+   cita de la ventana de 3h vía su clasificador. Causa raíz confirmada por
+   inspección.
+3. **Test de repro determinista.** `tests/passiveConfirmGuard.test.ts` por
+   `dispatch()` (el bug vive en el router, no en un handler): state=CONFIRMING,
+   `pendingSlots=[17:00]`, cita próxima de 10:00 sembrada, classifier mock
+   `CONFIRM_YES`. **Antes del fix FALLA** (`newState='CONFIRMED'`,
+   `selectedSlot=undefined`); **después PASA** (`AWAITING_BOOKING_NAME`,
+   `selectedSlot=17:00`). El rojo→verde es la prueba de que el test tiene poder.
+
+## El fix — guarda de prioridad en el choke-point
+
+En [`router.ts`](packages/engine/src/bot/lifestyle/router.ts), un set dedicado
+`ACTIVE_FLOW_STATES` (los 8 estados mid-flow) y la llamada pasiva envuelta:
+
+```ts
+if (!ACTIVE_FLOW_STATES.has(state)) {
+  const confirmResult = await handleConfirmationResponse(msg, context, deps);
+  if (confirmResult !== null) return confirmResult;
+}
+```
+
+- **Señal correcta = el `state`, no campos del contexto.** Se descartó chequear
+  `pendingSlots`/`nearestOfferSlot`: son frágiles (dependen de que cada handler los
+  limpie) y son subconjuntos del state (solo se pueblan dentro de SHOWING_SLOTS/
+  CONFIRMING). El state llega limpio al router (1er parámetro de `routeToHandler`).
+  Es el principio del plan: imponer la invariante en el choke-point, sin depender
+  de la cooperación de los handlers.
+- **Set SEPARADO de `BOOKING_STATES`** (alcance del contador de escape): mismo
+  contenido hoy, distinto propósito — desacoplados a propósito.
+- **El pasivo sigue interviniendo en reposo** (GREETING/CONFIRMED/terminales): el
+  recordatorio legítimo (sí/no/voy tarde de un cliente que no está agendando) no se
+  rompe. Blindado por el test de no-regresión.
+- **Frontera:** NO se migró CONFIRMING entero (R4) ni se tocó el ensamblado del
+  router (R6) ni el envío de recordatorios. Cambio mínimo: +1 set, +1 guarda.
+
+## Hallazgo secundario — citas de prueba acumuladas (data hygiene del smoke)
+
+El bug se reproducía tan confiablemente en el smoke porque cada agendamiento de
+prueba deja una cita confirmed/pending con `starts_at` en el futuro cercano, y
+`/reset-bot` resetea la **conversación** pero NO la tabla `appointments`. Así la
+ventana de 3h del pasivo casi siempre encuentra una cita de prueba rancia.
+
+Implicaciones: (a) explica la alta tasa de repro en el smoke; (b) **incluso con la
+guarda**, un "sí" en reposo (GREETING/CONFIRMED) puede confirmar una cita de
+prueba acumulada — la guarda arregla el secuestro del flujo activo, no la higiene
+de datos de prueba. **No se ataca en este sprint.** Propuesta de backlog: limpieza
+del entorno de smoke (cancelar/borrar citas de prueba futuras) o extender
+`/reset-bot` para barrer citas de prueba próximas del número en allowlist.
+
+## Deuda de infra — el gate de tipos en CI
+
+Este sprint destapó (al correr `tsc -p tsconfig.test.json --noEmit`) **14 errores
+de tipo pre-existentes** en `tests/sideQuestion.test.ts` (`SideQuestionRoute.text`
+sin estrechar la unión por `mode`). **Ajenos a este fix — no se tocan aquí.**
+
+El hallazgo de fondo NO son los 14 errores: es que `npm test` corre con
+`TS_NODE_TRANSPILE_ONLY=1` y **NO chequea tipos**. Una malla verde garantiza
+comportamiento runtime, no tipos sanos — estos 14 errores convivían tranquilos con
+349 tests en verde. **Deuda:** que el CI agregue `tsc -p tsconfig.test.json
+--noEmit` como gate (además del transpile-only de `npm test`), para que un error de
+tipos en los tests rompa el build. Eso habría detectado esto solo. El fix de los 14
++ el gate de CI = **sprint de higiene aparte**, después.
+
+## Bitácora — fix guarda de confirmación pasiva
+
+- **2026-06-23** — `fix/passive-confirm-guard` (ramificada de main `f8c0577`).
+  **PASO 1:** guarda `ACTIVE_FLOW_STATES` en `router.ts` — el pasivo no se consulta
+  si el state es mid-flow; el flujo conversacional siempre gana. **PASO 2:**
+  `tests/passiveConfirmGuard.test.ts` (2 casos, por `dispatch()`): repro
+  rojo→verde + no-regresión del recordatorio en GREETING. Confirmado que el repro
+  FALLA antes del fix. **PASO 3:** esta sección (el plan en main quedó atrás
+  respecto a lo diagnosticado; este commit lo reconcilia). Malla: **349 tests
+  verde** (347 R3 + 2 nuevos; R1/R2/R3 intactos), **app tsc 0**. (Deuda de infra
+  destapada por este sprint: ver "Deuda de infra — el gate de tipos en CI" arriba.)
+  **Pendiente:** smoke WhatsApp. Sin merge hasta el OK del smoke. **NO incluye** el
+  PASO 3 estratégico (revisar el envío/scope de recordatorios) — sprint aparte.

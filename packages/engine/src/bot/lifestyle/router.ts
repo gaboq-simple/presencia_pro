@@ -58,6 +58,26 @@ const BOOKING_STATES: ReadonlySet<LifestyleBotState> = new Set([
   'AWAITING_BOOKING_NAME',
 ]);
 
+// Estados de un flujo conversacional ACTIVO (mid-flow): el cliente está eligiendo
+// servicio/barbero/fecha o negociando/confirmando un slot. Mientras el flujo vive,
+// su "sí/no" pertenece al flujo, NO al recordatorio: la confirmación pasiva
+// (handleConfirmationResponse) no debe pre-emptarlo. Fuera de este set (GREETING,
+// CONFIRMED, terminales) el cliente está en reposo y el pasivo sí interviene.
+//
+// Conjunto deliberadamente SEPARADO de BOOKING_STATES (alcance del contador de
+// escape): mismo contenido hoy, distinto propósito — no se acoplan para que uno
+// pueda cambiar sin arrastrar al otro.
+const ACTIVE_FLOW_STATES: ReadonlySet<LifestyleBotState> = new Set([
+  'QUALIFYING_SERVICE',
+  'QUALIFYING_STAFF',
+  'QUALIFYING_DATETIME',
+  'SHOWING_SLOTS',
+  'QUALIFYING_WAITLIST',
+  'CONFIRMING_APPOINTMENT',
+  'AWAITING_CONFIRMATION',
+  'AWAITING_BOOKING_NAME',
+]);
+
 // Campos de la reserva cuyo llenado (de vacío a valor) cuenta como progreso real.
 const PROGRESS_FIELDS = [
   'serviceId',
@@ -171,12 +191,18 @@ async function routeToHandler(
     };
   }
 
-  // ── Confirmación pasiva — prioridad sobre el estado actual ────────────────
-  // Si el cliente tiene una cita en las próximas 3h, su mensaje se interpreta
-  // como respuesta al recordatorio (sí/no/cancelar) antes de evaluar el flujo
-  // conversacional normal.
-  const confirmResult = await handleConfirmationResponse(msg, context, deps);
-  if (confirmResult !== null) return confirmResult;
+  // ── Confirmación pasiva — solo en REPOSO, nunca sobre un flujo activo ──────
+  // Si el cliente tiene una cita en las próximas 3h, su mensaje PUEDE ser
+  // respuesta a un recordatorio (sí/no/voy tarde). Pero si está mid-flow
+  // (eligiendo/negociando un slot), ese "sí" es para el flujo: el flujo
+  // conversacional SIEMPRE gana. Solo se consulta el pasivo cuando el estado
+  // está en reposo (GREETING/CONFIRMED/terminal), no en ACTIVE_FLOW_STATES.
+  // (Bug R3: sin esta guarda, "sí" tras negociar 17:00 confirmaba la cita
+  // preexistente de las 10:00 — "dice 5pm, agenda 10".)
+  if (!ACTIVE_FLOW_STATES.has(state)) {
+    const confirmResult = await handleConfirmationResponse(msg, context, deps);
+    if (confirmResult !== null) return confirmResult;
+  }
 
   switch (state) {
     case 'GREETING': {
