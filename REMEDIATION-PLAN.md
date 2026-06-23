@@ -96,12 +96,18 @@ primero. Esto coincide con la deuda 🔴 que ya encabeza el backlog de `SPRINT.m
 | Sprint | Nombre | Decisión | Riesgo del sprint | Estado del detalle |
 |--------|--------|----------|-------------------|--------------------|
 | **R1** | Malla de invariantes + classifier inyectable | Andamio | **Bajo** (no cambia comportamiento) | ✅ Detallado abajo |
-| **R2** | Intérprete de turno único | Decisión 1 | **Alto** | ⏳ Al cerrar R1 |
-| **R3** | Separación contexto durable/efímero | Decisión 2 | **Alto** | ⏳ Al cerrar R2 |
-| **R4** | Migrar CONFIRMING_APPOINTMENT al intérprete | Decisión 1 (aplicación) | Medio | ⏳ Al cerrar R3 |
-| **R5** | Migrar QUALIFYING_* + resto de estados | Decisión 1 (aplicación) | Medio | ⏳ Al cerrar R4 |
+| **R2** | Intérprete de turno único | Decisión 1 | **Alto** | ✅ Detallado abajo |
+| **R3** | Propuesta negociable de slot único | — (fix del smoke R2) | Bajo | 🔵 Código listo, smoke pendiente |
+| **R4** | Migrar estados al intérprete (CONFIRMING + QUALIFYING_*) | Decisión 1 (aplicación) | Medio | ⏳ Al cerrar R3 |
+| **R5** | Separación contexto durable/efímero | Decisión 2 | **Alto** | ⏳ Al cerrar R4 |
 | **R6** | Unificar ensamblado de mensajes (anti-fragmento) | Decisión 2 (aplicación) | Medio | ⏳ Al cerrar R5 |
 | **R7** | Ajustes puntuales (AP-1..AP-5) + cierre | — | Bajo | ⏳ Al cerrar R6 |
+
+> **Reordenamiento (2026-06-22):** el smoke de R2 reveló que el bot auto-confirmaba
+> el slot único y cerraba la puerta al cambio de hora. Se intercaló **R3 = propuesta
+> negociable** (fix acotado, bajo riesgo) antes de la migración de estados. La
+> **separación de contexto durable/efímero (Decisión 2)** se corrió a **R5**, y la
+> migración de estados al intérprete se consolidó en **R4**.
 
 **Punto de corte go-live-ready:** al cerrar **R4**. En ese punto el foco caliente
 (CONFIRMING) está sobre la base nueva y con malla; el resto puede migrarse con
@@ -191,7 +197,7 @@ el único hoy sin cobertura. Es prerrequisito de R2.
 
 **Qué:** tests que blindan PROPIEDADES (no instancias de bug). Esta es la
 diferencia con los 18 tests actuales, que son regresión por-bug. Estos fallan si
-el refactor de R2/R3 rompe una propiedad global.
+el refactor de R2/R5 rompe una propiedad global.
 
 - Nuevo archivo: `tests/invariants.test.ts`.
 - **Invariante 1 — No-bucle / progreso-o-escape.** Para cada estado del flujo de
@@ -213,7 +219,7 @@ el refactor de R2/R3 rompe una propiedad global.
   extrae la hora. Es el primer caso de smoke del intérprete.
 - **Invariante 4 — Exclusión de banderas efímeras.** `nearestOfferSlot` y
   `pendingDigitDisambig` nunca quedan ambas no-nulas tras un `dispatch()`.
-  (Blinda a mano lo que R3 hará estructural.)
+  (Blinda a mano lo que R5 hará estructural.)
 
 **Nota sobre Invariante 3:** es legítimo tener un test en rojo en R1 si está
 marcado como `test.skip` o con un comentario `// RED hasta R2`. Documenta el
@@ -319,7 +325,7 @@ R1 está cerrado cuando TODO esto es cierto:
 - `scheduling.ts` (es sólido; los ajustes AP-1/AP-2/AP-5 van en R7 o intercalados).
 - La lógica de cualquier handler (solo el swap import→deps.classifier).
 - El intérprete único (eso es R2; R1 solo construye su red de seguridad).
-- El god-object de contexto (eso es R3).
+- El god-object de contexto (eso es R5).
 - El ensamblado de mensajes (eso es R6, pero R1 deja la Invariante 2 que lo blinda).
 
 ---
@@ -514,15 +520,15 @@ el smoke final.
 - parseTime de greeting y el parser 3 de confirmingAppointment NO se borran en
   R2 (se migran en R4/R5; por ahora el intérprete extrae su lógica pero los
   estados viejos siguen). Estrangulamiento.
-- El god-object de contexto (eso es R3).
+- El god-object de contexto (eso es R5).
 - scheduling.ts (sólido).
 
 ## Bitácora — actualización R1 → R2
 
 - **2026-06-22** — R1 cerrado. Piezas A/B/C mergeadas (PRs #28, #29). Malla:
   308 tests, Inv.1/2/4 verde con código actual, Inv.3 RED documentado.
-  **Nota R3:** Inv.4 (exclusión de banderas) pasa por disciplina manual en
-  confirmingAppointment.ts:178, no por estructura — R3 lo vuelve estructural.
+  **Nota R5:** Inv.4 (exclusión de banderas) pasa por disciplina manual en
+  confirmingAppointment.ts:178, no por estructura — R5 lo vuelve estructural.
   Smoke WhatsApp (3 capturas): happy path idéntico a pre-R1 (Imagen 2, cierre
   OK). Bugs en vivo confirmando diagnóstico: default silencioso de fecha
   (qualifyingStaff.ts:108/:150 → Imagen 1) y parsers de hora dispersos ("7 pm"
@@ -556,3 +562,30 @@ el smoke final.
   intencional y consistente; consolidar los 3 sitios en una sola fuente es
   trabajo futuro, fuera de C2. **Pendiente:** smoke WhatsApp (5 casos en el
   número Meta de TEST) — bloqueado blando por el canal de staging.
+
+## Bitácora — cierre R3 (propuesta negociable de slot único)
+
+- **2026-06-22** — R3 ejecutado en `feat/r3-negociable`. **Pieza A:** en
+  `presentingSlots.ts:284` (autoAssign + 1 slot único) el bot ya NO auto-confirma
+  saltando a `AWAITING_BOOKING_NAME`; mantiene el slot en `pendingSlots`, va a
+  `CONFIRMING_APPOINTMENT` y frasea negociable ("Tengo disponible … a las HH con
+  X. ¿Te sirve o preferís otra hora?"; variante exactMatchMissed conserva el
+  preámbulo "a las X no tengo, lo más cercano…"). NO setea
+  `selectedSlot`/`pendingBookingName`/`nearestOfferSlot`, así un "sí" cae en el
+  handler P1 (`confirmingAppointment.ts:175`, `pendingSlots.length===1 &&
+  isAffirmation`) → `buildConfirmationResult` → nombre en UN solo paso: la
+  fluidez para quien acepta queda intacta. **Pieza B:** ya cableada — con 1 slot
+  en `pendingSlots`, una hora fuera de rango ("7pm") rutea a `offer_nearest` →
+  `handleOfferNearest` re-consulta disponibilidad REAL del día con la hora pedida
+  ("no tengo 7pm, lo más cercano 6:45"); no hizo falta cableado nuevo, solo
+  cobertura de test. **Test actualizado:** `staffAxisIntent.test.ts` "default
+  (presentBy ausente)" — blindaba el viejo salto a `AWAITING_BOOKING_NAME`; ahora
+  afirma `CONFIRMING_APPOINTMENT` + frase negociable (decisión explícita del
+  sprint: el test documentaba el bug que se mató). **Tests nuevos:**
+  `tests/r3Negotiable.test.ts` — (1) 1 slot → propuesta negociable (no
+  te-asigno/nombre); (2) tras propuesta "7pm" → ofrece cercana (19:00, no repite);
+  (3) tras propuesta "sí" → `AWAITING_BOOKING_NAME` en un paso; (4) varios slots →
+  lista (sin regresión). **Frontera respetada:** NO se migró CONFIRMING entero
+  (R4) ni se tocó el ensamblado del router (R6). Malla: **347 tests verde, tsc 0**
+  (343 R2 + 4 nuevos; R1/R2 intactos). **Pendiente:** smoke WhatsApp (4 casos
+  objetivo) en el número Meta de TEST. Sin commit ni merge hasta el OK del smoke.

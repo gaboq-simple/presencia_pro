@@ -204,16 +204,19 @@ test('presentBy=staff: muestra el nombre de cada barbero (no los suprime), aun c
   assert.match(r.responseText, /Andres/);
 });
 
-test('default (presentBy ausente): autoAssign sigue byte-idéntico (dedup por hora → 1, suprime nombres)', async () => {
+test('default (presentBy ausente): autoAssign con 1 hora → propuesta negociable en CONFIRMING (R3)', async () => {
   const ctx: LifestyleBotContext = {
     serviceId:     SVC,
     requestedDate: DATE,
     autoAssign:    true,
   };
   const r = await handleShowingSlots(makeMsg(''), ctx, makeDeps());
-  // Dos barberos a la misma hora colapsan a 1 → atajo de auto-asignación.
-  // (no se nombra a AMBOS: el dedup deja un solo barbero, no se presenta por barbero)
-  assert.equal(r.newState, 'AWAITING_BOOKING_NAME');
+  // Dos barberos a la misma hora colapsan a 1 (dedup por hora). R3: ya NO se
+  // auto-confirma saltando a AWAITING_BOOKING_NAME; se PROPONE el slot —
+  // conservándolo en pendingSlots — y se va a CONFIRMING con frase negociable.
+  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
+  assert.equal(r.newContext.pendingSlots?.length, 1);
+  assert.match(r.responseText, /¿te sirve o preferis otra hora\?/i);
   const named = [/Carlos/, /Andres/].filter((re) => re.test(r.responseText));
   assert.equal(named.length, 1); // solo UN barbero sobrevive el dedup por hora
 });
