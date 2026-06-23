@@ -156,6 +156,14 @@ export const LifestyleBotContextSchema = z.object({
    */
   presentBy: z.enum(['time', 'staff']).optional(),
 
+  /**
+   * Disponibilidad honesta: el bot acaba de preguntar la franja binaria
+   * ("¿mañana o más tarde?") porque hay slots en AMBAS franjas. El siguiente turno
+   * se parsea LOCALMENTE como franja (parseFranjaReply) — NO como fecha: "mañana"
+   * aquí significa franja-mañana, no día-siguiente. true mientras esté pendiente.
+   */
+  pendingFranjaChoice: z.boolean().optional(),
+
   // ── Slot elegido y cita ───────────────────────────────────────────────────
 
   /** Slot elegido en ISO 8601 UTC. Se establece en CONFIRMING_APPOINTMENT. */

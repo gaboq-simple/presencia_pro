@@ -42,6 +42,11 @@ import { formatTimeHumanFromDate } from './utils';
 
 const SLOT_INTERVAL_MINUTES = 15;  // granularidad de slots
 const MAX_SLOTS_TO_RETURN    = 3;  // máximo de opciones presentadas al cliente
+// Corte mañana / tarde-noche para el bucketing de franjas (disponibilidad honesta).
+// Constante única del NUEVO bucketing. El filtro de generación (generateSlotsForStaff)
+// se alinea a este valor en su propio commit aparte. Exportada: el árbol de
+// presentación (slotPresentation.ts) la usa para ubicar la franja de un requestedTime.
+export const AFTERNOON_CUTOFF = 14 * 60;  // 14:00 local, en minutos
 
 // ─── Helpers de tiempo ────────────────────────────────────────────────────────
 
@@ -353,20 +358,38 @@ export type GetAvailableSlotsOptions = {
 };
 
 /**
- * Retorna hasta MAX_SLOTS_TO_RETURN candidatos de cita disponibles.
+ * Forma COMPLETA de la disponibilidad de un día (disponibilidad honesta).
+ * Separa "qué hay disponible" de "qué se muestra": devuelve el set completo
+ * (sin truncar) + su partición por franja, para que presentingSlots decida con
+ * el árbol determinista en vez de quedar ciego a 3 slots.
+ */
+export type DayAvailability = {
+  /** Set completo, ya ordenado y deduplicado-por-barbero (auto-assign) o todos (barbero fijo). SIN slice. */
+  readonly all: SlotCandidate[];
+  readonly total: number;
+  /** Franja mañana: hora local < AFTERNOON_CUTOFF. Preserva el orden de `all`. */
+  readonly morning: SlotCandidate[];
+  /** Franja tarde-noche: hora local >= AFTERNOON_CUTOFF. Preserva el orden de `all`. */
+  readonly afternoon: SlotCandidate[];
+};
+
+/**
+ * Retorna la forma completa de disponibilidad (todos los candidatos, sin truncar).
  *
  * Para auto_assign: aplica round-robin ponderado antes de buscar slots,
- * presentando slots del barbero con menos citas primero.
+ * presentando slots del barbero con menos citas primero (un slot por barbero).
  *
  * Para walk-in: minStart = NOW() + walkInBufferMinutes.
- * Retorna como máximo 1 slot (el más cercano).
+ * `all` contiene como máximo 1 slot (el más cercano).
  *
- * Si el barbero preferido no tiene disponibilidad, retorna array vacío —
+ * Si el barbero preferido no tiene disponibilidad, `all` es vacío —
  * el state handler decidirá si ofrecer otros barberos.
+ *
+ * El truncado a MAX_SLOTS_TO_RETURN vive en el wrapper getAvailableSlots (compat).
  */
-export async function getAvailableSlots(
+export async function getDayAvailability(
   opts: GetAvailableSlotsOptions,
-): Promise<SlotCandidate[]> {
+): Promise<DayAvailability> {
   const {
     businessId,
     serviceId,
@@ -411,7 +434,7 @@ export async function getAvailableSlots(
       .filter((s): s is StaffRow => s !== undefined);
   }
 
-  if (candidateStaff.length === 0) return [];
+  if (candidateStaff.length === 0) return bucketShape([], tz);
 
   // Cargar disponibilidad de todos los candidatos en paralelo
   const staffIds = candidateStaff.map((s) => s.id);
@@ -563,7 +586,7 @@ export async function getAvailableSlots(
   // Walk-in: solo el más cercano
   if (isWalkIn) {
     const earliest = allSlots.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())[0];
-    return earliest ? [earliest] : [];
+    return bucketShape(earliest ? [earliest] : [], tz);
   }
 
   // Auto-assign: un slot por barbero — el mejor para cada uno.
@@ -613,7 +636,31 @@ export async function getAvailableSlots(
     dedupedSlots.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   }
 
-  return dedupedSlots.slice(0, MAX_SLOTS_TO_RETURN);
+  return bucketShape(dedupedSlots, tz);
+}
+
+// Arma la forma completa (all + franjas) sin truncar. El bucketing usa
+// AFTERNOON_CUTOFF (14:00). `all` ya viene ordenado; filter preserva el orden.
+function bucketShape(slots: SlotCandidate[], tz: string): DayAvailability {
+  const morning:   SlotCandidate[] = [];
+  const afternoon: SlotCandidate[] = [];
+  for (const s of slots) {
+    if (utcToLocalMinutes(s.startsAt, tz) < AFTERNOON_CUTOFF) morning.push(s);
+    else afternoon.push(s);
+  }
+  return { all: slots, total: slots.length, morning, afternoon };
+}
+
+/**
+ * Wrapper de compatibilidad: comportamiento EXACTO previo a la disponibilidad
+ * honesta — hasta MAX_SLOTS_TO_RETURN candidatos (el `.all.slice(0,3)` de la forma).
+ * Los consumidores no migrados (confirmingAppointment, findSlotsInNextDays→waitlist)
+ * siguen sobre este wrapper sin cambios.
+ */
+export async function getAvailableSlots(
+  opts: GetAvailableSlotsOptions,
+): Promise<SlotCandidate[]> {
+  return (await getDayAvailability(opts)).all.slice(0, MAX_SLOTS_TO_RETURN);
 }
 
 // ─── findSlotsInNextDays ──────────────────────────────────────────────────────

@@ -19,10 +19,19 @@ import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/l
 import { getCatalog, getStaffForService } from '../catalog';
 import { logBot } from '../../../utils/logger';
 import { FORMATTING_RULES } from '../prompt';
-import { getAvailableSlots, findSlotsInNextDays, SchedulingQueryError } from '../scheduling';
+import { getAvailableSlots, getDayAvailability, findSlotsInNextDays, SchedulingQueryError } from '../scheduling';
+import type { DayAvailability } from '../scheduling';
+import {
+  decidePresentation,
+  pickRepresentative,
+  parseFranjaReply,
+  buildFranjaQuestion,
+  buildRepresentativeMessage,
+  type FranjaHint,
+} from './slotPresentation';
 import { formatTimeHumanFromDate, formatTimeHuman, detectsServiceCorrection, clearBookingSelection } from '../utils';
 import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '../tzUtils';
-import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
+import type { LifestyleIncomingMessage, SlotCandidate, StaffRow, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -106,6 +115,15 @@ export async function handleShowingSlots(
 
   // S5-BOT-04: bandera de presentación por barbero (no suprime nombres).
   const presentByStaff = context.presentBy === 'staff';
+
+  // ── Disponibilidad honesta (SOLO barbero fijo) ────────────────────────────
+  // Para un barbero específico (no auto-assign, no walk-in), "¿qué horarios tiene
+  // X?" no debe truncarse a 3 a ciegas (ocultaba el 8pm y afirmaba "lo más cercano
+  // es 10" falso). Delegamos al camino honesto: forma completa + árbol determinista.
+  // Auto-assign / walk-in conservan el flujo de abajo intacto (sobre el wrapper).
+  if (context.staffId && !context.autoAssign && !(context.isWalkIn ?? false)) {
+    return handleHonestAvailability(msg, context, deps, service, staffForService, requestedDate);
+  }
 
   // ── Retry limit para errores de disponibilidad ────────────────────────────
   // clarification_attempts se reutiliza como contador de reintentos de scheduling.
@@ -363,6 +381,148 @@ export async function handleShowingSlots(
     newContext,
     responseText,
   };
+}
+
+// ─── Disponibilidad honesta: barbero fijo ─────────────────────────────────────
+// Consume la FORMA completa del día (getDayAvailability, sin truncar) y aplica el
+// árbol determinista (slotPresentation). Fixea el "lo más cercano es X" falso: el
+// chequeo de hora exacta corre contra shape.all, no contra 3 slots truncados.
+// Determinismo (decisión 5): el árbol NUNCA toca el LLM; ask-franja y la muestra
+// representativa usan plantillas (el "o prefieres otra hora" es contractual);
+// solo "listar pocos" delega la redacción a Haiku sobre la decisión ya tomada.
+async function handleHonestAvailability(
+  msg:             LifestyleIncomingMessage,
+  context:         LifestyleBotContext,
+  deps:            StateHandlerDeps,
+  service:         { id: string; name: string; duration_minutes: number },
+  staffForService: StaffRow[],
+  requestedDate:   Date,
+): Promise<StateHandlerResult> {
+  const { business, supabase, anthropicKey } = deps;
+  const tz = business.timezone;
+  const schedulingRetries = context.clarification_attempts ?? 0;
+
+  // pendingFranjaChoice: la respuesta a "¿mañana o más tarde?" se parsea LOCAL como
+  // franja (NO fecha — "mañana" aquí = franja mañana, no día-siguiente). Si no es
+  // franja reconocible, NO re-preguntamos: mostramos una muestra de todo el día.
+  let hint: FranjaHint = {
+    requestedShift: context.requestedShift ?? null,
+    requestedTime:  context.requestedTime ?? null,
+  };
+  let forceRepresentativeAll = false;
+  let ctx = context;
+  if (context.pendingFranjaChoice) {
+    const franja = parseFranjaReply(msg.body);
+    ctx = { ...context, pendingFranjaChoice: false };
+    if (franja) hint = { requestedShift: franja };
+    else forceRepresentativeAll = true;
+  }
+
+  // Forma COMPLETA del día (shift=null → no pre-filtra; el árbol decide la franja).
+  let shape: DayAvailability;
+  try {
+    shape = await getDayAvailability({
+      businessId:          business.id,
+      serviceId:           service.id,
+      durationMinutes:     service.duration_minutes,
+      requestedDate,
+      shift:               null,
+      preferredStaffId:    context.staffId!,
+      isWalkIn:            false,
+      walkInBufferMinutes: business.walkInBufferMinutes,
+      staffToQuery:        staffForService,
+      supabase,
+      tz,
+    });
+  } catch (err) {
+    if (err instanceof SchedulingQueryError) {
+      if (schedulingRetries >= 1) {
+        return { newState: 'FALLBACK', newContext: { ...context, clarification_attempts: 0 }, responseText: business.fallbackMessage };
+      }
+      return { newState: 'SHOWING_SLOTS', newContext: { ...context, clarification_attempts: schedulingRetries + 1 }, responseText: SCHEDULING_ERROR_MESSAGE };
+    }
+    throw err;
+  }
+
+  const ctxOk = { ...ctx, clarification_attempts: 0 };
+
+  // Sin disponibilidad del barbero ese día → ofrecer auto-assign (comportamiento de hoy).
+  if (shape.all.length === 0) {
+    const staffName = staffForService.find((s) => s.id === context.staffId)?.name ?? 'ese barbero';
+    return {
+      newState:     'SHOWING_SLOTS',
+      newContext:   { ...ctxOk, staffId: undefined, autoAssign: true },
+      responseText: `${staffName} no tiene disponibilidad para ese dia. Buscando con otro barbero disponible...`,
+    };
+  }
+
+  // Decisión determinista.
+  const decision = forceRepresentativeAll
+    ? { mode: 'representative' as const, show: pickRepresentative(shape.all) }
+    : decidePresentation(shape, hint, tz);
+
+  // Pregunta binaria de franja (plantilla determinista; aún sin pendingSlots).
+  if (decision.mode === 'ask-franja') {
+    return {
+      newState:     'SHOWING_SLOTS',
+      newContext:   { ...ctxOk, pendingFranjaChoice: true },
+      responseText: buildFranjaQuestion(shape.total),
+    };
+  }
+
+  // list | representative → fijar pendingSlots del subconjunto elegido.
+  const pendingSlots: LifestylePendingSlot[] = decision.show.map((slot, i) => ({
+    index:     i + 1,
+    staffId:   slot.staffId,
+    staffName: slot.staffName,
+    startsAt:  slot.startsAt.toISOString(),
+    endsAt:    slot.endsAt.toISOString(),
+  }));
+  const newContext: LifestyleBotContext = { ...ctxOk, pendingSlots };
+
+  // exactMatchMissed contra shape.all (NO contra el display truncado) — el fix del bug.
+  let exactMatchMissed = false;
+  let requestedTimeLabel: string | undefined;
+  if (context.requestedTime) {
+    const [rh, rm] = context.requestedTime.split(':').map(Number);
+    const targetMin = (rh ?? 0) * 60 + (rm ?? 0);
+    const hasExact = shape.all.some((s) => Math.abs(utcToLocalMinutes(s.startsAt, tz) - targetMin) <= 5);
+    if (!hasExact) {
+      exactMatchMissed = true;
+      requestedTimeLabel = formatTimeHuman(context.requestedTime);
+    }
+  }
+
+  // Muestra representativa → plantilla determinista (el "o prefieres otra hora" es
+  // contractual → no va a Haiku). Preámbulo honesto si la hora exacta no existe.
+  if (decision.mode === 'representative') {
+    const times = decision.show.map((s) => formatTimeHumanFromDate(s.startsAt, tz));
+    const body  = buildRepresentativeMessage(times, shape.total);
+    const responseText = (exactMatchMissed && requestedTimeLabel)
+      ? `A las ${requestedTimeLabel} no tengo disponible. ${body}`
+      : body;
+    return { newState: 'CONFIRMING_APPOINTMENT', newContext, responseText };
+  }
+
+  // Listar pocos → Haiku redacta sobre la decisión YA tomada (no decide disponibilidad).
+  const staffName = staffForService.find((s) => s.id === context.staffId)?.name ?? null;
+  const responseText = await generateSlotsMessage({
+    slots:              decision.show,
+    isWalkIn:           false,
+    isReturning:        !!context.customerId,
+    serviceName:        service.name,
+    staffName,
+    autoAssign:         false,
+    anthropicKey,
+    system:             SLOTS_PRESENTER_SYSTEM,
+    businessId:         business.id,
+    customerPhone:      msg.customerPhone,
+    tz,
+    exactMatchMissed,
+    requestedTimeLabel,
+    presentByStaff:     context.presentBy === 'staff',
+  });
+  return { newState: 'CONFIRMING_APPOINTMENT', newContext, responseText };
 }
 
 // ─── Presentación de slots via Claude ────────────────────────────────────────
