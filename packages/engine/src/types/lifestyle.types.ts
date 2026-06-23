@@ -122,6 +122,22 @@ export const LifestyleBotContextSchema = z.object({
    */
   requestedTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
 
+  /**
+   * Hora ambigua aparcada esperando que el cliente aclare el período (R2 C2.1).
+   * Se setea en QUALIFYING_DATETIME cuando interpret() detecta una hora 1–6 EN
+   * PUNTO sin marcador am/pm ("a las 5") que no se puede desambiguar sin slots.
+   * El siguiente turno con "mañana"/"tarde" la resuelve a requestedTime. La fecha,
+   * si vino en el mismo turno, queda en requestedDate. null/ausente si no hay hora
+   * aparcada.
+   */
+  pendingPeriodTime: z
+    .object({
+      hour:   z.number().int().min(0).max(23),
+      minute: z.number().int().min(0).max(59),
+    })
+    .nullable()
+    .optional(),
+
   // ── Slots presentados ─────────────────────────────────────────────────────
 
   /**
