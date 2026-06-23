@@ -20,7 +20,7 @@ import { getCatalog, getStaffForService } from '../catalog';
 import { logBot } from '../../../utils/logger';
 import { FORMATTING_RULES } from '../prompt';
 import { getAvailableSlots, findSlotsInNextDays, SchedulingQueryError } from '../scheduling';
-import { formatTimeHumanFromDate, formatTimeHuman, buildBookingNameQuestion, detectsServiceCorrection, clearBookingSelection } from '../utils';
+import { formatTimeHumanFromDate, formatTimeHuman, detectsServiceCorrection, clearBookingSelection } from '../utils';
 import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '../tzUtils';
 import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -281,7 +281,13 @@ export async function handleShowingSlots(
     }
   }
 
-  // ── Un solo horario único (autoAssign) → AWAITING_BOOKING_NAME ───────────
+  // ── Un solo horario único (autoAssign) → CONFIRMING (propuesta negociable, R3)
+  // Antes saltaba directo a AWAITING_BOOKING_NAME, auto-confirmando el slot y
+  // cerrando la puerta a "preferís otra hora". Ahora se PROPONE el slot —
+  // manteniéndolo en pendingSlots — y se va a CONFIRMING_APPOINTMENT:
+  //   - "sí" cae en el handler P1 (confirmingAppointment.ts: pendingSlots.length===1
+  //     && isAffirmation) y avanza a nombre en UN paso (sin fricción extra).
+  //   - una hora distinta ("7pm") rutea a offer_nearest y ofrece la más cercana.
   if (context.autoAssign && displaySlots.length === 1) {
     const chosen        = displaySlots[0]!;
     const chosenDateStr = utcToLocalDateStr(chosen.startsAt, business.timezone);
@@ -290,24 +296,27 @@ export async function handleShowingSlots(
     const monthName     = MONTHS_ES[parseInt(chosenDateStr.split('-')[1]!, 10) - 1]!;
     const timeStr       = formatTimeHumanFromDate(chosen.startsAt, business.timezone);
 
-    const { nameQuestion, pendingBookingName } = buildBookingNameQuestion(msg.customerName);
+    const pendingSlots: LifestylePendingSlot[] = [{
+      index:     1,
+      staffId:   chosen.staffId,
+      staffName: chosen.staffName,
+      startsAt:  chosen.startsAt.toISOString(),
+      endsAt:    chosen.endsAt.toISOString(),
+    }];
 
     const newContext: LifestyleBotContext = {
       ...contextAfterSlots,
-      staffId:            chosen.staffId,
-      selectedSlot:       chosen.startsAt.toISOString(),
-      pendingSlots:       [],
-      pendingBookingName,
+      pendingSlots,
     };
 
-    const confirmText = exactMatchMissed && requestedTimeLabel
-      ? `A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano que hay es el ${dayName} ${dayNum} de ${monthName} a las ${timeStr} con ${chosen.staffName}. ${nameQuestion}`
-      : `Te asigno con ${chosen.staffName} el ${dayName} ${dayNum} de ${monthName} a las ${timeStr}. ${nameQuestion}`;
+    const proposalText = exactMatchMissed && requestedTimeLabel
+      ? `A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano que hay es el ${dayName} ${dayNum} de ${monthName} a las ${timeStr} con ${chosen.staffName}. ¿Te sirve o preferis otra hora?`
+      : `Tengo disponible el ${dayName} ${dayNum} de ${monthName} a las ${timeStr} con ${chosen.staffName}. ¿Te sirve o preferis otra hora?`;
 
     return {
-      newState:     'AWAITING_BOOKING_NAME',
+      newState:     'CONFIRMING_APPOINTMENT',
       newContext,
-      responseText: confirmText,
+      responseText: proposalText,
     };
   }
 
