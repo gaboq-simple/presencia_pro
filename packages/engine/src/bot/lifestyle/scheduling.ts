@@ -149,9 +149,12 @@ function generateSlotsForStaff(
   ) {
     const slotEnd = slotStart + durationMinutes;
 
-    // Filtrar por turno si el cliente especificó preferencia
-    if (shift === 'morning'   && slotStart >= 13 * 60) break;
-    if (shift === 'afternoon' && slotEnd   <= 13 * 60) continue;
+    // Filtrar por turno si el cliente especificó preferencia. Corte alineado al
+    // bucketing de franjas (AFTERNOON_CUTOFF=14:00): mañana = empieza antes de las
+    // 14:00; tarde = termina después de las 14:00. Antes 13:00 — la banda 13:00–14:00
+    // ahora pertenece a la mañana, consistente con getDayAvailability.
+    if (shift === 'morning'   && slotStart >= AFTERNOON_CUTOFF) break;
+    if (shift === 'afternoon' && slotEnd   <= AFTERNOON_CUTOFF) continue;
 
     // Verificar que no colisiona con ninguna ocupación
     const isOccupied = occupiedRanges.some(
