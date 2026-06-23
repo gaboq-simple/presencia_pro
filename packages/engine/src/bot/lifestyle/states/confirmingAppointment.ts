@@ -44,6 +44,8 @@ import {
   isNegation,
   extractRawTime,
   resolveTargetMinutes,
+  type RawTime,
+  type Interpretation,
 } from '../interpreter';
 import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -126,6 +128,24 @@ export async function handleConfirmingAppointment(
 
   const attempts = context.clarification_attempts ?? 0;
 
+  // ── Afirmación / negación: del intérprete (R4.1), con fallback local ──────
+  // Consumimos `deps.interpretation.affirmation` (computado 1×/turno en dispatch)
+  // en vez de re-invocar isAffirmation/isNegation sobre msg.body. El fallback a
+  // las listas locales cubre los call-sites que arman deps a mano (tests); los
+  // parsers viejos siguen vivos como respaldo a propósito hasta cerrar R4
+  // (estrangulamiento: interpretation se vuelve requerido al migrar el último
+  // estado, y ahí se borran los fallbacks de un golpe).
+  //
+  // PRECEDENCIA: el intérprete colapsa afirmación-primero
+  // (isAffirmation ? true : isNegation ? false : null). Eso difiere del viejo
+  // orden (que consultaba isAffirmation/isNegation por separado en distinto punto
+  // del control de flujo) SOLO si un mensaje dispara AMBOS: una palabra afirmativa
+  // anclada + la única negación anclada "negativo" juntas ("claro, negativo") →
+  // viejo: negación; nuevo: afirmación. Irreal en WhatsApp; aceptado en R4.1.
+  const interp = deps.interpretation;
+  const isYes  = interp ? interp.affirmation === true  : isAffirmation(msg.body);
+  const isNo   = interp ? interp.affirmation === false : isNegation(msg.body);
+
   // ── Desambiguación del dígito pelado ambiguo (S5-BOT-07) ──────────────────
   // El turno anterior preguntamos "¿te refieres a la X?". Resolvemos ANTES de la
   // aceptación de nearestOfferSlot y del router. Exclusión mutua con S5-BOT-03:
@@ -138,12 +158,12 @@ export async function handleConfirmingAppointment(
 
     // "sí" → era la HORA: reusar el requery de día real (S5-BOT-02) vía
     // offer_nearest con la hora guardada, sin duplicar la lógica.
-    if (isAffirmation(msg.body)) {
+    if (isYes) {
       return handleOfferNearest(requestedMinutes, pendingSlots[0]!, cleared, attempts, business, supabase);
     }
     // "no" → era el ÍNDICE (default conservador). buildConfirmationResult avanza
     // y RESETEA rejection_attempts; nunca lo incrementa (NO cruzar contadores).
-    if (isNegation(msg.body)) {
+    if (isNo) {
       const chosen = pendingSlots.find((s) => s.index === indexChoice) ?? pendingSlots[indexChoice - 1];
       if (chosen) {
         return buildConfirmationResult(cleared, chosen, business, supabase, msg.customerName);
@@ -156,7 +176,7 @@ export async function handleConfirmingAppointment(
 
   // ── Aceptación del slot cercano ofrecido en el turno anterior (decisión b) ─
 
-  if (context.nearestOfferSlot && isAffirmation(msg.body)) {
+  if (context.nearestOfferSlot && isYes) {
     const offered = pendingSlots.find((s) => s.startsAt === context.nearestOfferSlot);
     if (offered) {
       // El cliente ACEPTA explícitamente el slot ofrecido. Alinear
@@ -172,13 +192,13 @@ export async function handleConfirmingAppointment(
   // sola opción caía al clarify genérico. Si hay exactamente un slot pendiente,
   // una afirmación lo acepta. Con múltiples slots NO se auto-selecciona: se
   // re-presenta concreto más abajo (post-router) para que el cliente elija.
-  if (!context.nearestOfferSlot && pendingSlots.length === 1 && isAffirmation(msg.body)) {
+  if (!context.nearestOfferSlot && pendingSlots.length === 1 && isYes) {
     return buildConfirmationResult(context, pendingSlots[0]!, business, supabase, msg.customerName);
   }
 
   // ── Ruteo determinista de la selección ────────────────────────────────────
 
-  const route = routeSlotSelection(msg.body, pendingSlots, msg.timestamp, business.timezone);
+  const route = routeSlotSelection(msg.body, pendingSlots, msg.timestamp, business.timezone, interp);
 
   // ── Selección de barbero en prosa (S5-BOT-10, BUG 1) ──────────────────────
   // "Con Carlos" / "Carlos porfa" no tienen rama en routeSlotSelection → caen a
@@ -295,7 +315,7 @@ export async function handleConfirmingAppointment(
   // extrajo la hora y avanzó), así que nunca llegan a este punto. Solo el "no"
   // SIN señal de selección entra a la progresión escalonada de rechazo.
 
-  if (isNegation(msg.body)) {
+  if (isNo) {
     return buildRejectionResult(context, pendingSlots, business);
   }
 
@@ -320,7 +340,7 @@ export async function handleConfirmingAppointment(
   // "Sí" / "va" / "dale" sin señal de selección y con varias opciones: el cliente
   // quiere agendar pero no dijo cuál. Re-presentar las horas concretas (sin
   // auto-seleccionar) en vez del clarify genérico.
-  if (isAffirmation(msg.body) && pendingSlots.length > 1) {
+  if (isYes && pendingSlots.length > 1) {
     const tz    = business.timezone;
     const times = pendingSlots.map((s) => formatTimeHumanFromDate(new Date(s.startsAt), tz));
     const offer = `a las ${times.slice(0, -1).join(', a las ')} o a las ${times[times.length - 1]}`;
@@ -567,6 +587,7 @@ export function routeSlotSelection(
   slots: LifestylePendingSlot[],
   now:   Date,
   tz:    string,
+  interpretation?: Interpretation,
 ): SelectionRoute {
   const lower = body.trim().toLowerCase();
 
@@ -595,8 +616,15 @@ export function routeSlotSelection(
     return { action: 'ask_who' };
   }
 
-  // 3. Selección natural: hora / ordinal / difusa.
-  const match = matchNaturalSlot(lower, slots, tz);
+  // 3. Selección natural: hora / ordinal / difusa. La hora de reloj viene del
+  //    intérprete (R4.1: interpretation.time) cuando el caller lo pasa; si no
+  //    (call-sites que llaman sin interpretation, p. ej. tests directos), cae al
+  //    parser local extractRawTime (estrangulamiento — mismo valor, solo difiere
+  //    el .trim() que no afecta los regex anclados). resolveTargetMinutes (AM/PM
+  //    contra slots reales) sigue siendo política de estado y se queda en
+  //    matchNaturalSlot. Ordinal/difusa NO son hora → siguen leyendo de `lower`.
+  const raw = interpretation ? toRawTime(interpretation.time) : extractRawTime(lower);
+  const match = matchNaturalSlot(lower, slots, tz, raw);
   if (match.kind === 'exact')   return { action: 'select', slot: match.slot };
   if (match.kind === 'nearest') return { action: 'offer_nearest', requestedMinutes: match.requestedMinutes, slot: match.slot };
 
@@ -786,10 +814,18 @@ type NaturalMatch =
   | { kind: 'nearest'; requestedMinutes: number; slot: LifestylePendingSlot }
   | { kind: 'none' };
 
+// Convierte `interpretation.time` ({hour,minute,period}) al `RawTime`
+// ({hour,minute,explicitPeriod}) que consume resolveTargetMinutes. Mismo dato; el
+// intérprete sólo renombró el campo de período en su tipo público. null = sin hora.
+function toRawTime(t: Interpretation['time']): RawTime | null {
+  return t ? { hour: t.hour, minute: t.minute, explicitPeriod: t.period } : null;
+}
+
 function matchNaturalSlot(
   lower: string,
   slots: LifestylePendingSlot[],
   tz:    string,
+  raw:   RawTime | null,
 ): NaturalMatch {
   if (slots.length === 0) return { kind: 'none' };
 
@@ -797,7 +833,7 @@ function matchNaturalSlot(
   const slotMins = sorted.map((s) => utcToLocalMinutes(new Date(s.startsAt), tz));
 
   // A) Hora explícita ("5 de la tarde", "a las 5", "5pm", "5:15", "el de las 5").
-  const raw = extractRawTime(lower);
+  //    `raw` lo resuelve el caller (interpretation.time o extractRawTime local).
   if (raw) {
     const target = resolveTargetMinutes(raw, slotMins);
     let bestIdx = 0;
