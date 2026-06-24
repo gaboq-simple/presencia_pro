@@ -14,6 +14,7 @@
 
 import type { DayAvailability } from '../scheduling';
 import { AFTERNOON_CUTOFF } from '../scheduling';
+import { resolveTargetMinutes } from '../interpreter';
 import { utcToLocalMinutes } from '../tzUtils';
 import type { SlotCandidate } from '../types';
 
@@ -123,6 +124,35 @@ const FRANJA_QUESTIONS = [
 
 export function buildFranjaQuestion(variant = 0): string {
   return FRANJA_QUESTIONS[((variant % FRANJA_QUESTIONS.length) + FRANJA_QUESTIONS.length) % FRANJA_QUESTIONS.length]!;
+}
+
+// ─── FIX 2: resolución de hora aparcada contra la AGENDA real ──────────────────
+// Pura y testeable. La hora ambigua (1–11 en punto, defer-agenda) se desambigua
+// AM/PM por el slot REAL más cercano de `all` (TODA la agenda del día, NO la muestra
+// sesgada de 3): "a las 8" + agenda hasta 21:00 → 20:00, no 8am. Reusa
+// `resolveTargetMinutes` SIN tocarla — solo se le alimentan los minutos de `all`.
+// `all` vacío → 'ask' (último recurso: el caller pregunta mañana/noche, nunca asume AM).
+export function resolveParkedHour(
+  parked: { hour: number; minute: number },
+  all:    SlotCandidate[],
+  tz:     string,
+): { kind: 'resolved'; hhmm: string; minutes: number } | { kind: 'ask' } {
+  if (all.length === 0) return { kind: 'ask' };
+  const allMins   = all.map((s) => utcToLocalMinutes(s.startsAt, tz));
+  const targetMin = resolveTargetMinutes(
+    { hour: parked.hour, minute: parked.minute, explicitPeriod: null },
+    allMins,
+  );
+  const hh = String(Math.floor(targetMin / 60)).padStart(2, '0');
+  const mm = String(targetMin % 60).padStart(2, '0');
+  return { kind: 'resolved', hhmm: `${hh}:${mm}`, minutes: targetMin };
+}
+
+// Último recurso (FIX 2): sin agenda para desambiguar el AM/PM de la hora aparcada
+// (el barbero no trabaja ese día). NUNCA asumir AM — preguntar. "noche" (no "tarde")
+// porque el caso típico es la hora PM ("a las 8" → 20:00 = "8 de la noche").
+export function buildLastResortPeriodQuestion(): string {
+  return 'Esa hora la prefieres de la mañana o de la noche?';
 }
 
 // `times` ya vienen formateadas (ej. "10:00", "2:00 pm"). El caller las arma con tz.

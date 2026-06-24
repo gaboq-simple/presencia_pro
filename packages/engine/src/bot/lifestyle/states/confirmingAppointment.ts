@@ -288,6 +288,7 @@ export async function handleConfirmingAppointment(
           requestedDate:          undefined,
           requestedTime:          undefined,
           requestedShift:         undefined,
+          pendingAgendaTime:      undefined,
           pendingSlots:           undefined,
           nearestOfferSlot:       null,
           clarification_attempts: 0,

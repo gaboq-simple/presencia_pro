@@ -30,7 +30,7 @@ import {
 import { buildBusinessContext } from '../businessContext';
 import { routeSideQuestion, derivaFallback, composeGreetingSideAnswer, refineTopic, closingForTopic } from '../sideQuestion';
 import { getCatalog, getActiveStaff } from '../catalog';
-import { parseDate, resolveInterpretedTime } from './qualifyingDatetime';
+import { parseDate, resolveInterpretedTime, applyTimeRes } from './qualifyingDatetime';
 import { formatTimeHuman } from '../utils';
 import { buildDefaultGreetingPlan, buildGenerativeMessages, type ConvTurn } from '../continuity';
 import type { LifestyleIncomingMessage, ServiceRow, StaffRow, StateHandlerDeps, StateHandlerResult } from '../types';
@@ -173,9 +173,15 @@ export async function handleGreeting(
   const timeConfident = (multi.timeMatch?.confidence ?? 0) >= CONFIDENCE_THRESHOLD;
   const shiftRaw      = timeConfident ? multi.timeMatch!.shift : undefined;
 
+  // FIX 2: MISMA política que qualifyingDatetime (applyTimeRes). 'resolved' → hora
+  // concreta; 'defer-agenda' (1–11 en punto sin marcador) → parkear cruda en
+  // pendingAgendaTime y resolver contra la agenda real en SHOWING_SLOTS.
   const interpretedTime = deps.interpretation?.time ?? null;
-  const timeRes         = interpretedTime ? resolveInterpretedTime(interpretedTime) : null;
-  const parsedTimeStr: string | null = timeRes?.kind === 'resolved' ? timeRes.hhmm : null;
+  const timePatch       = applyTimeRes(interpretedTime ? resolveInterpretedTime(interpretedTime) : null);
+  const parsedTimeStr: string | null =
+    timePatch && 'requestedTime' in timePatch ? timePatch.requestedTime : null;
+  const parsedAgendaTime: { hour: number; minute: number } | null =
+    timePatch && 'pendingAgendaTime' in timePatch ? timePatch.pendingAgendaTime : null;
 
   // Derivar shift: desde HH:MM resuelto (preciso) o desde el turno del clasificador
   let parsedShift: 'morning' | 'afternoon' | null = null;
@@ -192,7 +198,10 @@ export async function handleGreeting(
   // automáticamente: no tiene sentido preguntar "¿cuál servicio?". Así
   // "quiero agendar una cita para mañana" avanza sin trabarse. No aplica a
   // preguntas del negocio (se responden aparte) ni a saludos sin señal de reserva.
-  const hasBookingSignal = Boolean(resolvedStaff || parsedDate || parsedTimeStr || multi.confirmYes);
+  // Una hora aparcada (defer-agenda) también es señal de reserva: "a las 8" sin
+  // servicio explícito debe auto-elegir el servicio único igual que antes (cuando
+  // "a las 8" resolvía directo a 08:00). Si no, perdería el booking-signal.
+  const hasBookingSignal = Boolean(resolvedStaff || parsedDate || parsedTimeStr || parsedAgendaTime || multi.confirmYes);
   if (!resolvedService && ambiguousServices.length === 0 && services.length === 1
       && !multi.sideQuestion && hasBookingSignal) {
     resolvedService = services[0]!;
@@ -223,6 +232,7 @@ export async function handleGreeting(
     ...(parsedDate         ? { requestedDate: parsedDate, isWalkIn: false } : {}),
     ...(parsedShift        ? { requestedShift: parsedShift } : {}),
     ...(parsedTimeStr      ? { requestedTime: parsedTimeStr } : {}),
+    ...(parsedAgendaTime   ? { pendingAgendaTime: parsedAgendaTime } : {}),
     ...(ambiguousServices.length > 1
       ? { ambiguous_service_candidates: ambiguousServices.map((s) => s.id) }
       : {}),

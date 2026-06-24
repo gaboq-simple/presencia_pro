@@ -24,6 +24,7 @@ export function clearBookingSelection(): Partial<LifestyleBotContext> {
     requestedDate:                undefined,
     requestedTime:                undefined,
     requestedShift:               undefined,
+    pendingAgendaTime:            undefined,
     pendingSlots:                 undefined,
     nearestOfferSlot:             null,
     ambiguous_service_candidates: undefined,
