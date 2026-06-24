@@ -123,16 +123,38 @@ export const LifestyleBotContextSchema = z.object({
   requestedTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
 
   /**
-   * Hora ambigua aparcada esperando que el cliente aclare el período (R2 C2.1).
-   * Se setea en QUALIFYING_DATETIME cuando interpret() detecta una hora 1–6 EN
-   * PUNTO sin marcador am/pm ("a las 5") que no se puede desambiguar sin slots.
-   * El siguiente turno con "mañana"/"tarde" la resuelve a requestedTime. La fecha,
-   * si vino en el mismo turno, queda en requestedDate. null/ausente si no hay hora
-   * aparcada.
+   * @deprecated (FIX 2 / disponibilidad honesta) — superado por `pendingAgendaTime`.
+   * Ya no se ESCRIBE: la hora ambigua se resuelve contra la agenda real, no se
+   * pregunta el período de entrada. El campo se conserva en el schema solo por
+   * COMPATIBILIDAD con conversaciones en vuelo al momento del deploy (el bloque
+   * resolvedor en qualifyingDatetime.ts las cierra). DEUDA: borrar el campo + su
+   * resolvedor en una limpieza futura (semanas post-deploy, sin conversaciones en
+   * vuelo). Como el `?? parseViejo()`: deuda consciente con fecha de cobro.
+   *
+   * Antes: hora ambigua aparcada esperando que el cliente aclare el período (R2 C2.1).
    */
   pendingPeriodTime: z
     .object({
       hour:   z.number().int().min(0).max(23),
+      minute: z.number().int().min(0).max(59),
+    })
+    .nullable()
+    .optional(),
+
+  /**
+   * Hora ambigua APARCADA cruda para resolver contra la AGENDA real (FIX 2 /
+   * disponibilidad honesta). A diferencia de `pendingPeriodTime` (que PREGUNTABA el
+   * período), esta NO molesta al cliente: se setea cuando `resolveInterpretedTime`
+   * devuelve kind:'defer-agenda' (hora 1–11 EN PUNTO sin marcador am/pm — "a las 8"
+   * = 8am ó 8pm) y se resuelve sola en `handleHonestAvailability` vía
+   * `resolveTargetMinutes(raw, shape.all)`: el barbero+fecha ya están, así que la
+   * agenda decide el AM/PM por el slot real más cercano. Último recurso (sin agenda
+   * alcanzable): se pregunta "¿de la mañana o de la noche?". Se limpia al resolverse
+   * o en cualquier reset de reserva. null/ausente si no hay hora pendiente.
+   */
+  pendingAgendaTime: z
+    .object({
+      hour:   z.number().int().min(1).max(11),
       minute: z.number().int().min(0).max(59),
     })
     .nullable()

@@ -298,6 +298,66 @@ test('T13 (edge) pendingFranjaChoice + "mañana a las 8" → conservador: la key
   assert.ok(ps.length > 0 && ps.every((p) => psLocalMin(p) < AFTERNOON_CUTOFF_MIN), 'trata "mañana" como franja mañana (documentado)');
 });
 
+// ─── FIX 2: resolución de hora aparcada contra la agenda — T14-T16 ────────────
+
+test('T14 (FIX 2, red→green) pendingAgendaTime {8,0} + agenda hasta 21:00 → 20:00 (NO 8am)', async () => {
+  // El smoke: "a las 8" en el browse de un barbero que abre hasta las 21:00. Antes
+  // "a las 8" se horneaba a 08:00 (8am) y el bot decía "no tengo / lo más cercano
+  // es la mañana". Ahora se difiere a la agenda: 8 = [8am, 8pm] → 20:00 tiene slot
+  // real (8pm gana), sin exactMatchMissed.
+  const r = await handleShowingSlots(
+    showMsg('a las 8'),
+    showCtx({ pendingAgendaTime: { hour: 8, minute: 0 } }),
+    handlerDeps(handlerSupabase('12:00:00', '21:00:00')),
+  );
+  assert.equal(r.newContext.requestedTime, '20:00', 'la agenda desambigua 8 → 20:00 (no 08:00)');
+  assert.equal(r.newContext.pendingAgendaTime, undefined, 'la hora aparcada se libera al resolver');
+  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
+  // último recurso => SHOWING_SLOTS + pendingFranjaChoice; acá la agenda resolvió sola.
+  // (No chequear "de la noche" en el texto: formatTimeHuman(20:00) ES "8 de la noche".)
+  assert.ok(!r.newContext.pendingFranjaChoice, 'NO usa el último recurso: la agenda resolvió sola');
+  assert.doesNotMatch(r.responseText, /no tengo disponible/i, '20:00 SÍ existe → sin preámbulo de "no tengo"');
+});
+
+test('T15 (FIX 2, happy path) pendingAgendaTime con slots → resuelve inline, NO cuela pregunta de más', async () => {
+  // Garantía (b) del diseño: en el caso feliz (hay agenda) NO debe aparecer una
+  // pregunta de período en el flujo normal. Resuelve y avanza a CONFIRMING.
+  const r = await handleShowingSlots(
+    showMsg('a las 8'),
+    showCtx({ pendingAgendaTime: { hour: 8, minute: 0 } }),
+    handlerDeps(handlerSupabase('10:00:00', '20:00:00')),
+  );
+  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT', 'no se queda en SHOWING_SLOTS preguntando');
+  assert.ok(!r.newContext.pendingFranjaChoice, 'no abre un ciclo de pregunta de franja');
+  assert.equal(r.newContext.pendingAgendaTime, undefined, 'resuelta');
+  assert.ok(/^\d{2}:\d{2}$/.test(r.newContext.requestedTime ?? ''), 'fijó una hora concreta');
+});
+
+test('T16 (FIX 2, último recurso) pendingAgendaTime SIN agenda ese día → pregunta mañana/noche, NUNCA asume AM', async () => {
+  function noAvailSupabase(): never {
+    return makeSupabase({
+      services:                  [{ id: SVC, name: 'Corte', description: null, duration_minutes: 30, price: 200, currency: 'MXN' }],
+      staff:                     [STAFF],
+      staff_availability:        [],   // el barbero NO trabaja ese día → no hay agenda
+      appointments:              [],
+      staff_blocks:              [],
+      staff_schedule_exceptions: [],
+      staff_services:            [{ staff_id: STAFF.id }],
+    });
+  }
+  // Turno 1: sin agenda para desambiguar → pregunta mañana/noche (no asume AM).
+  const r1 = await handleShowingSlots(showMsg('a las 8'), showCtx({ pendingAgendaTime: { hour: 8, minute: 0 } }), handlerDeps(noAvailSupabase()));
+  assert.equal(r1.newState, 'SHOWING_SLOTS');
+  assert.match(r1.responseText, /ma[ñn]ana o de la noche/i, 'pregunta el período como último recurso');
+  assert.equal(r1.newContext.pendingFranjaChoice, true, 'arma el reply');
+  assert.deepEqual(r1.newContext.pendingAgendaTime, { hour: 8, minute: 0 }, 'conserva la hora cruda para resolverla con la franja');
+
+  // Turno 2: "de la noche" resuelve el AM/PM → 20:00 (no 8am).
+  const r2 = await handleShowingSlots(showMsg('de la noche'), r1.newContext, handlerDeps(noAvailSupabase()));
+  assert.equal(r2.newContext.requestedTime, '20:00', 'la franja resuelve 8 → 20:00, nunca AM');
+  assert.equal(r2.newContext.pendingAgendaTime, undefined, 'suelta el parking (no loop)');
+});
+
 // ─── Texto FINAL del handler en modo list (el test que faltó) — T17-T19 ───────
 // Los tests del árbol (T1-T6) son PUROS: ven la `decision`, no el responseText tras
 // Haiku. Estos driveán el handler y afirman sobre el TEXTO FINAL. En test sin red

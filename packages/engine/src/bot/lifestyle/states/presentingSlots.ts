@@ -28,6 +28,8 @@ import {
   buildFranjaQuestion,
   buildRepresentativeMessage,
   buildListMessage,
+  resolveParkedHour,
+  buildLastResortPeriodQuestion,
   type FranjaHint,
 } from './slotPresentation';
 import { formatTimeHumanFromDate, formatTimeHuman, detectsServiceCorrection, clearBookingSelection } from '../utils';
@@ -412,7 +414,21 @@ async function handleHonestAvailability(
   };
   let forceRepresentativeAll = false;
   let ctx = context;
-  if (context.pendingFranjaChoice) {
+  if (context.pendingAgendaTime && context.pendingFranjaChoice) {
+    // Último recurso (FIX 2) — REPLY: preguntamos mañana/noche porque no había agenda
+    // para desambiguar la hora aparcada. La franja resuelve su AM/PM ahora. Recibida o
+    // no, SOLTAMOS el parking (evita loop); sin franja, seguimos sin la hora.
+    const franja = parseFranjaReply(msg.body);
+    if (franja) {
+      const { hour, minute } = context.pendingAgendaTime;
+      const h24  = franja === 'afternoon' && hour < 12 ? hour + 12 : hour;
+      const hhmm = `${String(h24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      ctx  = { ...context, pendingFranjaChoice: false, pendingAgendaTime: undefined, requestedTime: hhmm, requestedShift: franja };
+      hint = { requestedTime: hhmm };
+    } else {
+      ctx = { ...context, pendingFranjaChoice: false, pendingAgendaTime: undefined };
+    }
+  } else if (context.pendingFranjaChoice) {
     const franja = parseFranjaReply(msg.body);
     ctx = { ...context, pendingFranjaChoice: false };
     if (franja) hint = { requestedShift: franja };
@@ -445,17 +461,45 @@ async function handleHonestAvailability(
     throw err;
   }
 
-  const ctxOk = { ...ctx, clarification_attempts: 0 };
-
-  // Sin disponibilidad del barbero ese día → ofrecer auto-assign (comportamiento de hoy).
+  // Sin disponibilidad del barbero ese día.
   if (shape.all.length === 0) {
+    // Último recurso (FIX 2): hay una hora aparcada que NO pudimos resolver contra
+    // agenda (el barbero no trabaja ese día). NO asumir AM ni auto-asignar en
+    // silencio perdiendo la hora: preguntar mañana/noche, conservando la hora cruda.
+    // El reply la resuelve (bloque pendingAgendaTime + pendingFranjaChoice de arriba).
+    if (ctx.pendingAgendaTime) {
+      return {
+        newState:     'SHOWING_SLOTS',
+        newContext:   { ...ctx, clarification_attempts: 0, pendingFranjaChoice: true },
+        responseText: buildLastResortPeriodQuestion(),
+      };
+    }
     const staffName = staffForService.find((s) => s.id === context.staffId)?.name ?? 'ese barbero';
     return {
       newState:     'SHOWING_SLOTS',
-      newContext:   { ...ctxOk, staffId: undefined, autoAssign: true },
+      newContext:   { ...ctx, clarification_attempts: 0, staffId: undefined, autoAssign: true, pendingAgendaTime: undefined },
       responseText: `${staffName} no tiene disponibilidad para ese dia. Buscando con otro barbero disponible...`,
     };
   }
+
+  // FIX 2: resolver la hora aparcada (defer-agenda) contra la AGENDA REAL. shape.all
+  // ya no está vacío aquí → resolveParkedHour siempre resuelve (nunca 'ask'). Alimenta
+  // shape.all a resolveTargetMinutes (sin tocarla): "a las 8" + Andrés (hasta 21:00) →
+  // 20:00, no 8am. El shift se DERIVA aquí (antes no sabíamos AM/PM).
+  if (ctx.pendingAgendaTime) {
+    const res = resolveParkedHour(ctx.pendingAgendaTime, shape.all, tz);
+    if (res.kind === 'resolved') {
+      ctx  = {
+        ...ctx,
+        requestedTime:     res.hhmm,
+        requestedShift:    res.minutes >= AFTERNOON_CUTOFF ? 'afternoon' : 'morning',
+        pendingAgendaTime: undefined,
+      };
+      hint = { requestedTime: res.hhmm };
+    }
+  }
+
+  const ctxOk = { ...ctx, clarification_attempts: 0 };
 
   // Decisión determinista.
   const decision = forceRepresentativeAll
@@ -482,15 +526,17 @@ async function handleHonestAvailability(
   const newContext: LifestyleBotContext = { ...ctxOk, pendingSlots };
 
   // exactMatchMissed contra shape.all (NO contra el display truncado) — el fix del bug.
+  // Usa ctx.requestedTime (la hora YA resuelta: una hora aparcada se resolvió arriba
+  // contra la agenda; una explícita ya venía en context). NO context.requestedTime.
   let exactMatchMissed = false;
   let requestedTimeLabel: string | undefined;
-  if (context.requestedTime) {
-    const [rh, rm] = context.requestedTime.split(':').map(Number);
+  if (ctx.requestedTime) {
+    const [rh, rm] = ctx.requestedTime.split(':').map(Number);
     const targetMin = (rh ?? 0) * 60 + (rm ?? 0);
     const hasExact = shape.all.some((s) => Math.abs(utcToLocalMinutes(s.startsAt, tz) - targetMin) <= 5);
     if (!hasExact) {
       exactMatchMissed = true;
-      requestedTimeLabel = formatTimeHuman(context.requestedTime);
+      requestedTimeLabel = formatTimeHuman(ctx.requestedTime);
     }
   }
 

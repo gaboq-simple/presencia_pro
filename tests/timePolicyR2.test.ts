@@ -160,9 +160,14 @@ test('"5pm" pegado sin fecha → PM explícito 17:00 (no pregunta período)', as
   assert.ok(/d[ií]a/i.test(r.responseText ?? ''), 'debe preguntar por el día');
 });
 
-// ─── 4. "a las 5" ambiguo sin período → pregunta período, APARCA la hora ───────
+// ─── 4. "a las 5" ambiguo sin período → APARCA y difiere a la AGENDA (FIX 2) ────
+// CAMBIO DELIBERADO de comportamiento: antes 1–6 en punto PREGUNTABA el período
+// ("¿mañana o tarde?") y aparcaba en pendingPeriodTime. Ahora UNIFICA con 7–11:
+// difiere a la agenda real (pendingAgendaTime) y, sin fecha, pregunta el DÍA. La
+// desambiguación AM/PM la hace la agenda en SHOWING_SLOTS (Carlos 10–20 → 17:00),
+// no una pregunta de entrada.
 
-test('"a las 5" sin período → no adivina PM: pregunta período y aparca la hora', async () => {
+test('"a las 5" sin período → NO pregunta período: aparca en agenda y pregunta el día (FIX 2)', async () => {
   const deps = makeDeps();
   const r1 = await dispatch(
     'QUALIFYING_DATETIME',
@@ -171,14 +176,17 @@ test('"a las 5" sin período → no adivina PM: pregunta período y aparca la ho
     deps,
   );
   assert.equal(r1.newState, 'QUALIFYING_DATETIME');
-  assert.deepEqual(r1.newContext.pendingPeriodTime, { hour: 5, minute: 0 });
-  assert.equal(r1.newContext.requestedTime, undefined, 'no debe hornear un PM falso');
-  assert.ok(/ma[ñn]ana|tarde/i.test(r1.responseText ?? ''), 'debe preguntar mañana/tarde');
+  assert.deepEqual(r1.newContext.pendingAgendaTime, { hour: 5, minute: 0 }, 'aparca cruda para la agenda');
+  assert.equal(r1.newContext.pendingPeriodTime, undefined, 'ya NO usa el ask de período');
+  assert.equal(r1.newContext.requestedTime, undefined, 'no hornea un PM/AM falso');
+  assert.ok(/d[ií]a/i.test(r1.responseText ?? ''), 'pregunta el DÍA, no mañana/tarde');
+  assert.ok(!/ma[ñn]ana o.*tarde/i.test(r1.responseText ?? ''), 'NO pregunta el período');
 
-  // El siguiente turno resuelve el período → 17:00.
-  const r2 = await dispatch('QUALIFYING_DATETIME', makeMsg('en la tarde'), r1.newContext, deps);
-  assert.equal(r2.newContext.requestedTime, '17:00');
-  assert.equal(r2.newContext.pendingPeriodTime, undefined, 'la hora aparcada se libera');
+  // Turno siguiente: con el día, SHOWING_SLOTS resuelve la hora contra la agenda de
+  // Carlos (10–20) → 17:00 (5pm gana: tiene slot real, 5am no).
+  const r2 = await dispatch('QUALIFYING_DATETIME', makeMsg('mañana'), r1.newContext, deps);
+  assert.equal(r2.newContext.requestedTime, '17:00', 'la agenda desambigua 5 → 17:00');
+  assert.equal(r2.newContext.pendingAgendaTime, undefined, 'la hora aparcada se libera al resolver');
 });
 
 // ─── 5. Política única: greeting resuelve "a las 7 pm" igual que datetime (19:00) ─
@@ -189,4 +197,22 @@ test('"a las 5" sin período → no adivina PM: pregunta período y aparca la ho
 test('política única: "a las 7 pm" en GREETING resuelve a 19:00 (mismo parser que datetime)', async () => {
   const r = await dispatch('GREETING', makeMsg('a las 7 pm'), {}, makeDeps());
   assert.equal(r.newContext.requestedTime, '19:00', 'greeting usa la misma resolución de hora');
+});
+
+// ─── 6. FIX 2 (browse, red→green): "a las 8" en QUALIFYING_DATETIME → 20:00, NO 8am ─
+// El smoke exacto: el cliente dice "a las 8" en el browse de un barbero. En main esto
+// se horneaba a 08:00 (regla h>=7) y el bot ofrecía la mañana. Ahora difiere a la
+// agenda: "mañana a las 8" + barbero (10–20) → la hora se resuelve a 20:00 (8pm gana,
+// tiene slot más cercano que 8am) al encadenar a SHOWING_SLOTS. ROJO en main (08:00).
+
+test('FIX 2 (browse): "mañana a las 8" + barbero → 20:00 (no 08:00) vía agenda', async () => {
+  const r = await dispatch(
+    'QUALIFYING_DATETIME',
+    makeMsg('mañana a las 8'),
+    { serviceId: SVC, staffId: ANDRES },
+    makeDeps(),
+  );
+  assert.equal(r.newContext.requestedTime, '20:00', 'la agenda desambigua 8 → 20:00 (8pm)');
+  assert.notEqual(r.newContext.requestedTime, '08:00', 'NUNCA hornea 8am (el bug viejo)');
+  assert.equal(r.newContext.pendingAgendaTime, undefined, 'la hora aparcada se resolvió');
 });
