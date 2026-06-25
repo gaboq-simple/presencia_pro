@@ -159,22 +159,17 @@ test('happy-path: GREETING → … → CONFIRMED con la reserva poblada', async 
   assert.equal(r2.newState, 'QUALIFYING_DATETIME' as LifestyleBotState);
   assert.equal(r2.newContext.staffId, CARLOS);
 
-  // 3. QUALIFYING_DATETIME: "mañana" → SHOWING_SLOTS. Carlos (barbero fijo) tiene
-  //    slots en AMBAS franjas → disponibilidad honesta pregunta la franja binaria
-  //    en vez de volcar 3 horarios a ciegas (no auto-confirma, no oculta opciones).
+  // 3. QUALIFYING_DATETIME: "mañana" → SHOWING_SLOTS → (Versión C) CONFIRMING_APPOINTMENT.
+  //    Carlos (barbero fijo) tiene slots en AMBAS franjas → ancla con ejemplos que abarcan
+  //    todo el día (no pregunta franja, no oculta la tarde) y fija pendingSlots de una vez.
   const r3 = await dispatch('QUALIFYING_DATETIME', makeMsg('mañana'), r2.newContext, deps);
-  assert.equal(r3.newState, 'SHOWING_SLOTS' as LifestyleBotState);
+  assert.equal(r3.newState, 'CONFIRMING_APPOINTMENT' as LifestyleBotState);
   assert.equal(r3.newContext.requestedDate, REQ_DATE);
-  assert.equal(r3.newContext.pendingFranjaChoice, true, 'pregunta la franja (ambas con slots)');
-
-  // 3b. SHOWING_SLOTS: la respuesta se parsea LOCAL ("en la tarde" = franja tarde,
-  //     NO fecha) → presenta horarios de la tarde → CONFIRMING_APPOINTMENT.
-  const r3b = await dispatch('SHOWING_SLOTS', makeMsg('en la tarde'), r3.newContext, deps);
-  assert.equal(r3b.newState, 'CONFIRMING_APPOINTMENT' as LifestyleBotState);
-  assert.ok((r3b.newContext.pendingSlots ?? []).length > 0, 'debe presentar al menos un slot');
+  assert.ok(!r3.newContext.pendingFranjaChoice, 'Versión C no pregunta la franja');
+  assert.ok((r3.newContext.pendingSlots ?? []).length > 0, 'ancla con ejemplos concretos');
 
   // 4. CONFIRMING_APPOINTMENT: "la primera" → AWAITING_BOOKING_NAME con el slot.
-  const r4 = await dispatch('CONFIRMING_APPOINTMENT', makeMsg('la primera'), r3b.newContext, deps);
+  const r4 = await dispatch('CONFIRMING_APPOINTMENT', makeMsg('la primera'), r3.newContext, deps);
   assert.equal(r4.newState, 'AWAITING_BOOKING_NAME' as LifestyleBotState);
   assert.ok(r4.newContext.selectedSlot, 'el slot elegido debe quedar fijado');
 

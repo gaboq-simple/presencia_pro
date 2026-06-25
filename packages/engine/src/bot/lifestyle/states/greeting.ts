@@ -400,6 +400,22 @@ export async function handleGreeting(
     }
   }
 
+  // ── PIEZA 1 (una sola voz): si hay hora, deja hablar SOLO al camino de slots ──
+  // greetCase 'full' encadena a SHOWING_SLOTS en el router. Si el cliente dio una hora
+  // (resuelta en requestedTime, o aparcada en pendingAgendaTime), la respuesta honesta
+  // de slots YA responde a esa hora ("A las 9 no tengo… tengo a las 10, 11 o 12").
+  // Anteponer una confirmación de saludo genera DOS voces. La suprimimos: el .join del
+  // router filtra strings vacíos → queda una sola voz, y de paso evitamos la llamada a
+  // Sonnet. Excepción: el cliente nuevo igual recibe el aviso de privacidad (LFPDPPP
+  // Art. 8) — el dato legal no es una "voz" conversacional y el compliance no se negocia.
+  if (greetCase === 'full' && (parsedTimeStr || parsedAgendaTime)) {
+    return {
+      newState:     plan.nextState,
+      newContext:   { ...baseContext },
+      responseText: isReturning ? '' : buildPrivacyNotice(),
+    };
+  }
+
   // ── Generar responseText vía Claude Sonnet ─────────────────────────────────
 
   const systemPrompt = buildSystemPrompt(business, undefined, services);
