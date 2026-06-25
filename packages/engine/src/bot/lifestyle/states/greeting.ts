@@ -400,19 +400,29 @@ export async function handleGreeting(
     }
   }
 
-  // ── PIEZA 1 (una sola voz): si hay hora, deja hablar SOLO al camino de slots ──
-  // greetCase 'full' encadena a SHOWING_SLOTS en el router. Si el cliente dio una hora
-  // (resuelta en requestedTime, o aparcada en pendingAgendaTime), la respuesta honesta
-  // de slots YA responde a esa hora ("A las 9 no tengo… tengo a las 10, 11 o 12").
-  // Anteponer una confirmación de saludo genera DOS voces. La suprimimos: el .join del
-  // router filtra strings vacíos → queda una sola voz, y de paso evitamos la llamada a
-  // Sonnet. Excepción: el cliente nuevo igual recibe el aviso de privacidad (LFPDPPP
-  // Art. 8) — el dato legal no es una "voz" conversacional y el compliance no se negocia.
-  if (greetCase === 'full' && (parsedTimeStr || parsedAgendaTime)) {
+  // ── greeting confirma, showingSlots presenta (PIEZA 1 + Hallazgo 2 / S5-BOT-11) ──
+  // greetCase 'full' encadena a SHOWING_SLOTS en el router (que une por .join la
+  // confirmación de saludo + la presentación de slots). La confirmación de greeting
+  // NUNCA debe enumerar horarios: eso es trabajo de showingSlots. Generarla con Sonnet
+  // era frágil — a veces listaba/inventaba horarios pese a la instrucción, y colisionaba
+  // con la lista real de slots (doble lista). Por eso 'full' es DETERMINISTA, jamás pasa
+  // por Sonnet:
+  //   - con hora → se suprime ('') — la respuesta honesta de slots YA responde a esa hora
+  //     ("A las 9 no tengo… tengo a las 10, 11 o 12"); anteponer confirmación daría 2 voces.
+  //   - sin hora → confirmación determinista (deterministicFallback, "X con Y para Z,
+  //     anotado.") — el .join la pega a la presentación de Versión C → una sola voz de slots.
+  // El cliente nuevo conserva el aviso de privacidad (LFPDPPP Art. 8) — dato legal, no
+  // "voz". (qualifyingStaff → SHOWING_SLOTS ya seguía este patrón determinista: '' o
+  // "Con {staff}, perfecto.", nunca Sonnet.)
+  if (greetCase === 'full') {
+    const hasHour      = Boolean(parsedTimeStr || parsedAgendaTime);
+    const confirmation = hasHour ? '' : plan.deterministicFallback;
+    const privacy      = isReturning ? '' : buildPrivacyNotice();
+    const responseText = [confirmation, privacy].filter((s) => s.length > 0).join('\n\n');
     return {
       newState:     plan.nextState,
       newContext:   { ...baseContext },
-      responseText: isReturning ? '' : buildPrivacyNotice(),
+      responseText,
     };
   }
 

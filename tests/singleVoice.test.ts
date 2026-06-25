@@ -21,6 +21,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { dispatch } from '../packages/engine/src/bot/lifestyle/router';
+import { handleGreeting } from '../packages/engine/src/bot/lifestyle/states/greeting';
 import { parseDate } from '../packages/engine/src/bot/lifestyle/states/qualifyingDatetime';
 import { weekdayFromDateStr } from '../packages/engine/src/bot/lifestyle/tzUtils';
 import type { MultiIntentClassification } from '../packages/engine/src/bot/lifestyle/types';
@@ -122,9 +123,46 @@ test('PIEZA 1 — cliente nuevo: con hora, una sola voz pero CONSERVA el aviso d
   assert.ok(r.responseText.includes('aviso de privacidad'), 'cliente nuevo conserva el aviso de privacidad');
 });
 
-test('PIEZA 1 — guarda: greetCase full SIN hora conserva su confirmación (no se suprime de más)', async () => {
+// ─── Hallazgo 2 / S5-BOT-11 — greeting 'full' NUNCA lista (confirmación determinista) ──
+// Causa: el prompt de greeting 'full' le pedía a Sonnet confirmar "sin anunciar horarios"
+// contando con el .join con showingSlots; pero Sonnet a veces igual listaba/inventaba
+// horarios → colisión con la lista real de slots (doble lista). Fix: 'full' sin hora usa
+// el deterministicFallback (plantilla), nunca Sonnet → físicamente no puede listar.
+// Nota: en el harness Sonnet está apagado (anthropicKey=''), así que el texto coincide
+// antes/después del fix; el valor del test es BLINDAR el contrato (la voz de greeting ES
+// la plantilla, sin horarios) y que el .join dé una sola voz de slots.
+
+test('Hallazgo 2 — full SIN hora: greeting confirma con plantilla determinista, SIN horarios', async () => {
+  // handleGreeting directo aísla la voz de greeting (sin el .join). DEBE ser exactamente
+  // el deterministicFallback: confirmación, cero horarios. Estructural: 'full' ya no llama
+  // a Sonnet, así que no puede inventar/listar.
+  const r = await handleGreeting(msg(BODY_SIN_HORA), {}, makeDeps(RETURNING));
+  assert.equal(r.newState, 'SHOWING_SLOTS', 'full encadena a SHOWING_SLOTS');
+  assert.equal(r.responseText, 'Corte de cabello con Carlos para mañana, anotado.', 'es la confirmación determinista exacta');
+  // Cero horarios en la voz de greeting: ni reloj, ni "a las N", ni marcador de franja, ni lista numerada.
+  assert.doesNotMatch(r.responseText, /\d{1,2}:\d{2}|a las \d|de la (mañana|tarde|noche)|^\s*\d+\.\s/m, 'greeting no enuncia horarios');
+});
+
+test('Hallazgo 2 — full SIN hora: el .join da UNA sola voz de slots (la de Versión C)', async () => {
   const r = await dispatch('GREETING', msg(BODY_SIN_HORA), {}, makeDeps(RETURNING));
   assert.equal(r.newContext.staffId, CARLOS, 'el barbero quedó fijado');
-  // Sin hora, el fix NO debe disparar: la confirmación de greeting se conserva.
-  assert.ok(r.responseText.includes('anotado'), 'sin hora conserva la confirmación de greeting');
+  assert.ok(r.responseText.includes('anotado'), 'la confirmación de greeting está');
+  assert.match(r.responseText, /desde temprano hasta la noche|varios huecos/i, 'la presentación de slots (Versión C) está');
+  // UNA sola voz de slots: la pregunta de cierre de Versión C aparece exactamente una vez.
+  assert.equal((r.responseText.match(/busca[rs]?\s+otra/gi) || []).length, 1, 'una sola lista de slots, no dos');
+});
+
+test('Hallazgo 2 — full SIN hora, cliente nuevo: confirmación + aviso de privacidad, sin horarios en la confirmación', async () => {
+  const r = await handleGreeting(msg(BODY_SIN_HORA), {}, makeDeps([]));
+  assert.ok(r.responseText.includes('anotado'), 'confirmación determinista');
+  assert.ok(r.responseText.includes('aviso de privacidad'), 'cliente nuevo conserva el aviso de privacidad');
+  assert.doesNotMatch(r.responseText, /\d{1,2}:\d{2}|a las \d/, 'la confirmación no enuncia horarios');
+});
+
+test('Hallazgo 2 — no-regresión: greetCase none sigue saludando (el fix de full no lo afecta)', async () => {
+  // "hola" sin datos de reserva → greetCase 'none' → QUALIFYING_SERVICE con saludo. El fix
+  // determinista de 'full' NO debe tocar este camino (sigue su saludo, Sonnet o fallback).
+  const r = await dispatch('GREETING', msg('hola'), {}, makeDeps(RETURNING));
+  assert.equal(r.newState, 'QUALIFYING_SERVICE', 'saludo genérico no salta a SHOWING_SLOTS');
+  assert.ok(r.responseText.trim().length > 0, 'el saludo genérico sigue presente');
 });
