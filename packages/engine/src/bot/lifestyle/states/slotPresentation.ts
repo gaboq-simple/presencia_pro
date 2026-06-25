@@ -4,18 +4,20 @@
 //
 // Árbol (ante "¿qué horarios hay?", barbero+día definidos):
 //   1. ¿Pista (hora/franja)? → filtrar a eso → paso 3.
-//   2. ¿Slots en AMBAS franjas? No → listar esa franja (paso 3). Sí → preguntar
-//      binario "¿mañana o más tarde?".
+//   2. ¿Slots en AMBAS franjas? Sí → muestra representativa de TODO el día (Versión C:
+//      ejemplos que abarcan mañana y tarde, sin preguntar franja). No → presentar la
+//      única franja con slots (paso 3).
 //   3. Subconjunto de UNA franja: pocos (≤LIST_ALL_MAX) → listar todos; muchos →
-//      muestra representativa (REPRESENTATIVE_COUNT espaciados) + "o prefieres otra".
+//      muestra representativa (REPRESENTATIVE_COUNT espaciados) + "¿te late alguna o buscas otra?".
 //
-// Regla maestra: nunca >~3-4 horas de golpe; NUNCA afirmar/preguntar una franja sin
-// slots; preguntar franja SOLO cuando reparte una lista larga entre ambas.
+// Regla maestra: nunca >~3-4 horas de golpe; NUNCA afirmar una franja sin slots; la
+// señal de amplitud se adapta a la forma real (no mentir que hay de todo).
 
 import type { DayAvailability } from '../scheduling';
 import { AFTERNOON_CUTOFF } from '../scheduling';
 import { resolveTargetMinutes } from '../interpreter';
 import { utcToLocalMinutes } from '../tzUtils';
+import { formatTimeHumanFromDate, formatTimeCompactFromDate } from '../utils';
 import type { SlotCandidate } from '../types';
 
 // Umbrales (tunables en smoke sin tocar la lógica).
@@ -31,9 +33,8 @@ export type FranjaHint = {
 };
 
 export type PresentationDecision =
-  | { mode: 'list';           show: SlotCandidate[] }  // listar todos (plantilla determinista — NO LLM)
-  | { mode: 'representative'; show: SlotCandidate[] }  // muestra + "o prefieres otra hora" (plantilla determinista)
-  | { mode: 'ask-franja' };                            // pregunta binaria (plantilla determinista)
+  | { mode: 'list';           show: SlotCandidate[] }   // listar todos (plantilla determinista — NO LLM)
+  | { mode: 'representative'; show: SlotCandidate[] };  // muestra + "¿te late alguna o buscas otra?" (Versión C)
 
 /**
  * Elige REPRESENTATIVE_COUNT slots ESPACIADOS de `pool` (primero, medio, último…),
@@ -87,9 +88,11 @@ export function decidePresentation(
     return step3(bucket.length > 0 ? bucket : shape.all);
   }
 
-  // 2. Sin pista: ¿ambas franjas tienen slots? → preguntar binario; si solo una, listarla.
+  // 2. Sin pista: si AMBAS franjas tienen slots, anclamos con una muestra de TODO el día
+  //    (Versión C: ejemplos que abarcan mañana y tarde + "¿te late alguna o buscas otra?"),
+  //    sin preguntar la franja. Si solo una franja tiene slots, presentamos esa.
   if (shape.morning.length > 0 && shape.afternoon.length > 0) {
-    return { mode: 'ask-franja' };
+    return { mode: 'representative', show: pickRepresentative(shape.all) };
   }
   const onlyFranja = shape.morning.length > 0 ? shape.morning : shape.afternoon;
   return step3(onlyFranja);
@@ -109,21 +112,6 @@ export function parseFranjaReply(body: string): 'morning' | 'afternoon' | null {
   if (/\btarde\b|\bnoche\b|mas tarde|\bpm\b/.test(n)) return 'afternoon';
   if (/\bmanana\b|\btemprano\b|\bam\b|\btempran/.test(n)) return 'morning';
   return null;
-}
-
-// ─── Plantillas deterministas (2-3 variantes; redacción CONTRACTUAL) ──────────
-// El "o prefieres otra hora" NO puede omitirse (garantía anti-ocultar-opciones), por
-// eso es plantilla y no Haiku. Variantes para no sonar monótono; selección determinista
-// vía `variant` (lo elige el caller con un seed estable).
-
-const FRANJA_QUESTIONS = [
-  '¿Lo prefieres en la mañana o más tarde?',
-  '¿Te acomoda mejor en la mañana o por la tarde?',
-  '¿Buscas algo temprano, o más bien por la tarde?',
-];
-
-export function buildFranjaQuestion(variant = 0): string {
-  return FRANJA_QUESTIONS[((variant % FRANJA_QUESTIONS.length) + FRANJA_QUESTIONS.length) % FRANJA_QUESTIONS.length]!;
 }
 
 // ─── FIX 2: resolución de hora aparcada contra la AGENDA real ──────────────────
@@ -152,19 +140,50 @@ export function resolveParkedHour(
 // (el barbero no trabaja ese día). NUNCA asumir AM — preguntar. "noche" (no "tarde")
 // porque el caso típico es la hora PM ("a las 8" → 20:00 = "8 de la noche").
 export function buildLastResortPeriodQuestion(): string {
-  return 'Esa hora la prefieres de la mañana o de la noche?';
+  return '¿Esa hora la prefieres de la mañana o de la noche?';
 }
+
+// Muestra representativa (Versión C). Ancla con ejemplos SIN ocultar opciones: cierra
+// SIEMPRE con "¿te late alguna o buscas otra?" (garantía anti-ocultar-opciones → es
+// plantilla, no Haiku). La SEÑAL DE AMPLITUD se adapta a la forma real (no mentir que hay
+// de todo): ambas franjas → "desde temprano hasta la noche"; una sola → "varios huecos
+// en la mañana/tarde". Variantes para no sonar monótono (selección determinista).
+export type FranjaSpan = 'both' | 'morning' | 'afternoon';
+
+const AMPLITUD: Record<FranjaSpan, string> = {
+  both:      'desde temprano hasta la noche',
+  morning:   'varios huecos en la mañana',
+  afternoon: 'varios huecos en la tarde',
+};
 
 // `times` ya vienen formateadas (ej. "10:00", "2:00 pm"). El caller las arma con tz.
 const REPRESENTATIVE_TEMPLATES = [
-  (ts: string[]) => `Ese día tengo varios horarios — por ejemplo a las ${joinTimes(ts)}. ¿Te late alguno o prefieres otra hora?`,
-  (ts: string[]) => `Hay bastante espacio ese día. Algunas opciones: a las ${joinTimes(ts)}. ¿Cuál te acomoda, o prefieres otra hora?`,
-  (ts: string[]) => `Tengo varios huecos. Te paso tres: a las ${joinTimes(ts)}. Si prefieres otra hora, dime cuál.`,
+  (amp: string, ts: string[]) => `Tengo ${amp} —por ejemplo a las ${joinTimes(ts)}. ¿Te late alguna o buscas otra?`,
+  (amp: string, ts: string[]) => `Hay ${amp}. Por darte una idea: a las ${joinTimes(ts)}. ¿Te late alguna o prefieres buscar otra?`,
+  (amp: string, ts: string[]) => `Tengo ${amp}. Unas opciones: a las ${joinTimes(ts)}. ¿Alguna te late, o buscas otra?`,
 ];
 
-export function buildRepresentativeMessage(times: string[], variant = 0): string {
+export function buildRepresentativeMessage(times: string[], span: FranjaSpan, variant = 0): string {
   const idx = ((variant % REPRESENTATIVE_TEMPLATES.length) + REPRESENTATIVE_TEMPLATES.length) % REPRESENTATIVE_TEMPLATES.length;
-  return REPRESENTATIVE_TEMPLATES[idx]!(times);
+  return REPRESENTATIVE_TEMPLATES[idx]!(AMPLITUD[span], times);
+}
+
+/**
+ * Formatea los ejemplos de hora de la Versión C según la franja que la señal de amplitud
+ * YA comunicó, para NO repetirla en cada hora:
+ *   - una franja (morning/afternoon) → COMPACTO ("2", "4:45", "7:30"): la franja ya se dijo.
+ *   - ambas franjas (both) → marcador SOLO donde desambigua: el PRIMERO y el ÚLTIMO llevan
+ *     su franja ("10 de la mañana … 6 de la tarde") y enmarcan el rango temprano→noche; los
+ *     del medio van compactos (quedan claros por interpolación). Evita "tarde…tarde…tarde".
+ */
+export function formatRepresentativeExamples(slots: SlotCandidate[], tz: string, span: FranjaSpan): string[] {
+  const last = slots.length - 1;
+  return slots.map((s, i) => {
+    const isBracket = i === 0 || i === last;
+    return span === 'both' && isBracket
+      ? formatTimeHumanFromDate(s.startsAt, tz)
+      : formatTimeCompactFromDate(s.startsAt, tz);
+  });
 }
 
 // Modo LIST: muestra TODOS los slots de la franja (son pocos). Cierra con

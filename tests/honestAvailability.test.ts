@@ -15,8 +15,8 @@ import {
   decidePresentation,
   pickRepresentative,
   parseFranjaReply,
-  buildFranjaQuestion,
   buildRepresentativeMessage,
+  formatRepresentativeExamples,
   buildListMessage,
   REPRESENTATIVE_COUNT,
   LIST_ALL_MAX,
@@ -160,31 +160,33 @@ test('T2 muchos (>4) en una franja, sin pista → representative (3 espaciados)'
   assert.equal(d.mode === 'representative' && d.show.length, REPRESENTATIVE_COUNT);
 });
 
-test('T3 muchos repartidos en AMBAS franjas, sin pista → ask-franja', () => {
+test('T3 (Versión C) muchos repartidos en AMBAS franjas, sin pista → representative de TODO el día', () => {
+  // Antes preguntaba la franja ("¿mañana o más tarde?"). Versión C: ancla con ejemplos
+  // que abarcan mañana Y tarde, sin preguntar (no oculta franjas, no exige una decisión).
   const d = decidePresentation(makeShape(['10:00', '11:00', '12:00', '15:00', '16:00', '17:00']), {}, TZ);
-  assert.equal(d.mode, 'ask-franja');
+  assert.equal(d.mode, 'representative');
+  assert.equal(d.mode === 'representative' && d.show.length, REPRESENTATIVE_COUNT);
+  assert.ok(d.mode === 'representative' && d.show.some((s) => localMin(s) <  AFTERNOON_CUTOFF_MIN), 'incluye un ejemplo de la mañana');
+  assert.ok(d.mode === 'representative' && d.show.some((s) => localMin(s) >= AFTERNOON_CUTOFF_MIN), 'incluye un ejemplo de la tarde');
 });
 
-test('T4 con pista de franja (requestedShift) → filtra directo a esa franja, NO pregunta', () => {
+test('T4 con pista de franja (requestedShift) → filtra directo a esa franja', () => {
   const shape = makeShape(['10:00', '11:00', '12:00', '15:00', '16:00']); // morning 3, afternoon 2
   const d = decidePresentation(shape, { requestedShift: 'afternoon' }, TZ);
-  assert.notEqual(d.mode, 'ask-franja');
-  assert.ok(d.mode !== 'ask-franja' && d.show.every((s) => localMin(s) >= AFTERNOON_CUTOFF_MIN), 'solo slots de la tarde');
+  assert.ok(d.show.every((s) => localMin(s) >= AFTERNOON_CUTOFF_MIN), 'solo slots de la tarde');
 });
 
 test('T5 con pista de hora (requestedTime) → franja de esa hora, ordenada por cercanía', () => {
   const shape = makeShape(['10:00', '18:00', '19:00', '20:00']); // 20:00 = 8pm presente
   const d = decidePresentation(shape, { requestedTime: '20:00' }, TZ);
-  assert.notEqual(d.mode, 'ask-franja');
   // El más cercano a 20:00 va primero (no el más temprano del día).
-  assert.equal(d.mode !== 'ask-franja' && localMin(d.show[0]!), 20 * 60);
+  assert.equal(localMin(d.show[0]!), 20 * 60);
 });
 
-test('T6 una sola franja con slots (otra vacía), sin pista → lista esa franja, NUNCA pregunta (regla maestra)', () => {
-  // Muchos slots SOLO en la tarde: aun siendo muchos, no se pregunta franja (la mañana está vacía).
+test('T6 una sola franja con slots (otra vacía), sin pista → presenta solo esa franja (regla maestra)', () => {
+  // Muchos slots SOLO en la tarde: se presenta la tarde (la mañana está vacía → no se afirma de más).
   const d = decidePresentation(makeShape(['15:00', '16:00', '17:00', '18:00', '19:00']), {}, TZ);
-  assert.notEqual(d.mode, 'ask-franja');
-  assert.ok(d.mode !== 'ask-franja' && d.show.every((s) => localMin(s) >= AFTERNOON_CUTOFF_MIN));
+  assert.ok(d.show.every((s) => localMin(s) >= AFTERNOON_CUTOFF_MIN), 'solo slots de la tarde');
 });
 
 // ─── pickRepresentative (determinista) — T15 ──────────────────────────────────
@@ -199,21 +201,40 @@ test('T15 pickRepresentative: 3 espaciados deterministas (primero/medio/último)
 
 // ─── Plantillas deterministas — T16 (garantía contractual) ────────────────────
 
-test('T16 representative: TODAS las variantes incluyen "otra hora" (anti-ocultar-opciones)', () => {
+test('T16 representative: TODAS las variantes dejan la puerta abierta ("buscas otra") y muestran los ejemplos (anti-ocultar-opciones)', () => {
   const times = ['10:00', '2:00', '6:00'];
-  for (let v = 0; v < 3; v++) {
-    const msg = buildRepresentativeMessage(times, v);
-    assert.match(msg, /otra hora/, `la variante ${v} DEBE ofrecer "otra hora"`);
-    for (const t of times) assert.ok(msg.includes(t), `la variante ${v} debe incluir ${t}`);
+  for (const span of ['both', 'morning', 'afternoon'] as const) {
+    for (let v = 0; v < 3; v++) {
+      const msg = buildRepresentativeMessage(times, span, v);
+      assert.match(msg, /busca[rs]?\s+otra/, `span ${span} variante ${v} DEBE ofrecer buscar otra`);
+      for (const t of times) assert.ok(msg.includes(t), `span ${span} variante ${v} debe incluir ${t}`);
+    }
   }
 });
 
-test('T16b franja question: todas las variantes ofrecen mañana Y tarde', () => {
+test('T16b representative: la señal de amplitud se adapta a la forma (no miente que hay de todo)', () => {
+  const times = ['10:00', '2:00', '6:00'];
   for (let v = 0; v < 3; v++) {
-    const q = buildFranjaQuestion(v);
-    assert.match(q, /ma[ñn]ana|temprano/, `variante ${v} debe ofrecer la mañana`);
-    assert.match(q, /tarde/,               `variante ${v} debe ofrecer la tarde`);
+    assert.match(buildRepresentativeMessage(times, 'both', v),      /desde temprano hasta la noche/, `ambas franjas, variante ${v}`);
+    assert.match(buildRepresentativeMessage(times, 'morning', v),   /en la mañana/,                  `solo mañana, variante ${v}`);
+    assert.match(buildRepresentativeMessage(times, 'afternoon', v), /en la tarde/,                   `solo tarde, variante ${v}`);
+    // Una sola franja NO debe afirmar amplitud total ("desde temprano hasta la noche").
+    assert.doesNotMatch(buildRepresentativeMessage(times, 'morning', v),   /desde temprano hasta la noche/);
+    assert.doesNotMatch(buildRepresentativeMessage(times, 'afternoon', v), /desde temprano hasta la noche/);
   }
+});
+
+test('T16c formatRepresentativeExamples: una franja → compacto (sin repetir franja); ambas → marcador en los extremos', () => {
+  // Ambas franjas: el primero y el último llevan su franja (enmarcan temprano→noche); el
+  // del medio va compacto (claro por interpolación) → sin "tarde…tarde…tarde".
+  const mixed = ['10:00', '14:30', '18:00'].map(slot); // 10am, 2:30pm, 6pm
+  assert.deepEqual(formatRepresentativeExamples(mixed, TZ, 'both'), ['10 de la mañana', '2:30', '6 de la tarde']);
+  // Una sola franja (tarde): TODO compacto — la franja ya se dijo en la señal de amplitud.
+  const pm = ['14:00', '16:45', '19:30'].map(slot); // 2pm, 4:45pm, 7:30pm
+  assert.deepEqual(formatRepresentativeExamples(pm, TZ, 'afternoon'), ['2', '4:45', '7:30']);
+  // Una sola franja (mañana): compacto.
+  const am = ['09:00', '10:30', '11:45'].map(slot);
+  assert.deepEqual(formatRepresentativeExamples(am, TZ, 'morning'), ['9', '10:30', '11:45']);
 });
 
 // ─── parseFranjaReply (LOCAL; trampa C1) ──────────────────────────────────────
@@ -269,33 +290,25 @@ test('T8 exactMatchMissed honesto: requestedTime sin slot real → "no tengo" + 
   assert.ok((r.newContext.pendingSlots ?? []).length > 0, 'ofrece alternativas concretas');
 });
 
-test('T10 pendingFranjaChoice + "mañana" → franja MAÑANA (NO día-siguiente; trampa C1)', async () => {
-  const r = await handleShowingSlots(showMsg('mañana'), showCtx({ pendingFranjaChoice: true }), handlerDeps(handlerSupabase('10:00:00', '20:00:00')));
-  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
-  assert.equal(r.newContext.requestedDate, DATE_STR, '"mañana" NO saltó de fecha (sigue el día pedido)');
-  const ps = r.newContext.pendingSlots ?? [];
-  assert.ok(ps.length > 0 && ps.every((p) => psLocalMin(p) < AFTERNOON_CUTOFF_MIN), 'todos los slots son de la mañana');
-});
+// Nota: los antiguos T10–T13 ejercitaban la RESPUESTA a la pregunta binaria de franja
+// (rama `else if (pendingFranjaChoice)`). Versión C eliminó esa pregunta y su rama, así
+// que esos tests se retiraron. El reply de franja del ÚLTIMO RECURSO (mañana/noche con
+// hora aparcada sin agenda) sigue cubierto por los T14-T16 de abajo.
 
-test('T11 pendingFranjaChoice + "en la tarde" → franja TARDE', async () => {
-  const r = await handleShowingSlots(showMsg('en la tarde'), showCtx({ pendingFranjaChoice: true }), handlerDeps(handlerSupabase('10:00:00', '20:00:00')));
-  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
-  const ps = r.newContext.pendingSlots ?? [];
-  assert.ok(ps.length > 0 && ps.every((p) => psLocalMin(p) >= AFTERNOON_CUTOFF_MIN), 'todos los slots son de la tarde');
-});
+// ─── Versión C (integración): muestra representativa de UNA franja → señal acotada ───
 
-test('T12 pendingFranjaChoice + respuesta no-franja ("cualquiera") → muestra de todo, NO re-pregunta (sin loop)', async () => {
-  const r = await handleShowingSlots(showMsg('cualquiera'), showCtx({ pendingFranjaChoice: true }), handlerDeps(handlerSupabase('10:00:00', '20:00:00')));
-  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT', 'no vuelve a SHOWING_SLOTS a re-preguntar');
-  assert.ok(!r.newContext.pendingFranjaChoice, 'limpia la bandera (no hay loop)');
-  assert.ok((r.newContext.pendingSlots ?? []).length > 0);
-});
-
-test('T13 (edge) pendingFranjaChoice + "mañana a las 8" → conservador: la keyword de franja gana (mañana)', async () => {
-  const r = await handleShowingSlots(showMsg('mañana a las 8'), showCtx({ pendingFranjaChoice: true }), handlerDeps(handlerSupabase('10:00:00', '20:00:00')));
+test('T13 (Versión C, integración) una sola franja con muchos slots → "varios huecos en la tarde", sin afirmar amplitud total', async () => {
+  // Carlos 14:00–20:00 → solo tarde, muchos slots. Browse sin pista → representative.
+  const r = await handleShowingSlots(showMsg('¿qué horarios tienes?'), showCtx(), handlerDeps(handlerSupabase('14:00:00', '20:00:00')));
   assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
   const ps = r.newContext.pendingSlots ?? [];
-  assert.ok(ps.length > 0 && ps.every((p) => psLocalMin(p) < AFTERNOON_CUTOFF_MIN), 'trata "mañana" como franja mañana (documentado)');
+  assert.ok(ps.length > 0 && ps.every((p) => psLocalMin(p) >= AFTERNOON_CUTOFF_MIN), 'solo anclas de la tarde');
+  assert.match(r.responseText, /varios huecos en la tarde/i, 'señal de amplitud acotada a la franja real');
+  assert.doesNotMatch(r.responseText, /desde temprano hasta la noche/i, 'NO miente amplitud total con una sola franja');
+  // Ejemplos COMPACTOS: la franja ya se dijo en la amplitud → no repetir "de la tarde" en
+  // cada hora. Sin el fix de formateo, los ejemplos decían "2 de la tarde, 4:45 de la tarde…".
+  assert.doesNotMatch(r.responseText, /de la (tarde|mañana|noche)/, 'ejemplos compactos: sin marcador de franja repetido');
+  assert.match(r.responseText, /busca[rs]?\s+otra/i, 'deja la puerta abierta');
 });
 
 // ─── FIX 2: resolución de hora aparcada contra la agenda — T14-T16 ────────────

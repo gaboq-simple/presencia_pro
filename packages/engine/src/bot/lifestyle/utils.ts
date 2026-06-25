@@ -119,13 +119,7 @@ export function buildBookingNameQuestion(customerName: string | null): {
  *   - Sin minutos cuando son :00 (5 de la tarde, no 5:00 de la tarde)
  */
 export function formatTimeHuman(time: string): string {
-  const [hStr, mStr] = time.split(':');
-  const h = parseInt(hStr ?? '0', 10);
-  const m = parseInt(mStr ?? '0', 10);
-
-  // Convertir a formato 12h sin cero inicial
-  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  const minutePart = m > 0 ? `:${String(m).padStart(2, '0')}` : '';
+  const h = parseInt(time.split(':')[0] ?? '0', 10);
 
   let period: string;
   if (h >= 6 && h < 12) {
@@ -136,17 +130,25 @@ export function formatTimeHuman(time: string): string {
     period = 'de la noche';
   }
 
-  return `${h12}${minutePart} ${period}`;
+  return `${formatTimeCompact(time)} ${period}`;
 }
 
 /**
- * Convierte un Date UTC a hora en el timezone del negocio y lo formatea
- * con formatTimeHuman.
- *
- * @param d   Date UTC (ej: slot.startsAt desde Supabase o scheduling)
- * @param tz  IANA timezone del negocio (ej: 'America/Mexico_City')
+ * Igual que formatTimeHuman pero COMPACTO: solo la hora en 12h, SIN marcador de franja
+ * ("5", "1:30", "7:30"). Para ejemplos donde la franja ya se comunicó aparte (Versión C).
+ * Sin ceros a la izquierda; sin minutos cuando son :00.
  */
-export function formatTimeHumanFromDate(d: Date, tz: string): string {
+export function formatTimeCompact(time: string): string {
+  const [hStr, mStr] = time.split(':');
+  const h = parseInt(hStr ?? '0', 10);
+  const m = parseInt(mStr ?? '0', 10);
+  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  const minutePart = m > 0 ? `:${String(m).padStart(2, '0')}` : '';
+  return `${h12}${minutePart}`;
+}
+
+// Extrae la hora local "HH:MM" de un Date UTC en el timezone del negocio.
+function localHHMMFromDate(d: Date, tz: string): string {
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     hour:     '2-digit',
@@ -161,5 +163,24 @@ export function formatTimeHumanFromDate(d: Date, tz: string): string {
   let h = get('hour');
   if (h === 24) h = 0;
   const m = get('minute');
-  return formatTimeHuman(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * Convierte un Date UTC a hora en el timezone del negocio y la formatea CON marcador de
+ * franja (formatTimeHuman): "5 de la tarde".
+ *
+ * @param d   Date UTC (ej: slot.startsAt desde Supabase o scheduling)
+ * @param tz  IANA timezone del negocio (ej: 'America/Mexico_City')
+ */
+export function formatTimeHumanFromDate(d: Date, tz: string): string {
+  return formatTimeHuman(localHHMMFromDate(d, tz));
+}
+
+/**
+ * Igual que formatTimeHumanFromDate pero COMPACTO (sin marcador de franja): "5", "1:30".
+ * Para los ejemplos de la Versión C donde la franja ya se comunicó en la señal de amplitud.
+ */
+export function formatTimeCompactFromDate(d: Date, tz: string): string {
+  return formatTimeCompact(localHHMMFromDate(d, tz));
 }

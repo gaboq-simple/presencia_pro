@@ -1,15 +1,13 @@
-// T7 — REPRO del bug de disponibilidad parcial (smoke R4.1).
+// T7 — REPRO del bug de disponibilidad parcial (smoke R4.1), actualizado a Versión C.
 // Síntoma: barbero fijo con día completo (slots en mañana Y tarde-noche); el cliente
 // pide "¿qué horarios tienes?" sin pista → el bot ofrecía SOLO los 3 más tempranos
 // (todos de la mañana), OCULTANDO la tarde/noche, y luego afirmaba "lo más cercano es
 // 10" falsamente. Causa: slice(0,3) sobre slots cronológicos en scheduling.
 //
-// Este test importa SOLO handleShowingSlots (existe en el código viejo y el nuevo),
-// para poder correrlo contra ambos y confirmar ROJO→VERDE:
-//   - VIEJO (con slice): vuelca 3 slots → newState = CONFIRMING_APPOINTMENT,
-//     pendingFranjaChoice undefined, los 3 pendingSlots son todos de la mañana.
-//   - NUEVO (forma honesta): no oculta la tarde → pregunta la franja binaria →
-//     newState = SHOWING_SLOTS con pendingFranjaChoice = true.
+// Versión C (la cura, sin preguntar franja): ante ambas franjas se ANCLA con una muestra
+// representativa que abarca mañana Y tarde + "¿te late alguna o buscas otra?". La tarde
+// NO se oculta. (Antes de Versión C la cura preguntaba "¿mañana o más tarde?"; eso se
+// retiró.) ROJO→VERDE contra el código viejo: las anclas abarcan ambas franjas.
 //
 // Determinista: Supabase fake (sin red), sin Anthropic. Ejecutar: npm test
 
@@ -17,13 +15,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { handleShowingSlots } from '../packages/engine/src/bot/lifestyle/states/presentingSlots';
-import { noonUTCDate, weekdayFromDateStr } from '../packages/engine/src/bot/lifestyle/tzUtils';
+import { noonUTCDate, weekdayFromDateStr, utcToLocalMinutes } from '../packages/engine/src/bot/lifestyle/tzUtils';
 import type { LifestyleBotContext } from '../packages/engine/src/types/lifestyle.types';
 import type { StaffRow } from '../packages/engine/src/bot/lifestyle/types';
 
 const TZ       = 'America/Mexico_City';
 const DATE_STR = '2026-06-10';
 const DOW      = weekdayFromDateStr(DATE_STR);
+const AFTERNOON_CUTOFF_MIN = 14 * 60;
 const SVC      = 'svc-corte';
 const STAFF: StaffRow = { id: 'staff-carlos', name: 'Carlos', whatsapp_id: '5210000000000' };
 
@@ -76,14 +75,23 @@ function browseCtx(): LifestyleBotContext {
   return { serviceId: SVC, staffId: STAFF.id, autoAssign: false, requestedDate: DATE_STR };
 }
 
-test('T7 (bug repro, rojo→verde): browse de barbero fijo con ambas franjas NO oculta la tarde — pregunta franja, no vuelca 3 tempranos', async () => {
+test('T7 (bug repro, rojo→verde, Versión C): browse de barbero fijo con ambas franjas NO oculta la tarde — ancla con ejemplos de TODO el día', async () => {
   const r = await handleShowingSlots(makeMsg('¿qué horarios tienes?'), browseCtx(), makeDeps());
 
-  // NUEVO (forma honesta): no se queda con 3 de la mañana → pregunta la franja.
-  // VIEJO (slice): habría ido a CONFIRMING_APPOINTMENT con 3 slots tempranos y
-  // pendingFranjaChoice undefined → estas aserciones FALLAN contra el código viejo.
-  assert.equal(r.newState, 'SHOWING_SLOTS', 'no debe volcar slots: debe preguntar la franja');
-  assert.equal(r.newContext.pendingFranjaChoice, true, 'pregunta binaria de franja (ambas con slots)');
-  // No se fijaron pendingSlots a ciegas (no se eligió subconjunto todavía).
-  assert.ok((r.newContext.pendingSlots ?? []).length === 0, 'no fija pendingSlots antes de saber la franja');
+  // Versión C: en vez de volcar 3 de la mañana, ancla con ejemplos que abarcan mañana Y
+  // tarde y deja la puerta abierta. VIEJO (slice): 3 slots tempranos, todos de mañana →
+  // la aserción de "ancla de tarde" FALLA contra el código viejo.
+  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
+  assert.ok(!r.newContext.pendingFranjaChoice, 'ya no pregunta la franja: ancla con ejemplos');
+  const ps = r.newContext.pendingSlots ?? [];
+  assert.ok(ps.length > 0, 'fija las anclas representativas');
+  const mins = ps.map((p) => utcToLocalMinutes(new Date(p.startsAt), TZ));
+  assert.ok(mins.some((m) => m <  AFTERNOON_CUTOFF_MIN), 'incluye un ejemplo de la mañana');
+  assert.ok(mins.some((m) => m >= AFTERNOON_CUTOFF_MIN), 'incluye un ejemplo de la tarde/noche (NO la oculta)');
+  // Señal de amplitud honesta (ambas franjas) + puerta abierta.
+  assert.match(r.responseText, /desde temprano hasta la noche/i);
+  assert.match(r.responseText, /busca[rs]?\s+otra/i);
+  // Ambas franjas: los ejemplos llevan marcador donde desambigua (extremos que enmarcan el
+  // rango). "de la mañana" SOLO puede venir de un ejemplo — la frase de amplitud no lo dice.
+  assert.match(r.responseText, /de la mañana/, 'el ejemplo de la mañana lleva su marcador (desambigua)');
 });

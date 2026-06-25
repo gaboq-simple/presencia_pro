@@ -23,14 +23,14 @@ import { getAvailableSlots, getDayAvailability, findSlotsInNextDays, SchedulingQ
 import type { DayAvailability } from '../scheduling';
 import {
   decidePresentation,
-  pickRepresentative,
   parseFranjaReply,
-  buildFranjaQuestion,
   buildRepresentativeMessage,
+  formatRepresentativeExamples,
   buildListMessage,
   resolveParkedHour,
   buildLastResortPeriodQuestion,
   type FranjaHint,
+  type FranjaSpan,
 } from './slotPresentation';
 import { formatTimeHumanFromDate, formatTimeHuman, detectsServiceCorrection, clearBookingSelection } from '../utils';
 import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '../tzUtils';
@@ -390,9 +390,9 @@ export async function handleShowingSlots(
 // Consume la FORMA completa del día (getDayAvailability, sin truncar) y aplica el
 // árbol determinista (slotPresentation). Fixea el "lo más cercano es X" falso: el
 // chequeo de hora exacta corre contra shape.all, no contra 3 slots truncados.
-// Determinismo (decisión 5): el árbol NUNCA toca el LLM; ask-franja y la muestra
-// representativa usan plantillas (el "o prefieres otra hora" es contractual);
-// solo "listar pocos" delega la redacción a Haiku sobre la decisión ya tomada.
+// Determinismo (decisión 5): el árbol NUNCA toca el LLM. Tanto la muestra representativa
+// (Versión C) como el listado usan plantillas deterministas; el cierre que no oculta
+// opciones ("¿te late alguna o buscas otra?" / "¿cuál prefieres?") es contractual.
 async function handleHonestAvailability(
   msg:             LifestyleIncomingMessage,
   context:         LifestyleBotContext,
@@ -405,19 +405,18 @@ async function handleHonestAvailability(
   const tz = business.timezone;
   const schedulingRetries = context.clarification_attempts ?? 0;
 
-  // pendingFranjaChoice: la respuesta a "¿mañana o más tarde?" se parsea LOCAL como
-  // franja (NO fecha — "mañana" aquí = franja mañana, no día-siguiente). Si no es
-  // franja reconocible, NO re-preguntamos: mostramos una muestra de todo el día.
+  // Último recurso (FIX 2): si en un turno previo NO había agenda para desambiguar la
+  // hora aparcada, preguntamos "¿mañana o de la noche?" y aquí parseamos la respuesta
+  // LOCAL como franja (NO fecha — "mañana" = franja mañana, no día-siguiente). Es el
+  // ÚNICO caso que pregunta franja: la presentación normal ancla con ejemplos (Versión C).
   let hint: FranjaHint = {
     requestedShift: context.requestedShift ?? null,
     requestedTime:  context.requestedTime ?? null,
   };
-  let forceRepresentativeAll = false;
   let ctx = context;
   if (context.pendingAgendaTime && context.pendingFranjaChoice) {
-    // Último recurso (FIX 2) — REPLY: preguntamos mañana/noche porque no había agenda
-    // para desambiguar la hora aparcada. La franja resuelve su AM/PM ahora. Recibida o
-    // no, SOLTAMOS el parking (evita loop); sin franja, seguimos sin la hora.
+    // REPLY del último recurso: la franja resuelve el AM/PM de la hora aparcada. Recibida
+    // o no, SOLTAMOS el parking (evita loop); sin franja, seguimos sin la hora.
     const franja = parseFranjaReply(msg.body);
     if (franja) {
       const { hour, minute } = context.pendingAgendaTime;
@@ -428,11 +427,6 @@ async function handleHonestAvailability(
     } else {
       ctx = { ...context, pendingFranjaChoice: false, pendingAgendaTime: undefined };
     }
-  } else if (context.pendingFranjaChoice) {
-    const franja = parseFranjaReply(msg.body);
-    ctx = { ...context, pendingFranjaChoice: false };
-    if (franja) hint = { requestedShift: franja };
-    else forceRepresentativeAll = true;
   }
 
   // Forma COMPLETA del día (shift=null → no pre-filtra; el árbol decide la franja).
@@ -501,19 +495,8 @@ async function handleHonestAvailability(
 
   const ctxOk = { ...ctx, clarification_attempts: 0 };
 
-  // Decisión determinista.
-  const decision = forceRepresentativeAll
-    ? { mode: 'representative' as const, show: pickRepresentative(shape.all) }
-    : decidePresentation(shape, hint, tz);
-
-  // Pregunta binaria de franja (plantilla determinista; aún sin pendingSlots).
-  if (decision.mode === 'ask-franja') {
-    return {
-      newState:     'SHOWING_SLOTS',
-      newContext:   { ...ctxOk, pendingFranjaChoice: true },
-      responseText: buildFranjaQuestion(shape.total),
-    };
-  }
+  // Decisión determinista (list | representative; ya no existe ask-franja).
+  const decision = decidePresentation(shape, hint, tz);
 
   // list | representative → fijar pendingSlots del subconjunto elegido.
   const pendingSlots: LifestylePendingSlot[] = decision.show.map((slot, i) => ({
@@ -540,11 +523,18 @@ async function handleHonestAvailability(
     }
   }
 
-  // Muestra representativa → plantilla determinista (el "o prefieres otra hora" es
-  // contractual → no va a Haiku). Preámbulo honesto si la hora exacta no existe.
+  // Muestra representativa (Versión C) → plantilla determinista (el cierre "¿te late
+  // alguna o buscas otra?" es contractual → no va a Haiku). La señal de amplitud se deriva
+  // de las franjas REALMENTE mostradas (ambas → "desde temprano hasta la noche"; una →
+  // "varios huecos en la mañana/tarde"), para no afirmar de más. Preámbulo honesto si la
+  // hora exacta pedida no existe.
   if (decision.mode === 'representative') {
-    const times = decision.show.map((s) => formatTimeHumanFromDate(s.startsAt, tz));
-    const body  = buildRepresentativeMessage(times, shape.total);
+    const shownMins    = decision.show.map((s) => utcToLocalMinutes(s.startsAt, tz));
+    const hasMorning   = shownMins.some((m) => m <  AFTERNOON_CUTOFF);
+    const hasAfternoon = shownMins.some((m) => m >= AFTERNOON_CUTOFF);
+    const span: FranjaSpan = hasMorning && hasAfternoon ? 'both' : hasAfternoon ? 'afternoon' : 'morning';
+    const times = formatRepresentativeExamples(decision.show, tz, span);
+    const body  = buildRepresentativeMessage(times, span, shape.total);
     const responseText = (exactMatchMissed && requestedTimeLabel)
       ? `A las ${requestedTimeLabel} no tengo disponible. ${body}`
       : body;
