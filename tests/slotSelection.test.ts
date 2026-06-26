@@ -289,10 +289,16 @@ test('(06-noreg) "no, a las 6" sigue consumido como corrección por el matcher (
   assert.equal(r.action, 'offer_nearest');
 });
 
-test('(06-noreg) "uno" sigue índice 1 (palabra, no dígito → parseChoice)', () => {
-  const r = route('uno', trio12);
-  assert.equal(r.action, 'index');
-  assert.equal((r as { choice: number }).choice, 1);
+// Hallazgo 3 (decisión aprobada): palabra ≡ dígito. "uno" ya NO es índice-fijo
+// vía parseChoice; entra por el step-4 igual que "1" y hereda su MISMA resolución
+// (hora-ofrecida → índice → cercana). Ante {12:00,13:00,15:00} la hora 1 (13:00)
+// está ofrecida → select 13:00, idéntico a route('1', trio12) (test 06-crítico).
+test('(06/H3) "uno" ≡ "1": select 13:00 (hora-ofrecida gana, ya no índice-fijo)', () => {
+  const word  = route('uno', trio12);
+  const digit = route('1',   trio12);
+  assert.equal(word.action, 'select');
+  assert.equal((word as { slot: LifestylePendingSlot }).slot.startsAt, '2026-06-15T19:00:00.000Z'); // 13:00 local
+  assert.deepEqual(word, digit); // palabra ≡ dígito, misma ruta
 });
 
 test('(06-noreg) "5pm" sigue select por el matcher (marcador, no rama pelada)', () => {

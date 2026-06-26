@@ -73,23 +73,113 @@ export function isNegation(body: string): boolean {
   return NEGATION_ANCHORED.some((k) => padded.includes(` ${k} `));
 }
 
-// ─── Parser de hora (movido desde confirmingAppointment.ts, sin cambio) ───────
+// ─── Números en palabras → dígito (Hallazgo 3) ────────────────────────────────
+// FUENTE ÚNICA palabra→dígito para los parsers deterministas. El bug: el cliente
+// dice "once" / "a las nueve" y el parser (100% \d) no lo reconoce. greeting y
+// qualifyingDatetime lo disimulan (avanzan por otras señales y listan el día);
+// el browse, estricto, lo rechaza con "no te seguí bien". Esta capa convierte el
+// número-palabra a su dígito para que los regex \d EXISTENTES de extractRawTime /
+// detectBareDigit / routeSlotSelection lo reconozcan sin duplicar lógica — cura
+// la divergencia DE RAÍZ y mantiene el FSM 100% determinista (cero LLM).
+//
+// Dos accesos sobre el MISMO mapa `HOUR_WORD`:
+//  - `digitizeNumberWords` (CON marcador): reemplaza "las once" / "once y media" /
+//    "ocho de la tarde" → dígito. El marcador desambigua, así que aquí "una" SÍ
+//    se convierte ("la una"→"la 1", "una y media"→"1 y media").
+//  - `wordToHour` (token PELADO): "once"→11, "tres"→3, pero "una"/"un"→null
+//    (tienen forma de artículo: "una cita" NO es la hora 1). Sin marcador sólo se
+//    aceptan palabras-número sin colisión.
+const HOUR_WORD: Record<string, number> = {
+  una: 1, un: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6,
+  siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, trece: 13,
+  catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18,
+  diecinueve: 19, veinte: 20, veintiun: 21, veintiuno: 21, veintiuna: 21,
+  veintidos: 22, veintitres: 23,
+};
+
+// Tokens con forma de artículo: como número PELADO NO cuentan como hora (protege
+// "una cita"). Con marcador explícito sí (lo resuelve digitizeNumberWords).
+const BARE_BLOCKED = new Set(['una', 'un']);
+
+// Alternación de palabras-número, las más LARGAS primero (evita que "uno" gane
+// sobre "veintiuno", o "veinte" sobre "veintitres", al construir el regex).
+const WORD_ALT = Object.keys(HOUR_WORD).sort((a, b) => b.length - a.length).join('|');
+
+// Marcadores que, tras un número-palabra, PRUEBAN que es una hora ("nueve y media",
+// "ocho de la tarde", "siete pm"). Sin acentos: digitizeNumberWords normaliza antes.
+const TIME_SUFFIX =
+  '(?:y\\s+(?:media|cuarto)|en\\s+punto|(?:de|por|en)\\s+la\\s+(?:manana|tarde|noche)|a\\.?\\s?m\\.?|p\\.?\\s?m\\.?)';
+
+/**
+ * Token PELADO → hora (1..23), o null. "once"→11, "tres"→3; "una"/"un"→null
+ * (artículo). Lo usan los sitios de número desnudo (detectBareDigit y el step-4
+ * del browse), que ya tratan un dígito suelto como hora-o-índice.
+ */
+export function wordToHour(token: string): number | null {
+  const t = normalize(token).trim();
+  if (BARE_BLOCKED.has(t)) return null;
+  return HOUR_WORD[t] ?? null;
+}
+
+/**
+ * Reemplaza números-palabra por su dígito SOLO en contexto de hora (con marcador),
+ * para que los regex \d de extractRawTime los reconozcan. Devuelve el texto
+ * normalizado (minúsculas, sin diacríticos) con las sustituciones aplicadas.
+ */
+export function digitizeNumberWords(text: string): string {
+  let t = normalize(text);
+  // (a) Precedido por "las"/"la"/"a las"/"a la": "a las once"→"a las 11",
+  //     "la una"→"la 1". El marcador desambigua → "una" SÍ se convierte aquí.
+  t = t.replace(
+    new RegExp(`\\b(a\\s+)?(las?)\\s+(${WORD_ALT})\\b`, 'g'),
+    (_m, a, las, w) => `${a ?? ''}${las} ${HOUR_WORD[w]}`,
+  );
+  // (b) Seguido por marcador de minuto/turno/período: "once y media"→"11 y media",
+  //     "ocho de la tarde"→"8 de la tarde". El lookahead conserva el marcador.
+  t = t.replace(
+    new RegExp(`\\b(${WORD_ALT})\\s+(?=${TIME_SUFFIX})`, 'g'),
+    (_m, w) => `${HOUR_WORD[w]} `,
+  );
+  return t;
+}
+
+// ─── Parser de hora (movido desde confirmingAppointment.ts) ───────────────────
 
 export type RawTime = { hour: number; minute: number; explicitPeriod: 'am' | 'pm' | null };
 
 /**
  * Parser de hora. Solo devuelve hora cuando hay un MARCADOR de hora
- * ("a las"/"las"/":MM"/pm/am/"de la tarde"). Un dígito desnudo ("5") NO es hora
- * → se trata como índice (decisión e).
+ * ("a las"/"las"/":MM"/pm/am/"de la tarde"/"y media"/"mediodía"). Un número
+ * desnudo —dígito "5" o palabra "once"— NO es hora aquí → se trata como índice
+ * (decisión e); los sitios de número desnudo usan `wordToHour`.
+ *
+ * Reconoce números en palabras vía `digitizeNumberWords` (Hallazgo 3): "a las
+ * once"→11:00, "nueve y media"→09:30, "mediodía"→12:00.
  */
-export function extractRawTime(lower: string): RawTime | null {
+export function extractRawTime(lowerRaw: string): RawTime | null {
+  // Normaliza y convierte números-palabra en contexto → los regex \d de abajo
+  // operan idéntico sobre dígitos y palabras (fuente única, sin ramas paralelas).
+  const lower = digitizeNumberWords(lowerRaw);
+
   // El marcador pm/am puede venir PEGADO al dígito ("5pm", "5am", "5p.m."). El
   // boundary \b falla entre dígito y "p"/"a" (ambos word-chars), así que el
   // límite izquierdo es un lookbehind negativo de LETRA: admite dígito / espacio
   // / inicio antes del marcador, pero NO una letra (evita matchear "pm"/"am"
   // embebidos en palabras como "examen"). El \b derecho se conserva.
   const pm = /(?<![a-z])(pm|p\.?\s?m\.?)\b/.test(lower) || /(de|por|en)\s+la\s+(tarde|noche)/.test(lower);
-  const am = /(?<![a-z])(am|a\.?\s?m\.?)\b/.test(lower) || /(de|por|en)\s+la\s+(mañana|manana)/.test(lower);
+  const am = /(?<![a-z])(am|a\.?\s?m\.?)\b/.test(lower) || /(de|por|en)\s+la\s+(manana)/.test(lower);
+
+  // Minuto explícito por frase ("y media"→30, "y cuarto"→15, "en punto"→0). Actúa
+  // también como marcador de hora para "once y media" (ver patrón 3b).
+  let minutePhrase: number | null = null;
+  if (/\by\s+media\b/.test(lower))       minutePhrase = 30;
+  else if (/\by\s+cuarto\b/.test(lower)) minutePhrase = 15;
+  else if (/\ben\s+punto\b/.test(lower)) minutePhrase = 0;
+
+  // "mediodía" → 12:00 (período del día; no lleva marcador "las").
+  if (/\bmediodia\b/.test(lower)) {
+    return { hour: 12, minute: minutePhrase ?? 0, explicitPeriod: null };
+  }
 
   let hour:    number | null = null;
   let minute = 0;
@@ -109,15 +199,26 @@ export function extractRawTime(lower: string): RawTime | null {
       m = lower.match(/\b(?:a\s+)?las?\s+(\d{1,2})\b/);
       if (m) {
         hour = parseInt(m[1]!, 10);
-      } else if (pm || am) {
-        // 4. número suelto con marcador de turno ("5 de la tarde")
-        m = lower.match(/\b(\d{1,2})\b/);
-        if (m) hour = parseInt(m[1]!, 10);
+      } else {
+        // 3b. "5 y media" / "5 y cuarto" / "5 en punto": la frase de minuto ACTÚA
+        //     como marcador de hora (igual que "las") → habilita "once y media".
+        m = lower.match(/\b(\d{1,2})\s+(?:y\s+(?:media|cuarto)|en\s+punto)\b/);
+        if (m) {
+          hour = parseInt(m[1]!, 10);
+        } else if (pm || am) {
+          // 4. número suelto con marcador de turno ("5 de la tarde")
+          m = lower.match(/\b(\d{1,2})\b/);
+          if (m) hour = parseInt(m[1]!, 10);
+        }
       }
     }
   }
 
   if (hour === null) return null;
+
+  // La frase de minuto aplica salvo que "HH:MM" ya haya fijado minutos explícitos.
+  if (minute === 0 && minutePhrase !== null) minute = minutePhrase;
+
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
 
   return { hour, minute, explicitPeriod: pm ? 'pm' : am ? 'am' : null };
@@ -183,9 +284,12 @@ function detectStaffMention(norm: string): string | null {
 
 // Dígito desnudo (índice potencial): un número 1–2 dígitos que NO es una hora.
 // Solo se computa cuando NO hay hora detectada (un "10:15" o "a las 5" no cuenta).
+// Acepta también el número-palabra como mensaje pelado ("once"→11) vía wordToHour
+// (misma fuente que el browse); "una"/"un" sueltos → null (artículo).
 function detectBareDigit(lower: string): number | null {
   const m = lower.match(/\b(\d{1,2})\b/);
-  return m ? parseInt(m[1]!, 10) : null;
+  if (m) return parseInt(m[1]!, 10);
+  return wordToHour(lower);
 }
 
 // ─── Tipo público e intérprete ────────────────────────────────────────────────

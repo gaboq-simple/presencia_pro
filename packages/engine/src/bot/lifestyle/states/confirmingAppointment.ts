@@ -43,6 +43,7 @@ import {
   isAffirmation,
   isNegation,
   extractRawTime,
+  wordToHour,
   resolveTargetMinutes,
   type RawTime,
   type Interpretation,
@@ -636,7 +637,9 @@ export function routeSlotSelection(
   //    NO se tocan extractRawTime/matchNaturalSlot/resolveTargetMinutes/parseChoice;
   //    aquí solo ALIMENTAMOS el dígito a resolveTargetMinutes (lectura) y ruteamos.
   //    Solo dígitos en rango horario (1..23); 0 / ≥24 caen a parseChoice → clarify.
-  const bareDigit = /^\d{1,2}$/.test(lower) ? parseInt(lower, 10) : null;
+  //    Hallazgo 3: un número-palabra pelado ("once"→11, "tres"→3) entra por la
+  //    MISMA puerta vía wordToHour (palabra ≡ dígito); "una"/"un" → null (artículo).
+  const bareDigit = /^\d{1,2}$/.test(lower) ? parseInt(lower, 10) : wordToHour(lower);
   if (bareDigit !== null && bareDigit >= 1 && bareDigit <= 23 && slots.length > 0) {
     const sorted   = [...slots].sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1));
     const slotMins = sorted.map((s) => utcToLocalMinutes(new Date(s.startsAt), tz));
