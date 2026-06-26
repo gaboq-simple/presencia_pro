@@ -176,6 +176,24 @@ test('noPreference: nombre concreto "quiero con Carlos" → false', () => {
   assert.equal(run('quiero con Carlos').noPreference, false);
 });
 
+// ─── Hallazgo 4: eje FECHA — "cualquier día" / "otro día" ──────────────────────
+// El intérprete es axis-agnostic: "cualquier día" marca noPreference (la consume
+// qualifyingDatetime como FECHA porque el barbero ya se resolvió — el eje lo fija el
+// ESTADO). NO es fecha concreta → date=null. "otro día" NO es no-preferencia (es un
+// "siguiente" que confirming detecta por keyword) y tampoco es fecha concreta.
+
+test('Hallazgo 4: "cualquier día" → noPreference true, date null (no es fecha concreta)', () => {
+  const r = run('cualquier día');
+  assert.equal(r.noPreference, true);
+  assert.equal(r.date, null);
+});
+
+test('Hallazgo 4: "otro día" → noPreference false, date null (es "siguiente", no no-preferencia)', () => {
+  const r = run('otro día');
+  assert.equal(r.noPreference, false);
+  assert.equal(r.date, null);
+});
+
 // ─── Dígito desnudo (índice potencial) ────────────────────────────────────────
 
 test('dígito desnudo "5" → bareDigit 5, time null', () => {

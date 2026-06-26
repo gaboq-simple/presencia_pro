@@ -21,6 +21,7 @@ import {
 } from '../clarification';
 import { detectsServiceCorrection } from '../utils';
 import { isAvailabilityQuestion } from '../availabilityIntent';
+import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import { utcToLocalDateStr, getTodayStr, noonUTCDate } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -216,6 +217,41 @@ export async function handleQualifyingDatetime(
       isWalkIn:               false,
       requestedDate:          parsedDate,
       requestedShift:         shift,
+      clarification_attempts: 0,
+      last_side_question:     null,
+    };
+    return {
+      newState:     'SHOWING_SLOTS',
+      newContext,
+      responseText: '',
+    };
+  }
+
+  // ── No-preferencia de FECHA (Hallazgo 4) ──────────────────────────────────
+  // "cualquier día" / "el que sea" / "da igual" SIN fecha concreta: el cliente YA
+  // respondió "¿qué día?" — no tiene preferencia. Gemelo de R4.2 (no-preferencia de
+  // barbero) en el eje FECHA. El eje lo fija el ESTADO: aquí el barbero ya se resolvió
+  // (staffId o autoAssign), así que noPreference = FECHA, no barbero. Determinista, va
+  // ANTES del clasificador (evita Haiku). Consume interpretation.noPreference (CRUDO,
+  // 1×/turno); fallback al keyword-match local para call-sites sin interpretation
+  // (tests) — estrangulamiento R4.1. La fecha concreta (arriba) GANA: "cualquier día…
+  // el martes" respeta el martes.
+  //
+  // Opción A: resolver al PRIMER día con cupo. Seteamos HOY y delegamos a SHOWING_SLOTS
+  // (chequea hoy primero, cae a findSlotsInNextDays si está vacío) — NO findSlotsInNextDays
+  // directo, que arranca en hoy+1 y saltearía un hoy con cupo.
+  const noPreference = deps.interpretation
+    ? deps.interpretation.noPreference
+    : NO_PREFERENCE_KEYWORDS.some((kw) => lower.includes(kw));
+  if (noPreference) {
+    const today          = getTodayStr(deps.business.timezone);
+    const hasStaffChoice = context.staffId || context.autoAssign;
+    const newContext: LifestyleBotContext = {
+      ...context,
+      isWalkIn:               false,
+      requestedDate:          today,
+      requestedShift:         shift,
+      ...(hasStaffChoice ? {} : { autoAssign: true }),
       clarification_attempts: 0,
       last_side_question:     null,
     };
