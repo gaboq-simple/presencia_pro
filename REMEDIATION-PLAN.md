@@ -815,10 +815,29 @@ router (R6). Malla 349 verde + smoke dirigido como gate.
 **Riesgo:** medio-alto (el estado más caliente). Mitigación: malla + smoke +
 migrar SOLO este estado en R4.1.
 
-## R4.2 — qualifyingStaff
+## R4.2 — qualifyingStaff 🟢 done-pending-smoke (2026-06-25)
 
 Consume `interpretation.affirmation` y la no-preferencia ("cualquiera", "el que
 sea") desde el intérprete, en vez de su detección propia.
+
+**Decisiones de ejecución (2026-06-25, aprobadas por Gabriel):**
+- **SOLO no-preferencia.** qualifyingStaff NO tiene detector determinista de
+  afirmación que migrar (cae al LLM). El fast-path de afirmación del favorito sería
+  un AGREGADO de comportamiento, no una migración → queda FUERA de R4.2 (su propia
+  tarea si se quiere). No mezclar migrar con agregar feature.
+- **Frontera: incluir confirmingAppointment.** Se migran AMBOS consumidores a
+  `interpretation.noPreference` y se borran las 2 listas locales → UNA fuente de
+  verdad. Dejar 2 listas medio-migradas (un 3er consumidor con divergencia viva)
+  sería peor que hoy.
+- **Detección vs política (guardarraíl B2):** `interpretation.noPreference` es
+  CRUDO (solo presencia de keyword). El guard `SHIFT_OR_EXTREME` ("cualquiera de la
+  tarde" = preferencia de turno, no no-preferencia) NO va al intérprete: SE QUEDA
+  en confirmingAppointment como política de estado. qualifyingStaff no tiene guard
+  (preserva comportamiento). Lista unificada = superset de confirming saneado
+  (SIN 'disponible'/'libre' sueltos). Orden `wantsStaffAxis`-antes intacto.
+- **Estrangulamiento R4.1:** `interp ? interp.noPreference : NO_PREFERENCE_KEYWORDS.some(...)`.
+  Fallback al parser viejo; la lista compartida (en interpreter.ts) no se borra
+  hasta el último consumidor.
 
 ## R4.3 — awaitingConfirmation + awaitingBookingName
 

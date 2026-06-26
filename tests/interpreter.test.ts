@@ -140,6 +140,42 @@ test('mensaje neutro sin sí/no → affirmation null', () => {
   assert.equal(run('a las 5').affirmation, null);
 });
 
+// ─── No-preferencia (R4.2) ────────────────────────────────────────────────────
+// CRUDA: solo presencia de keyword. SIN guard de turno (el guard "cualquiera de la
+// tarde" es política de confirmingAppointment, NO del intérprete). Saneada: SIN
+// 'disponible'/'libre' sueltos. Fuente única para qualifyingStaff + confirming.
+
+test('noPreference "cualquiera" → true', () => {
+  assert.equal(run('cualquiera').noPreference, true);
+});
+
+test('noPreference "el que sea" → true', () => {
+  assert.equal(run('el que sea').noPreference, true);
+});
+
+test('noPreference: superset de confirming ("no tengo tema", "el que este") → true', () => {
+  assert.equal(run('no tengo tema').noPreference, true);
+  assert.equal(run('el que este').noPreference, true);
+  assert.equal(run('el que este disponible').noPreference, true); // cubierto por 'el que este'
+});
+
+test('noPreference: "me da igual" cubierto por "da igual" → true', () => {
+  assert.equal(run('me da igual').noPreference, true);
+});
+
+test('noPreference saneado: "¿qué barbero está disponible?" → false (sin disponible/libre sueltos)', () => {
+  assert.equal(run('¿qué barbero está disponible?').noPreference, false);
+  assert.equal(run('cuál barbero está libre').noPreference, false);
+});
+
+test('noPreference CRUDA: "cualquiera de la tarde" → true (el guard de turno es política de estado)', () => {
+  assert.equal(run('cualquiera de la tarde').noPreference, true);
+});
+
+test('noPreference: nombre concreto "quiero con Carlos" → false', () => {
+  assert.equal(run('quiero con Carlos').noPreference, false);
+});
+
 // ─── Dígito desnudo (índice potencial) ────────────────────────────────────────
 
 test('dígito desnudo "5" → bareDigit 5, time null', () => {

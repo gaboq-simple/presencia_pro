@@ -45,6 +45,7 @@ import {
   extractRawTime,
   wordToHour,
   resolveTargetMinutes,
+  NO_PREFERENCE_KEYWORDS,
   type RawTime,
   type Interpretation,
 } from '../interpreter';
@@ -62,12 +63,9 @@ const MONTHS_ES = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ];
 
-// Keywords que expresan "no tengo preferencia de barbero / slot"
-const NO_PREFERENCE_KEYWORDS = [
-  'cualquiera', 'cualquier', 'el que sea', 'quien sea', 'no importa',
-  'no me importa', 'da igual', 'me da igual', 'no tengo preferencia',
-  'no tengo tema', 'el que este', 'el que este disponible',
-];
+// NO_PREFERENCE_KEYWORDS se movió a interpreter.ts (R4.2): fuente ÚNICA compartida
+// con qualifyingStaff. Aquí se usa como fallback del estrangulamiento; el guard
+// SHIFT_OR_EXTREME_RE (abajo) sigue siendo política de ESTE estado y NO se movió.
 
 // Frases que indican cambio de día que parseDate NO sabe expresar como fecha
 // concreta. Junto con parseDate forman el detector de "redirección de fecha".
@@ -605,7 +603,15 @@ export function routeSlotSelection(
   }
 
   // 2. No-preferencia pura (sin calificador de turno/extremo → decisión d).
-  if (NO_PREFERENCE_KEYWORDS.some((k) => lower.includes(k)) && !SHIFT_OR_EXTREME_RE.test(lower)) {
+  //    R4.2: la presencia de keyword viene del intérprete (interpretation.noPreference,
+  //    CRUDA); el guard SHIFT_OR_EXTREME es POLÍTICA DE ESTADO y se queda aquí
+  //    ("cualquiera de la tarde" = preferencia de turno, NO no-preferencia, porque
+  //    ya hay slots mostrados). Fallback al keyword-match local si el caller no pasa
+  //    interpretation (tests directos) — estrangulamiento R4.1.
+  const noPref = interpretation
+    ? interpretation.noPreference
+    : NO_PREFERENCE_KEYWORDS.some((k) => lower.includes(k));
+  if (noPref && !SHIFT_OR_EXTREME_RE.test(lower)) {
     return { action: 'no_preference' };
   }
 
