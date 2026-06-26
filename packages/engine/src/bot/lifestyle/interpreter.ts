@@ -73,6 +73,33 @@ export function isNegation(body: string): boolean {
   return NEGATION_ANCHORED.some((k) => padded.includes(` ${k} `));
 }
 
+// ─── No-preferencia de barbero/slot (R4.2) ────────────────────────────────────
+// Lista ÚNICA de keywords de no-preferencia, consumida por qualifyingStaff y
+// confirmingAppointment (antes cada estado tenía su PROPIA copia, ya divergidas:
+// confirming reconocía 'no tengo tema'/'el que este' que staff no). Esta es la
+// fuente de verdad; cierra esa duplicación.
+//
+// Detección CRUDA y NEUTRAL: solo presencia de keyword (guardarraíl B2). La
+// POLÍTICA sensible al estado NO vive aquí: en confirmingAppointment "cualquiera
+// de la tarde" NO es no-preferencia sino preferencia de turno (hay slots
+// mostrados), y ese guard (SHIFT_OR_EXTREME) se queda en ese estado. El intérprete
+// entiende neutral; cada estado aplica su política.
+//
+// Saneada (S5-BOT-04): SIN 'disponible'/'libre' sueltos — eran falsos positivos
+// por substring ("¿qué barbero está disponible?" NO es no-preferencia). 'cualquier'
+// cubre "cualquiera"/"cualquier barbero"; 'el que este' cubre "el que este
+// disponible"; 'da igual' cubre "me da igual".
+export const NO_PREFERENCE_KEYWORDS = [
+  'cualquier', 'el que sea', 'quien sea', 'no importa', 'no me importa',
+  'da igual', 'no tengo preferencia', 'no tengo tema', 'el que este',
+];
+
+// Presencia cruda de keyword de no-preferencia sobre el texto normalizado (sin
+// diacríticos). NO aplica el guard de turno/extremo (eso es política de estado).
+export function detectNoPreference(norm: string): boolean {
+  return NO_PREFERENCE_KEYWORDS.some((kw) => norm.includes(kw));
+}
+
 // ─── Números en palabras → dígito (Hallazgo 3) ────────────────────────────────
 // FUENTE ÚNICA palabra→dígito para los parsers deterministas. El bug: el cliente
 // dice "once" / "a las nueve" y el parser (100% \d) no lo reconoce. greeting y
@@ -300,6 +327,7 @@ export type Interpretation = {
   readonly time:   { hour: number; minute: number; period: 'am' | 'pm' | null } | null;
   readonly date:   string | null;    // YYYY-MM-DD (vía parseDate), o null
   readonly affirmation: boolean | null;  // sí=true / no=false / no aplica=null
+  readonly noPreference: boolean;         // "cualquiera"/"el que sea"/… (CRUDO: sin guard de turno)
   readonly staffMention: string | null;  // nombre de barbero crudo, o null
   readonly hasSideQuestion: boolean;      // contiene "?" / "¿"
   readonly ordinal: number | null;        // "la primera"→0, etc. (0-based)
@@ -331,6 +359,7 @@ export function interpret(input: {
       ? false
       : null;
 
+  const noPreference   = detectNoPreference(norm);
   const staffMention   = detectStaffMention(norm);
   const hasSideQuestion = /[?¿]/.test(message);
   const ordinal        = detectOrdinal(norm);
@@ -342,6 +371,7 @@ export function interpret(input: {
     time,
     date,
     affirmation,
+    noPreference,
     staffMention,
     hasSideQuestion,
     ordinal,

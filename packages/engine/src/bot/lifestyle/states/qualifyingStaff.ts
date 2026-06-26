@@ -28,6 +28,7 @@ import { isAvailabilityQuestion } from '../availabilityIntent';
 import { wantsToChooseStaff, asksWhoOnly } from '../staffAxisIntent';
 import { parseDate } from './qualifyingDatetime';
 import { getTodayStr } from '../tzUtils';
+import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
@@ -36,16 +37,9 @@ const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 // Exportado para el test de relación de caps (S5-BOT-12).
 export const MAX_TOTAL_ATTEMPTS = 5;
 
-// Keywords que indican "no tengo preferencia".
-// S5-BOT-04: se quitaron 'libre' y 'disponible' — eran falsos positivos por
-// match substring (":129"): "¿qué barbero está disponible?" se leía como "el
-// que sea". La lista queda acotada a expresiones inequívocas de no-preferencia.
-// (Deuda: existe otra lista análoga en confirmingAppointment.ts:54 —ya sin
-// 'disponible'/'libre'—; unificarlas algún día.)
-const NO_PREFERENCE_KEYWORDS = [
-  'cualquiera', 'cualquier', 'no importa', 'no me importa', 'da igual',
-  'el que sea', 'quien sea', 'cualquier barbero', 'no tengo preferencia',
-];
+// NO_PREFERENCE_KEYWORDS se movió a interpreter.ts (R4.2): fuente ÚNICA compartida
+// con confirmingAppointment. El saneo S5-BOT-04 (sin 'disponible'/'libre' sueltos)
+// vive allá. Aquí solo se usa como fallback del estrangulamiento.
 
 const FLOW_QUESTION = 'Con quien te gustaria agendar?';
 
@@ -163,8 +157,15 @@ export async function handleQualifyingStaff(
 
   const lower = msg.body.trim().toLowerCase();
 
-  // ¿No tiene preferencia? (keywords directos)
-  if (NO_PREFERENCE_KEYWORDS.some((kw) => lower.includes(kw))) {
+  // ¿No tiene preferencia? (R4.2) Consume interpretation.noPreference (computado
+  // 1×/turno en dispatch); fallback al keyword-match local si dispatch no inyectó
+  // interpretation (tests directos) — estrangulamiento R4.1. SIN guard de turno:
+  // qualifyingStaff aún no mostró slots, así que "cualquiera" es no-preferencia de
+  // barbero (a diferencia de confirming). Preserva el comportamiento previo.
+  const noPref = deps.interpretation
+    ? deps.interpretation.noPreference
+    : NO_PREFERENCE_KEYWORDS.some((kw) => lower.includes(kw));
+  if (noPref) {
     return buildAutoAssignResult(effectiveContext);
   }
 
