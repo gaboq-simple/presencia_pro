@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getAvailableSlots } from '../packages/engine/src/bot/lifestyle/scheduling';
+import { getDayAvailability } from '../packages/engine/src/bot/lifestyle/scheduling';
 import { parseDate } from '../packages/engine/src/bot/lifestyle/states/qualifyingDatetime';
 import {
   noonUTCDate,
@@ -23,6 +23,12 @@ import {
   utcToLocalMinutes,
 } from '../packages/engine/src/bot/lifestyle/tzUtils';
 import type { StaffRow } from '../packages/engine/src/bot/lifestyle/types';
+
+// El ex-wrapper getAvailableSlots se eliminó (fuente única = getDayAvailability). Estos tests
+// prueban la GENERACIÓN de slots (que 17:00 exista, que un slot ocupado no se ofrezca, etc.);
+// el truncado a ≤3 es incidental → shim local idéntico byte-a-byte al ex-wrapper.
+const getAvailableSlots = async (opts: Parameters<typeof getDayAvailability>[0]) =>
+  (await getDayAvailability(opts)).all.slice(0, 3);
 
 // ─── Fake Supabase ────────────────────────────────────────────────────────────
 // Builder encadenable y "thenable": cada método retorna el mismo builder; al

@@ -204,21 +204,23 @@ test('presentBy=staff: muestra el nombre de cada barbero (no los suprime), aun c
   assert.match(r.responseText, /Andres/);
 });
 
-test('default (presentBy ausente): autoAssign con 1 hora → propuesta negociable en CONFIRMING (R3)', async () => {
+test('default (presentBy ausente): autoAssign día completo → muestra honesta de amplitud (NO slot único)', async () => {
+  // HONESTIDAD UNIVERSAL (smoke R4.2): antes el dedup por barbero+hora colapsaba el día
+  // completo (ambos 10–20) a 1 slot ("las 10") y escondía la tarde → perdía citas. Ahora
+  // la unión por HORA muestra la amplitud real, SIN nombres (presentBy ausente → el cliente
+  // elige HORA, no barbero). R3 (slot único negociable) queda ACOTADO al caso de UNA sola
+  // hora libre (cubierto en r3Negotiable.test.ts).
   const ctx: LifestyleBotContext = {
     serviceId:     SVC,
     requestedDate: DATE,
     autoAssign:    true,
   };
   const r = await handleShowingSlots(makeMsg(''), ctx, makeDeps());
-  // Dos barberos a la misma hora colapsan a 1 (dedup por hora). R3: ya NO se
-  // auto-confirma saltando a AWAITING_BOOKING_NAME; se PROPONE el slot —
-  // conservándolo en pendingSlots — y se va a CONFIRMING con frase negociable.
   assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
-  assert.equal(r.newContext.pendingSlots?.length, 1);
-  assert.match(r.responseText, /¿te sirve o preferis otra hora\?/i);
-  const named = [/Carlos/, /Andres/].filter((re) => re.test(r.responseText));
-  assert.equal(named.length, 1); // solo UN barbero sobrevive el dedup por hora
+  assert.ok((r.newContext.pendingSlots?.length ?? 0) > 1, 'varias horas, no colapsa a 1');
+  assert.match(r.responseText, /desde temprano hasta la noche/i, 'amplitud honesta');
+  assert.doesNotMatch(r.responseText, /¿te sirve o preferis otra hora\?/i, 'ya no es la propuesta de slot único');
+  assert.doesNotMatch(r.responseText, /Carlos|Andres/, 'presentBy ausente → sin nombres de barbero');
 });
 
 // ─── 4. Guard de interrogación (ask_who) en routeSlotSelection ───────────────

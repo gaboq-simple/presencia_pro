@@ -19,7 +19,7 @@ import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/l
 import { getCatalog, getStaffForService } from '../catalog';
 import { logBot } from '../../../utils/logger';
 import { FORMATTING_RULES } from '../prompt';
-import { getAvailableSlots, getDayAvailability, findSlotsInNextDays, SchedulingQueryError, AFTERNOON_CUTOFF } from '../scheduling';
+import { getDayAvailability, findSlotsInNextDays, SchedulingQueryError, AFTERNOON_CUTOFF } from '../scheduling';
 import type { DayAvailability } from '../scheduling';
 import {
   decidePresentation,
@@ -134,22 +134,51 @@ export async function handleShowingSlots(
   // 2do fallo → FALLBACK (escalar a humano).
   const schedulingRetries = context.clarification_attempts ?? 0;
 
+  // (a) HONESTIDAD UNIVERSAL: auto-asign SIN barbero (no walk-in, no eje-staff) consume la
+  // forma COMPLETA del día con dedup por HORA (unión de horas) y se presenta con el árbol
+  // determinista — igual que barbero-fijo. Antes el per-barber colapsaba el día a 1 slot
+  // cuando los barberos compartían la hora más temprana → escondía la tarde (perdía citas).
+  // Walk-in y presentBy='staff' conservan el flujo clásico (un slot por barbero, ≤3).
+  const useAutoHonest = !!context.autoAssign && !presentByStaff && !(context.isWalkIn ?? false);
+
   let slots: SlotCandidate[];
+  let autoHonestShape: DayAvailability | null = null;
   try {
-    slots = await getAvailableSlots({
-      businessId:          business.id,
-      serviceId:           context.serviceId,
-      durationMinutes:     service.duration_minutes,
-      requestedDate,
-      shift:               context.requestedShift ?? null,
-      preferredStaffId:    context.autoAssign ? null : (context.staffId ?? null),
-      isWalkIn:            context.isWalkIn ?? false,
-      walkInBufferMinutes: business.walkInBufferMinutes,
-      staffToQuery:        staffForService,
-      supabase,
-      tz:                  business.timezone,
-      requestedTime:       context.requestedTime ?? undefined,
-    });
+    if (useAutoHonest) {
+      autoHonestShape = await getDayAvailability({
+        businessId:          business.id,
+        serviceId:           context.serviceId,
+        durationMinutes:     service.duration_minutes,
+        requestedDate,
+        shift:               null,        // el árbol decide la franja (vía hint)
+        preferredStaffId:    null,        // auto-asign
+        dedupe:              'per-hour',  // (a): unión de horas honesta
+        isWalkIn:            false,
+        walkInBufferMinutes: business.walkInBufferMinutes,
+        staffToQuery:        staffForService,
+        supabase,
+        tz:                  business.timezone,
+        requestedTime:       context.requestedTime ?? undefined,
+      });
+      slots = [...autoHonestShape.all];
+    } else {
+      // Camino clásico (walk-in ≤1; presentBy='staff' = un slot por barbero). Inline del
+      // ex-wrapper getAvailableSlots (= .all.slice(0,3)); dedupe default 'per-barber'.
+      slots = (await getDayAvailability({
+        businessId:          business.id,
+        serviceId:           context.serviceId,
+        durationMinutes:     service.duration_minutes,
+        requestedDate,
+        shift:               context.requestedShift ?? null,
+        preferredStaffId:    context.autoAssign ? null : (context.staffId ?? null),
+        isWalkIn:            context.isWalkIn ?? false,
+        walkInBufferMinutes: business.walkInBufferMinutes,
+        staffToQuery:        staffForService,
+        supabase,
+        tz:                  business.timezone,
+        requestedTime:       context.requestedTime ?? undefined,
+      })).all.slice(0, 3);
+    }
   } catch (err) {
     if (err instanceof SchedulingQueryError) {
       if (schedulingRetries >= 1) {
@@ -270,8 +299,10 @@ export async function handleShowingSlots(
   // ya es un-slot-por-barbero (proyección de getAvailableSlots) y queremos
   // conservar a TODOS los barberos, incluso si comparten la misma hora.
 
+  // useAutoHonest ya viene deduplicado por hora (getDayAvailability dedupe:'per-hour') →
+  // no re-deduplicar. El resto del flujo clásico (walk-in, presentBy='staff') sí.
   let displaySlots = slots;
-  if (context.autoAssign && !presentByStaff) {
+  if (context.autoAssign && !presentByStaff && !useAutoHonest) {
     const seen = new Set<string>();
     displaySlots = slots.filter((s) => {
       const localMin = utcToLocalMinutes(s.startsAt, business.timezone);
@@ -338,6 +369,26 @@ export async function handleShowingSlots(
       newState:     'CONFIRMING_APPOINTMENT',
       newContext,
       responseText: proposalText,
+    };
+  }
+
+  // ── (a) Auto-asign honesto, VARIAS horas → muestra honesta (no la lista de Haiku) ──
+  // Mismo árbol + plantillas deterministas que barbero-fijo: amplitud real ("desde temprano
+  // hasta la noche" / "varios huecos en la tarde"), sin esconder franjas. El barbero ya viene
+  // pre-asignado por hora en autoHonestShape → al elegir la hora se agenda ese barbero. El
+  // caso de UNA sola hora ya se resolvió arriba con la propuesta negociable de R3 (acotada).
+  if (useAutoHonest && autoHonestShape) {
+    const hint: FranjaHint = {
+      requestedShift: context.requestedShift ?? null,
+      requestedTime:  context.requestedTime ?? null,
+    };
+    const { pendingSlots, responseText } = buildHonestPresentation(
+      autoHonestShape, hint, context.requestedTime ?? null, business.timezone,
+    );
+    return {
+      newState:   'CONFIRMING_APPOINTMENT',
+      newContext: { ...contextAfterSlots, pendingSlots },
+      responseText,
     };
   }
 
@@ -495,10 +546,29 @@ async function handleHonestAvailability(
 
   const ctxOk = { ...ctx, clarification_attempts: 0 };
 
-  // Decisión determinista (list | representative; ya no existe ask-franja).
+  // Presentación honesta compartida (mismo árbol + plantillas deterministas que auto-asign).
+  // El preámbulo "A las X no tengo" usa ctx.requestedTime (la hora YA resuelta: una aparcada
+  // se resolvió arriba contra la agenda; una explícita venía en context).
+  const { pendingSlots, responseText } = buildHonestPresentation(shape, hint, ctx.requestedTime ?? null, tz);
+  return { newState: 'CONFIRMING_APPOINTMENT', newContext: { ...ctxOk, pendingSlots }, responseText };
+}
+
+// ─── Presentación honesta compartida (determinista, NO LLM) ───────────────────
+// De la FORMA completa (DayAvailability) + el árbol (decidePresentation) arma el
+// subconjunto a mostrar (pendingSlots ≤3) y el texto: representative (Versión C, "desde
+// temprano hasta la noche / varios huecos en la mañana/tarde" + "¿te late alguna o buscas
+// otra?") o list (plantilla, con coda de la otra franja si la oculta). Preámbulo honesto
+// "A las X no tengo disponible" si `requestedTime` no existe en shape.all. La usan TANTO
+// barbero-fijo (handleHonestAvailability) como auto-asign sin barbero (handleShowingSlots,
+// rama per-hour) → una sola voz honesta en todos los caminos.
+function buildHonestPresentation(
+  shape:         DayAvailability,
+  hint:          FranjaHint,
+  requestedTime: string | null,
+  tz:            string,
+): { pendingSlots: LifestylePendingSlot[]; responseText: string } {
   const decision = decidePresentation(shape, hint, tz);
 
-  // list | representative → fijar pendingSlots del subconjunto elegido.
   const pendingSlots: LifestylePendingSlot[] = decision.show.map((slot, i) => ({
     index:     i + 1,
     staffId:   slot.staffId,
@@ -506,28 +576,20 @@ async function handleHonestAvailability(
     startsAt:  slot.startsAt.toISOString(),
     endsAt:    slot.endsAt.toISOString(),
   }));
-  const newContext: LifestyleBotContext = { ...ctxOk, pendingSlots };
 
-  // exactMatchMissed contra shape.all (NO contra el display truncado) — el fix del bug.
-  // Usa ctx.requestedTime (la hora YA resuelta: una hora aparcada se resolvió arriba
-  // contra la agenda; una explícita ya venía en context). NO context.requestedTime.
+  // exactMatchMissed contra shape.all (NO el display truncado) — el fix del bug.
   let exactMatchMissed = false;
   let requestedTimeLabel: string | undefined;
-  if (ctx.requestedTime) {
-    const [rh, rm] = ctx.requestedTime.split(':').map(Number);
+  if (requestedTime) {
+    const [rh, rm] = requestedTime.split(':').map(Number);
     const targetMin = (rh ?? 0) * 60 + (rm ?? 0);
     const hasExact = shape.all.some((s) => Math.abs(utcToLocalMinutes(s.startsAt, tz) - targetMin) <= 5);
     if (!hasExact) {
       exactMatchMissed = true;
-      requestedTimeLabel = formatTimeHuman(ctx.requestedTime);
+      requestedTimeLabel = formatTimeHuman(requestedTime);
     }
   }
 
-  // Muestra representativa (Versión C) → plantilla determinista (el cierre "¿te late
-  // alguna o buscas otra?" es contractual → no va a Haiku). La señal de amplitud se deriva
-  // de las franjas REALMENTE mostradas (ambas → "desde temprano hasta la noche"; una →
-  // "varios huecos en la mañana/tarde"), para no afirmar de más. Preámbulo honesto si la
-  // hora exacta pedida no existe.
   if (decision.mode === 'representative') {
     const shownMins    = decision.show.map((s) => utcToLocalMinutes(s.startsAt, tz));
     const hasMorning   = shownMins.some((m) => m <  AFTERNOON_CUTOFF);
@@ -538,19 +600,14 @@ async function handleHonestAvailability(
     const responseText = (exactMatchMissed && requestedTimeLabel)
       ? `A las ${requestedTimeLabel} no tengo disponible. ${body}`
       : body;
-    return { newState: 'CONFIRMING_APPOINTMENT', newContext, responseText };
+    return { pendingSlots, responseText };
   }
 
-  // Listar pocos → plantilla determinista (NO Haiku). El camino honesto NO hace una
-  // segunda pasada por generateSlotsMessage: ahí Haiku fusionaba su propia lista de
-  // horarios tempranos (doble lista contradictoria) e inventaba un "lo más cercano es
-  // X" falso. decision.show ya viene ordenada (cronológica, o por cercanía si hubo
-  // requestedTime). El preámbulo honesto sale del exactMatchMissed contra shape.all.
+  // list: pocos → plantilla determinista. Coda honesta si la franja mostrada es una sola
+  // y la OTRA tiene slots sin mostrar (no esconde que existe).
   const shownMins    = decision.show.map((s) => utcToLocalMinutes(s.startsAt, tz));
   const allMorning   = shownMins.every((m) => m <  AFTERNOON_CUTOFF);
   const allAfternoon = shownMins.every((m) => m >= AFTERNOON_CUTOFF);
-  // Coda honesta: si la franja mostrada es una sola y la OTRA tiene slots sin
-  // mostrar, ofrecerla — no esconder que existe.
   const otherFranja: 'morning' | 'afternoon' | null =
       (allAfternoon && shape.morning.length   > 0) ? 'morning'
     : (allMorning   && shape.afternoon.length > 0) ? 'afternoon'
@@ -560,7 +617,7 @@ async function handleHonestAvailability(
   const responseText = (exactMatchMissed && requestedTimeLabel)
     ? `A las ${requestedTimeLabel} no tengo disponible. ${listBody}`
     : listBody;
-  return { newState: 'CONFIRMING_APPOINTMENT', newContext, responseText };
+  return { pendingSlots, responseText };
 }
 
 // ─── Presentación de slots via Claude ────────────────────────────────────────

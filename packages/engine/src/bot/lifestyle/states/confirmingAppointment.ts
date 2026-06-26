@@ -35,7 +35,8 @@ import {
   clearBookingSelection,
 } from '../utils';
 import { utcToLocalMinutes, noonUTCDate } from '../tzUtils';
-import { getAvailableSlots, SchedulingQueryError } from '../scheduling';
+import { getDayAvailability, SchedulingQueryError } from '../scheduling';
+import { decidePresentation } from './slotPresentation';
 import { parseDate } from './qualifyingDatetime';
 import {
   normalize,
@@ -405,7 +406,10 @@ async function handleOfferNearest(
       const service = catalog.find((s) => s.id === context.serviceId);
       if (service) {
         const staffToQuery = await getStaffForService(business.id, service.id, supabase);
-        realSlots = await getAvailableSlots({
+        // HONESTIDAD UNIVERSAL: forma completa ordenada por cercanía a la hora pedida
+        // (requestedTime), topada al cap del pendingSlot (≤3). Inlinea el ex-wrapper
+        // getAvailableSlots (que era exactamente .all.slice(0,3)).
+        realSlots = (await getDayAvailability({
           businessId:          business.id,
           serviceId:           service.id,
           durationMinutes:     service.duration_minutes,
@@ -420,7 +424,7 @@ async function handleOfferNearest(
           supabase,
           tz,
           requestedTime:       `${hh}:${mm}`,
-        });
+        })).all.slice(0, 3);
       }
     } catch (err) {
       if (err instanceof SchedulingQueryError) {
@@ -481,16 +485,27 @@ async function handleOfferNearest(
     };
   }
 
-  // Sin disponibilidad real recuperable → ofrecer el más cercano de los ya
-  // mostrados (comportamiento previo, conserva el slot en pendingSlots).
-  const nearestTime = formatTimeHumanFromDate(new Date(fallbackSlot.startsAt), tz);
-  const staffPart   = (context.requestedStaffId || !context.autoAssign) ? ` con ${fallbackSlot.staffName}` : '';
+  // HONESTIDAD UNIVERSAL — fallback honesto: el requery de ESE día volvió VACÍO (el barbero
+  // pedido / auto no tiene NINGÚN hueco ese día). NO reusar el pendingSlot viejo como "lo más
+  // cercano" — era FALSO: un slot truncado de la mañana que ya no aplicaba (de ahí salía el
+  // "lo más cercano 10am" del smoke). Decimos la verdad y pivotamos a otro día, limpiando los
+  // slots viejos (conservando barbero/servicio para reintentar la búsqueda ese nuevo día).
+  const staffPart = (context.requestedStaffId || !context.autoAssign) ? ` con ${fallbackSlot.staffName}` : '';
   return {
-    newState:   'CONFIRMING_APPOINTMENT',
-    newContext: { ...context, nearestOfferSlot: fallbackSlot.startsAt, clarification_attempts: 0, rejection_attempts: 0 },
+    newState:   'QUALIFYING_DATETIME',
+    newContext: {
+      ...context,
+      requestedDate:          undefined,
+      requestedTime:          undefined,
+      requestedShift:         undefined,
+      pendingAgendaTime:      undefined,
+      pendingSlots:           undefined,
+      nearestOfferSlot:       null,
+      clarification_attempts: 0,
+      rejection_attempts:     0,
+    },
     responseText:
-      `A las ${reqLabel} no tengo disponible${staffPart}. ` +
-      `Lo mas cercano es a las ${nearestTime}. Te sirve?`,
+      `A las ${reqLabel} no tengo disponible${staffPart} ese dia. ¿Para que otro dia te gustaria?`,
   };
 }
 
@@ -985,13 +1000,19 @@ async function buildBarberMismatchResult(
   const chosenTime = formatTimeHumanFromDate(new Date(chosen.startsAt), tz);
 
   // Intentar mantener al barbero pedido en otro horario del mismo día.
-  let requestedSlots: SlotCandidate[] = [];
+  // HONESTIDAD UNIVERSAL: la forma COMPLETA del día (getDayAvailability) + árbol
+  // determinista (decidePresentation), NO el slice(0,3) cronológico. El slice escondía
+  // la tarde cuando la agenda del barbero arranca temprano pero tiene la tarde libre
+  // (falso-negativo DURO: el cliente pidió "para la tarde" y se le ofrecía solo la
+  // mañana → perdía la cita). El hint (requestedShift/requestedTime) deja que el árbol
+  // elija la franja honesta; sin pista, ancla con una muestra que abarca todo el día.
+  let requestedShow: SlotCandidate[] = [];
   if (context.serviceId && context.requestedDate && requested) {
     try {
       const catalog = await getCatalog(business.id, supabase);
       const service = catalog.find((s) => s.id === context.serviceId);
       if (service) {
-        requestedSlots = await getAvailableSlots({
+        const shape = await getDayAvailability({
           businessId:          business.id,
           serviceId:           service.id,
           durationMinutes:     service.duration_minutes,
@@ -1004,6 +1025,13 @@ async function buildBarberMismatchResult(
           supabase,
           tz,
         });
+        if (shape.all.length > 0) {
+          requestedShow = decidePresentation(
+            shape,
+            { requestedShift: context.requestedShift ?? null, requestedTime: context.requestedTime ?? null },
+            tz,
+          ).show;
+        }
       }
     } catch (err) {
       if (!(err instanceof SchedulingQueryError)) throw err;
@@ -1011,8 +1039,9 @@ async function buildBarberMismatchResult(
     }
   }
 
-  if (requestedSlots.length > 0) {
-    const newPending: LifestylePendingSlot[] = requestedSlots.slice(0, 3).map((s, i) => ({
+  if (requestedShow.length > 0) {
+    // decision.show ya viene topada (≤ max(LIST_ALL_MAX, REPRESENTATIVE_COUNT) = 3).
+    const newPending: LifestylePendingSlot[] = requestedShow.map((s, i) => ({
       index:     i + 1,
       staffId:   s.staffId,
       staffName: s.staffName,
