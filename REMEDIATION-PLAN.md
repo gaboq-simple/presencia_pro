@@ -962,3 +962,28 @@ fuente única de comprensión. NO tocar scheduling/slots.ts (otro producto).
 
 **Decisión Gabriel:** los 4 en UN sprint, unificación (no diff mínimo). Prioridad
 ALTA — pierde citas en prod. Pausa R4.3 (el cierre de reserva no pierde citas, esto sí).
+
+## SMOKE Honestidad Universal (2026-06-26) — ÉXITO + 2 hallazgos nuevos
+
+ÉXITO PRINCIPAL (el bug que pierde citas, MUERTO): auto-asign "Cualquiera" → "Tengo
+desde temprano hasta la noche. Unas opciones: a las 10, 3 o 8 de la noche." → "a las
+5" → "Sí, tengo disponible a las 5. Te la agendo?" → agenda. ANTES decía "a las 5 no
+tengo, lo más cercano 10am". Falso-negativo de auto-asign curado. R3 acotado funciona
+(Img 3). (c) y (b) sin reproducir bugs.
+
+HALLAZGO 4 — "cualquier día"/"otro día" NO se entiende como no-preferencia de FECHA:
+(Img 4) "Cualquier día" → "No entendí bien qué día prefieres". "Otro día" tras ver
+slots → mismo rechazo. Gemelo EXACTO de la no-preferencia de barbero (R4.2) en el eje
+FECHA. "cualquier día" = noPreference en qualifyingDatetime → primer día con cupo (vía
+SHOWING_SLOTS + findSlotsInNextDays, Opción A). "otro día" = date_redirect que hoy
+borra requestedDate y rebota a "no entendí"; fix = anclar requestedDate+1 → SHOWING_SLOTS
+por interceptación de handler. Eje resuelto: noPreference axis-agnostic, el estado fija
+el significado (datetime→fecha, barbero ya resuelto).
+
+HALLAZGO 5 (menor, borde de franja): "1:45 de la tarde" → 13:45 < AFTERNOON_CUTOFF(~14)
+→ sistema lo bucketea mañana pero el bot dice "tarde". Inconsistencia de label. Baja
+prioridad.
+
+Sub-hallazgo (Img 2): "Carlos para la tarde" cayó en "no te seguí bien" en vez de
+entender "tarde" como filtro. Relacionado con R4.5. Adyacente: "esta semana"/"próxima
+semana" (en DATE_CHANGE_KEYWORDS) también mueren en :347 — gap futuro.
