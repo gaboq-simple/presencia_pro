@@ -1498,3 +1498,21 @@ Al cierre de cada semana, Gabriel actualiza:
 | 2 | 5 | 9 | 56% | — | S2-G-01/02/03 bloqueadas (humanas); S2-LEG-01 bloqueada por S2-G-01 |
 | 3 | 8 | 8 | 100% | — | S3-OPS-01 bloqueada (UptimeRobot pendiente de Gabriel); S3-G-01 humana |
 | 4 | 0 | 4 | 0% | 0 | — |
+
+### Hallazgo de smoke R4.2 (2026-06-25) — side-question "disponibilidad de barbero X" no consulta agenda real
+
+**Síntoma (Img 3 del smoke R4.2):** "¿Qué horario tiene disponible Carlos mañana?"
+(side-question ANTES de entrar al flujo de reserva) → el bot responde el horario del
+NEGOCIO ("abrimos 09:00-23:00") o evade ("consultá con el equipo / no tengo info
+sobre barberos específicos"). El bot SÍ tiene la agenda real de Carlos (la usa dentro
+del flujo SHOWING_SLOTS via getDayAvailability), pero la rama de side-question NO la
+consulta — responde con el manejo genérico de horario-de-negocio.
+
+**NO es de R4.2** (R4.2 = no-preferencia, cerrado y verde). Es **Hallazgo A territory**
+(side-question no integrada con datos reales del estado). Se cura de raíz en **R4.5**
+(side-question unificada en todos los estados). Anclado acá para que R4.5 lo cubra:
+la side-question "disponibilidad de barbero X en fecha Y" debe rutear a
+getDayAvailability(staffX, fechaY) y responder slots reales, no el horario del negocio.
+
+**Caso de prueba para R4.5:** "¿qué horarios tiene Carlos mañana?" → debe listar los
+huecos reales de Carlos mañana (o decir honestamente que no tiene), no "abrimos 9-23".

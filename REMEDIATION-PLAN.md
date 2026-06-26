@@ -931,3 +931,34 @@ scheduling.ts núcleo + presentingSlots).
 > para el diseño de la Versión C.
 
 ---
+
+## HONESTIDAD UNIVERSAL de disponibilidad (hallazgo smoke R4.2, 2026-06-25)
+
+**Problema raíz:** `getAvailableSlots` trunca a 3 slots (MAX_SLOTS_TO_RETURN=3, es
+`getDayAvailability().all.slice(0,3)`). La honestidad de agenda (getDayAvailability,
+forma completa) se cableó SOLO en la rama barbero-fijo (presentingSlots:127). En
+auto-asign y en búsqueda-de-hora dentro de confirming, el bot mira solo 3 slots y
+dice "no hay" cuando SÍ hay. PIERDE CITAS. Es la enfermedad "aplicado a una rama,
+no a todas" — el gemelo de presentación de la comprensión divergente que R4 cura.
+
+**Síntoma (smoke R4.2, Img 1):** "el que sea" (auto-asign) → ofrece 10 o 12 →
+"¿a las 5?" → "a las 5 no tengo, lo más cercano 10am". La agenda tiene las 5 LIBRES;
+el bot solo miró los primeros 3 slots.
+
+**Gradación de severidad (orientación read-only):**
+- Falso-negativo DURO (pierde cita activa): confirmingAppointment:994
+  (buildBarberMismatchResult, barbero-fijo sin requestedTime, esconde la tarde) + el
+  branch de fallback de handleOfferNearest:408 (reusa pendingSlots truncados).
+- Sub-representación (esconde amplitud): presentingSlots:139 (auto-asign sin hora,
+  muestra 10/12 sin señal de franja).
+- Inocuo: scheduling:703 (findSlotsInNextDays; waitlist usa solo .date).
+
+**Cura — UNIFICACIÓN:** TODOS consumen getDayAvailability (forma completa);
+presentación por decidePresentation (árbol honesto), búsqueda en .all. Auto-asign:
+knob dedupe:'per-hour' (default 'per-barber' no regresiona) → unión de horas sobre
+todos los barberos → señal de amplitud honesta. MATAR getAvailableSlots cuando los 4
+migren. Fuente única de disponibilidad = getDayAvailability, como el intérprete es
+fuente única de comprensión. NO tocar scheduling/slots.ts (otro producto).
+
+**Decisión Gabriel:** los 4 en UN sprint, unificación (no diff mínimo). Prioridad
+ALTA — pierde citas en prod. Pausa R4.3 (el cierre de reserva no pierde citas, esto sí).
