@@ -1,6 +1,7 @@
 // ─── Lifestyle Bot — Scheduling ───────────────────────────────────────────────
-// getAvailableSlots(): calcula slots disponibles cruzando staff_availability,
-// appointments existentes y staff_blocks.
+// getDayAvailability(): fuente ÚNICA de disponibilidad. Calcula la FORMA completa del día
+// (all/morning/afternoon, sin truncar) cruzando staff_availability, appointments y
+// staff_blocks. Cada consumidor toma `.all` (y, si presenta una lista, `.all.slice(0,3)`).
 //
 // Round-robin ponderado:
 //   1. COUNT(appointments) por staff_id WHERE DATE(starts_at) = fecha solicitada
@@ -41,7 +42,8 @@ import { formatTimeHumanFromDate } from './utils';
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const SLOT_INTERVAL_MINUTES = 15;  // granularidad de slots
-const MAX_SLOTS_TO_RETURN    = 3;  // máximo de opciones presentadas al cliente
+// El truncado a ≤3 (cap del pendingSlot, schema index.max(3)) vive ahora en cada consumidor
+// como `.all.slice(0, 3)` — ya no hay un wrapper getAvailableSlots ni una constante global.
 // Corte mañana / tarde-noche para el bucketing de franjas (disponibilidad honesta).
 // Constante única del NUEVO bucketing. El filtro de generación (generateSlotsForStaff)
 // se alinea a este valor en su propio commit aparte. Exportada: el árbol de
@@ -358,6 +360,18 @@ export type GetAvailableSlotsOptions = {
    * Si ausente, se ordenan cronológicamente.
    */
   requestedTime?: string;
+  /**
+   * Estrategia de dedup para auto_assign (preferredStaffId=null). SIN efecto en
+   * barbero fijo (que devuelve todos sus slots). Default 'per-barber' = un slot por
+   * barbero (comportamiento previo, byte-idéntico — NO regresiona).
+   *
+   * 'per-hour' = un slot por HORA distinta sobre TODOS los barberos (unión de horas),
+   * con el barbero pre-asignado por round-robin (sobre el orden por carga). Da la señal
+   * de amplitud HONESTA para la presentación de auto-asign sin barbero (antes el
+   * per-barber colapsaba un día completo a 1 slot cuando los barberos compartían la
+   * hora más temprana → escondía la tarde). El consumidor elige la hora, no el barbero.
+   */
+  dedupe?: 'per-barber' | 'per-hour';
 };
 
 /**
@@ -388,7 +402,8 @@ export type DayAvailability = {
  * Si el barbero preferido no tiene disponibilidad, `all` es vacío —
  * el state handler decidirá si ofrecer otros barberos.
  *
- * El truncado a MAX_SLOTS_TO_RETURN vive en el wrapper getAvailableSlots (compat).
+ * Fuente ÚNICA: cada consumidor toma `.all` (presentación honesta vía decidePresentation)
+ * o `.all.slice(0, 3)` cuando arma una lista (cap del pendingSlot, schema index.max(3)).
  */
 export async function getDayAvailability(
   opts: GetAvailableSlotsOptions,
@@ -406,6 +421,7 @@ export async function getDayAvailability(
     supabase,
     tz,
     requestedTime,
+    dedupe = 'per-barber',
   } = opts;
 
   const minStart = isWalkIn ? addMinutes(new Date(), walkInBufferMinutes) : null;
@@ -592,34 +608,40 @@ export async function getDayAvailability(
     return bucketShape(earliest ? [earliest] : [], tz);
   }
 
-  // Auto-assign: un slot por barbero — el mejor para cada uno.
-  // "Mejor" = más cercano a requestedTime, o el más temprano si no hay preferencia.
-  // Esto evita mostrar 3 horarios del mismo barbero y en cambio muestra
-  // opciones diversas (un horario por cada barbero disponible).
+  // Auto-assign: proyección según el knob `dedupe`.
+  //   'per-barber' (default): un slot por barbero — opciones diversas (un horario por
+  //     cada barbero). "Mejor" = más cercano a requestedTime, o el más temprano.
+  //   'per-hour': un slot por HORA distinta sobre TODOS los barberos (unión de horas),
+  //     barbero pre-asignado por round-robin → señal de amplitud honesta (no colapsa el
+  //     día a 1 slot cuando los barberos comparten la hora más temprana).
   let dedupedSlots: SlotCandidate[];
   if (preferredStaffId === null) {
-    let targetMin: number | null = null;
-    if (requestedTime) {
-      const [rh, rm] = requestedTime.split(':').map(Number);
-      targetMin = (rh ?? 0) * 60 + (rm ?? 0);
-    }
-
-    const staffMap = new Map<string, SlotCandidate>();
-    for (const slot of allSlots) {
-      const existing = staffMap.get(slot.staffId);
-      if (!existing) {
-        staffMap.set(slot.staffId, slot);
-      } else if (targetMin !== null) {
-        // Reemplazar si este slot es más cercano al tiempo solicitado
-        const slotMin     = utcToLocalMinutes(slot.startsAt, tz);
-        const existingMin = utcToLocalMinutes(existing.startsAt, tz);
-        if (Math.abs(slotMin - targetMin) < Math.abs(existingMin - targetMin)) {
-          staffMap.set(slot.staffId, slot);
-        }
+    if (dedupe === 'per-hour') {
+      dedupedSlots = dedupePerHour(allSlots, candidateStaff, tz);
+    } else {
+      let targetMin: number | null = null;
+      if (requestedTime) {
+        const [rh, rm] = requestedTime.split(':').map(Number);
+        targetMin = (rh ?? 0) * 60 + (rm ?? 0);
       }
-      // Sin requestedTime: conservar el primero (más temprano, ya que allSlots es cronológico)
+
+      const staffMap = new Map<string, SlotCandidate>();
+      for (const slot of allSlots) {
+        const existing = staffMap.get(slot.staffId);
+        if (!existing) {
+          staffMap.set(slot.staffId, slot);
+        } else if (targetMin !== null) {
+          // Reemplazar si este slot es más cercano al tiempo solicitado
+          const slotMin     = utcToLocalMinutes(slot.startsAt, tz);
+          const existingMin = utcToLocalMinutes(existing.startsAt, tz);
+          if (Math.abs(slotMin - targetMin) < Math.abs(existingMin - targetMin)) {
+            staffMap.set(slot.staffId, slot);
+          }
+        }
+        // Sin requestedTime: conservar el primero (más temprano, ya que allSlots es cronológico)
+      }
+      dedupedSlots = [...staffMap.values()];
     }
-    dedupedSlots = [...staffMap.values()];
   } else {
     dedupedSlots = allSlots;
   }
@@ -654,16 +676,46 @@ function bucketShape(slots: SlotCandidate[], tz: string): DayAvailability {
   return { all: slots, total: slots.length, morning, afternoon };
 }
 
-/**
- * Wrapper de compatibilidad: comportamiento EXACTO previo a la disponibilidad
- * honesta — hasta MAX_SLOTS_TO_RETURN candidatos (el `.all.slice(0,3)` de la forma).
- * Los consumidores no migrados (confirmingAppointment, findSlotsInNextDays→waitlist)
- * siguen sobre este wrapper sin cambios.
- */
-export async function getAvailableSlots(
-  opts: GetAvailableSlotsOptions,
-): Promise<SlotCandidate[]> {
-  return (await getDayAvailability(opts)).all.slice(0, MAX_SLOTS_TO_RETURN);
+// Unión de HORAS distintas (disponibilidad honesta para auto-asign sin barbero).
+// De allSlots (de todos los barberos candidatos) devuelve UN slot por hora local
+// distinta. Cada hora se reparte entre los barberos por round-robin sobre `candidateStaff`
+// (ya ordenado por carga): el slot representativo de una hora es el más temprano del
+// barbero asignado en esa hora. El caller re-ordena (cercanía a requestedTime o crono)
+// y bucketea. Si los barberos comparten horas, ambos terminan presentes (alternancia).
+function dedupePerHour(
+  allSlots:       SlotCandidate[],
+  candidateStaff: StaffRow[],
+  tz:             string,
+): SlotCandidate[] {
+  // hora local (0..23) → (staffId → slot más temprano de ese barbero en esa hora)
+  const byHour = new Map<number, Map<string, SlotCandidate>>();
+  for (const s of allSlots) {
+    const hour = Math.floor(utcToLocalMinutes(s.startsAt, tz) / 60);
+    let perStaff = byHour.get(hour);
+    if (!perStaff) { perStaff = new Map(); byHour.set(hour, perStaff); }
+    const existing = perStaff.get(s.staffId);
+    if (!existing || s.startsAt.getTime() < existing.startsAt.getTime()) {
+      perStaff.set(s.staffId, s);
+    }
+  }
+
+  const order = candidateStaff.map((s) => s.id); // orden por carga (round-robin)
+  if (order.length === 0) return [];
+  const hours = [...byHour.keys()].sort((a, b) => a - b);
+  let rr = 0;
+  const out: SlotCandidate[] = [];
+  for (const hour of hours) {
+    const perStaff = byHour.get(hour)!;
+    // Round-robin desde `rr`: primer barbero del orden con slot en esta hora.
+    let picked: SlotCandidate | undefined;
+    for (let k = 0; k < order.length; k++) {
+      const slot = perStaff.get(order[(rr + k) % order.length]!);
+      if (slot) { picked = slot; rr = (rr + k + 1) % order.length; break; }
+    }
+    // Salvaguarda (no debería pasar): ningún barbero del orden → cualquiera de la hora.
+    out.push(picked ?? [...perStaff.values()][0]!);
+  }
+  return out;
 }
 
 // ─── findSlotsInNextDays ──────────────────────────────────────────────────────
@@ -696,17 +748,19 @@ export async function findSlotsInNextDays(
     // Fix: agregar campo `closedDays?: number[]` a FindSlotsBaseOptions y pasarlo desde
     // el caller (presentingSlots.ts vía business.officeHours). Si officeHours es null
     // (24h) o el día tiene horario, no omitir. Mientras tanto, si un barbero tiene
-    // staff_availability para domingo, getAvailableSlots lo encontrará aunque lo saltemos
+    // staff_availability para domingo, getDayAvailability lo encontrará aunque lo saltemos
     // aquí (perdemos esa fecha en la búsqueda de alternativas, no en citas directas).
     if (candidate.getDay() === 0) continue; // domingo — hardcoded como cerrado
 
-    const slots = await getAvailableSlots({
+    // Inline del ex-wrapper getAvailableSlots: forma completa topada al cap del pendingSlot
+    // (≤3). dedupe default 'per-barber' (un slot por barbero) — comportamiento de siempre.
+    const slots = (await getDayAvailability({
       ...baseOpts,
       requestedDate:    candidate,
       shift:            null,
       isWalkIn:         false,
       preferredStaffId: null,
-    });
+    })).all.slice(0, 3);
 
     if (slots.length > 0) return { date: candidate, slots };
   }

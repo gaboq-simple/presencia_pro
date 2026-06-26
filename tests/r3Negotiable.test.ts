@@ -1,10 +1,16 @@
-// R3 — Propuesta negociable de slot único (autoAssign).
-// Antes: autoAssign + 1 hora única → salto directo a AWAITING_BOOKING_NAME
-// (auto-confirmaba el slot y cerraba la puerta a "preferís otra hora").
-// Ahora: se PROPONE el slot manteniéndolo en pendingSlots y se va a
-// CONFIRMING_APPOINTMENT con frase negociable. Un "sí" avanza a nombre en UN
-// paso (handler P1 de confirmingAppointment); una hora distinta rutea a
-// offer_nearest.
+// R3 — Propuesta negociable de slot único (autoAssign), ACOTADA por HONESTIDAD UNIVERSAL.
+//
+// R3 original: autoAssign + 1 hora única → no auto-confirmaba; PROPONÍA el slot
+// ("¿te sirve o preferís otra?") en CONFIRMING. El smoke R4.2 mostró que R3 estaba
+// INCOMPLETO: cuando el día tiene VARIAS horas libres, el dedup por barbero+hora colapsaba
+// el día a 1 slot (ambos barberos comparten la hora más temprana) → proponía "las 10",
+// escondía la tarde → "a las 5" fallaba → PERDÍA CITAS.
+//
+// Cura (decisión Gabriel): acotar cada caso al suyo.
+//   - VARIAS horas libres → muestra representativa HONESTA (unión por hora, amplitud real:
+//     "desde temprano hasta la noche…"). Proponer una sola escondería las demás.
+//   - UNA sola hora libre real → se CONSERVA la propuesta negociable de R3 (no hay amplitud
+//     que mostrar). "Sí" avanza a nombre en un paso; una hora distinta rutea a offer_nearest.
 //
 // Deterministas: Supabase fake (sin red), Anthropic con key vacía (cae al
 // fallback determinista). Ejecutar: npm test
@@ -63,9 +69,11 @@ function localISO(localHHMM: string): string {
   return localTimeToUTC(DATE, localHHMM, TZ).toISOString();
 }
 
-// Por defecto: ambos barberos 10:00–20:00 → mismo slot más temprano (10:00) →
-// tras dedup por hora queda UN solo slot único (el caso de la propuesta).
+// Día completo: ambos barberos 10:00–20:00 → VARIAS horas (unión 10..19) → caso de amplitud.
 const BOTH_10_20 = [availRow(CARLOS, '10:00:00', '20:00:00'), availRow(ANDRES, '10:00:00', '20:00:00')];
+// UNA sola hora libre: ambos 10:00–11:00 → la unión por hora colapsa a la hora 10 (un slot) →
+// caso donde R3 (propuesta negociable de slot único) sigue válido (no hay amplitud).
+const ONE_HOUR = [availRow(CARLOS, '10:00:00', '11:00:00'), availRow(ANDRES, '10:00:00', '11:00:00')];
 
 function tables(avail: unknown[]): TableData {
   return {
@@ -111,46 +119,48 @@ function makeMsg(body: string): never {
 
 const AUTO_CTX: LifestyleBotContext = { serviceId: SVC, requestedDate: DATE, autoAssign: true };
 
-// ─── 1. "el que sea" + 1 slot único → propone negociable (no auto-confirma) ───
+// ─── A. VARIAS horas → muestra honesta de amplitud (NO propuesta de slot único) ───
 
-test('1 slot único autoAssign → propuesta negociable en CONFIRMING (no salta a nombre)', async () => {
+test('día con VARIAS horas libres (autoAssign) → muestra honesta de amplitud, NO propuesta de slot único', async () => {
+  // CAMBIO vs R3 viejo: antes el día completo colapsaba a 1 slot ("las 10") y escondía la
+  // tarde → perdía citas (smoke R4.2). Ahora la unión por hora muestra la amplitud real.
   const r = await handleShowingSlots(makeMsg(''), { ...AUTO_CTX }, makeDeps());
 
-  // No auto-confirma: se queda en CONFIRMING con el slot conservado en pendingSlots.
   assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
-  assert.equal(r.newContext.pendingSlots?.length, 1);
-  // Frase negociable, no "te asigno" ni pedir nombre.
-  assert.match(r.responseText, /¿te sirve o preferis otra hora\?/i);
+  const ps = r.newContext.pendingSlots ?? [];
+  assert.ok(ps.length > 1, 'muestra varias horas, no colapsa a 1 slot');
+  assert.match(r.responseText, /desde temprano hasta la noche/i, 'amplitud honesta (ambas franjas)');
+  assert.match(r.responseText, /busca[rs]?\s+otra/i, 'Versión C: deja la puerta abierta');
+  // Ya NO es la propuesta de slot único de R3 (esa quedó acotada a una sola hora).
+  assert.doesNotMatch(r.responseText, /¿te sirve o preferis otra hora\?/i);
+  // presentBy ausente → el cliente elige HORA, no barbero → sin nombres.
+  assert.doesNotMatch(r.responseText, /Carlos|Andres/);
+});
+
+// ─── B. UNA sola hora libre → propuesta negociable de R3 (conservada) ─────────
+
+test('día con UNA sola hora libre (autoAssign) → propuesta negociable de R3 (conservada)', async () => {
+  // R3 sigue válido cuando NO hay amplitud que mostrar: una sola hora libre real → se
+  // PROPONE ese slot ("¿te sirve o preferís otra?"), no se inventa amplitud.
+  const r = await handleShowingSlots(makeMsg(''), { ...AUTO_CTX }, makeDeps(ONE_HOUR));
+
+  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
+  assert.equal(r.newContext.pendingSlots?.length, 1, 'una sola hora → un solo ancla');
+  assert.match(r.responseText, /¿te sirve o preferis otra hora\?/i, 'propuesta negociable de R3');
   assert.doesNotMatch(r.responseText, /te asigno/i);
   assert.doesNotMatch(r.responseText, /nombre/i);
-  // No setea las banderas del cierre todavía (eso ocurre al aceptar).
-  assert.equal(r.newContext.selectedSlot, undefined);
-  assert.equal(r.newContext.pendingBookingName, undefined);
+  assert.equal(r.newContext.selectedSlot, undefined, 'no cierra todavía (espera el "sí")');
+  // Nombra UN barbero (el round-robin pre-asignó uno para esa hora).
+  const named = [/Carlos/, /Andres/].filter((re) => re.test(r.responseText));
+  assert.equal(named.length, 1);
 });
 
-// ─── 2. Tras la propuesta, una hora distinta ("7pm") → ofrece la más cercana ──
+// ─── C. Tras propuesta R3 (una hora), "sí" → avanza a nombre en UN paso ───────
 
-test('tras propuesta, "7pm" → offer_nearest re-consulta y ofrece cercana (no repite)', async () => {
-  const deps     = makeDeps();
+test('tras propuesta R3 (una hora), "sí" → AWAITING_BOOKING_NAME con el slot (un solo paso)', async () => {
+  const deps     = makeDeps(ONE_HOUR);
   const proposal = await handleShowingSlots(makeMsg(''), { ...AUTO_CTX }, deps);
-  assert.equal(proposal.newState, 'CONFIRMING_APPOINTMENT');
-
-  const r = await handleConfirmingAppointment(makeMsg('7pm'), proposal.newContext, deps);
-
-  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
-  // Re-consultó disponibilidad real del día y ofrece el slot de las 19:00.
-  assert.equal(r.newContext.nearestOfferSlot, localISO('19:00'));
-  assert.equal(r.newContext.pendingSlots?.[0]?.startsAt, localISO('19:00'));
-  // Es una oferta a la espera de "sí", no la propuesta original de las 10:00.
-  assert.match(r.responseText, /agendo|cercano/i);
-  assert.doesNotMatch(r.responseText, /a las 10/i);
-});
-
-// ─── 3. Tras la propuesta, "sí" → avanza a nombre en UN paso (fluidez) ────────
-
-test('tras propuesta, "sí" → AWAITING_BOOKING_NAME con el slot (un solo paso)', async () => {
-  const deps     = makeDeps();
-  const proposal = await handleShowingSlots(makeMsg(''), { ...AUTO_CTX }, deps);
+  assert.equal(proposal.newContext.pendingSlots?.length, 1);
 
   const r = await handleConfirmingAppointment(makeMsg('sí'), proposal.newContext, deps);
 
@@ -158,15 +168,44 @@ test('tras propuesta, "sí" → AWAITING_BOOKING_NAME con el slot (un solo paso)
   assert.equal(r.newContext.selectedSlot, localISO('10:00'));
 });
 
-// ─── 4. "el que sea" con varias horas → lista en CONFIRMING (sin regresión) ───
+// ─── D. Tras muestra honesta (varias horas), una hora MOSTRADA → selecciona ───
 
-test('varios slots autoAssign → presenta lista (sin propuesta negociable de slot único)', async () => {
-  // Carlos más temprano 10:00, Andres más temprano 12:00 → 2 horas distintas.
+test('tras muestra honesta, "7pm" (hora mostrada, la noche ya NO se esconde) → selecciona y avanza a nombre', async () => {
+  // La muestra honesta del día completo incluye la noche (19:00) → "7pm" cae EXACTO en una
+  // ancla mostrada → se selecciona directo. Antes 19:00 estaba escondido (colapso a "las 10")
+  // y "a las 5/7" caía a offer_nearest o fallaba — el síntoma del smoke.
+  const deps     = makeDeps();
+  const proposal = await handleShowingSlots(makeMsg(''), { ...AUTO_CTX }, deps);
+  assert.equal(proposal.newState, 'CONFIRMING_APPOINTMENT');
+
+  const r = await handleConfirmingAppointment(makeMsg('7pm'), proposal.newContext, deps);
+
+  assert.equal(r.newState, 'AWAITING_BOOKING_NAME');
+  assert.equal(r.newContext.selectedSlot, localISO('19:00'), 'agenda las 19:00 que SÍ estaban en la muestra');
+});
+
+// ─── E. Tras muestra honesta (varias horas), "sí" ambiguo → re-pregunta ───────
+
+test('tras muestra honesta (varias horas), "sí" sin elegir cuál → re-pregunta (no auto-agenda)', async () => {
+  const deps     = makeDeps();
+  const proposal = await handleShowingSlots(makeMsg(''), { ...AUTO_CTX }, deps);
+  assert.ok((proposal.newContext.pendingSlots?.length ?? 0) > 1);
+
+  const r = await handleConfirmingAppointment(makeMsg('sí'), proposal.newContext, deps);
+
+  assert.equal(r.newState, 'CONFIRMING_APPOINTMENT', 'no auto-agenda un "sí" ambiguo entre varias horas');
+  assert.notEqual(r.newState, 'AWAITING_BOOKING_NAME');
+  assert.match(r.responseText, /cu[aá]l/i, 'pregunta cuál de las horas');
+});
+
+// ─── F. Varios barberos con distinto arranque → muestra honesta de amplitud ───
+
+test('varios barberos con distinto arranque (autoAssign) → muestra honesta de amplitud (sin propuesta de slot único)', async () => {
+  // Carlos 10:00, Andres 12:00 → unión de horas 10..19 → varias horas → muestra honesta.
   const deps = makeDeps([availRow(CARLOS, '10:00:00', '20:00:00'), availRow(ANDRES, '12:00:00', '20:00:00')]);
   const r    = await handleShowingSlots(makeMsg(''), { ...AUTO_CTX }, deps);
 
   assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
-  assert.equal(r.newContext.pendingSlots?.length, 2);
-  // Camino de lista: NO usa la frase de propuesta de slot único.
-  assert.doesNotMatch(r.responseText, /preferis otra hora/i);
+  assert.ok((r.newContext.pendingSlots?.length ?? 0) > 1, 'muestra varias horas');
+  assert.doesNotMatch(r.responseText, /¿te sirve o preferis otra hora\?/i, 'no es la propuesta de slot único');
 });

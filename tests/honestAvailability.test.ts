@@ -1,15 +1,16 @@
 // Disponibilidad honesta — separar "qué hay" (forma completa) de "qué se muestra".
-// Paso 1 (forma de datos): getDayAvailability devuelve la forma completa (all/total/
-// morning/afternoon, SIN truncar); getAvailableSlots queda como wrapper de compat
-// (.all.slice(0,3)). T9 prueba la PARIDAD: el wrapper reproduce el ≤3 de hoy y la
-// forma expone el set completo + las franjas particionadas por AFTERNOON_CUTOFF (14:00).
+// Paso 1 (forma de datos): getDayAvailability es la FUENTE ÚNICA; devuelve la forma completa
+// (all/total/morning/afternoon, SIN truncar). El ≤3 que arma cada consumidor que LISTA es
+// `.all.slice(0, 3)` (cap del pendingSlot, schema index.max(3)) — ya no hay un wrapper
+// getAvailableSlots. T9 prueba que la forma NO trunca y expone las franjas particionadas por
+// AFTERNOON_CUTOFF (14:00).
 //
 // Determinista: Supabase fake (sin red), sin Anthropic. Ejecutar: npm test
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getAvailableSlots, getDayAvailability } from '../packages/engine/src/bot/lifestyle/scheduling';
+import { getDayAvailability } from '../packages/engine/src/bot/lifestyle/scheduling';
 import type { DayAvailability } from '../packages/engine/src/bot/lifestyle/scheduling';
 import {
   decidePresentation,
@@ -93,20 +94,20 @@ function fixedBarberOpts(supabase: never) {
   };
 }
 
-// ─── T9 — paridad wrapper ↔ forma + partición de franjas ──────────────────────
+// ─── T9 — la forma NO trunca + partición de franjas (fuente única) ────────────
 
-test('T9a paridad: getAvailableSlots == getDayAvailability().all.slice(0,3) y la forma NO trunca', async () => {
-  const opts  = fixedBarberOpts(fullDaySupabase());
-  const shape = await getDayAvailability(opts);
-  const wrap  = await getAvailableSlots(opts);
+test('T9a la forma NO trunca (expone >3); el ≤3 de una lista = .all.slice(0,3), prefijo de la forma', async () => {
+  const shape = await getDayAvailability(fixedBarberOpts(fullDaySupabase()));
 
   // La forma expone el set COMPLETO (el bug era quedarse con 3).
   assert.ok(shape.all.length > 3, `la forma debe exponer >3 slots, tiene ${shape.all.length}`);
   assert.equal(shape.total, shape.all.length);
 
-  // El wrapper reproduce el comportamiento de hoy: exactamente ≤3 = all.slice(0,3).
-  assert.equal(wrap.length, 3);
-  assert.deepEqual(wrap, shape.all.slice(0, 3));
+  // Lo que arma un consumidor que LISTA (ex-wrapper getAvailableSlots) = .all.slice(0,3):
+  // exactamente 3, y un PREFIJO de la forma (no inventa ni reordena).
+  const listed = shape.all.slice(0, 3);
+  assert.equal(listed.length, 3);
+  assert.deepEqual(listed, [shape.all[0], shape.all[1], shape.all[2]]);
 });
 
 test('T9b franjas: morning/afternoon particionan all por AFTERNOON_CUTOFF (14:00), preservando orden', async () => {
@@ -124,13 +125,13 @@ test('T9b franjas: morning/afternoon particionan all por AFTERNOON_CUTOFF (14:00
   assert.deepEqual([...mins].sort((a, b) => a - b), mins, 'all viene ordenado cronológicamente');
 });
 
-test('T9c walk-in: la forma trae ≤1 (el más cercano) y el wrapper coincide', async () => {
+test('T9c walk-in: la forma trae ≤1 (el más cercano); el consumidor toma .all directo', async () => {
   const opts  = { ...fixedBarberOpts(fullDaySupabase()), isWalkIn: true };
   const shape = await getDayAvailability(opts);
-  const wrap  = await getAvailableSlots(opts);
 
   assert.ok(shape.all.length <= 1);
-  assert.deepEqual(wrap, shape.all.slice(0, 3));
+  // Con ≤1, .all.slice(0,3) === .all (el cap no recorta nada).
+  assert.deepEqual(shape.all.slice(0, 3), shape.all);
 });
 
 // ─── Árbol de decisión (puro) — Paso 2 ────────────────────────────────────────
