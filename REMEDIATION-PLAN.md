@@ -901,4 +901,14 @@ franjas) de "qué muestro" (acotado). scheduling devuelve la forma; presentingSl
 decide. Arregla también el "lo más cercano" falso. Riesgo medio-alto (toca
 scheduling.ts núcleo + presentingSlots).
 
+> ⚠️ **SUPERADO PARCIALMENTE** (2026-06-25): el paso 2 "preguntar ¿mañana o más
+> tarde?" (ask-franja) fue ELIMINADO por la Versión C. Ahora, ante slots en ambas
+> franjas, NO se pregunta — se muestra una muestra representativa de todo el día
+> con señal de amplitud honesta ("desde temprano hasta la noche" si ambas franjas;
+> "varios huecos en la {franja}" si una sola) + "¿te late alguna o buscas otra?".
+> `buildFranjaQuestion`/`FRANJA_QUESTIONS` eliminados. El "último recurso"
+> mañana/noche (`buildLastResortPeriodQuestion`) es OTRO camino y SIGUE vivo. Ver
+> la bitácora de SPRINT.md (entrada 2026-06-25, "fix doble-lista v2 / Versión C")
+> para el diseño de la Versión C.
+
 ---
