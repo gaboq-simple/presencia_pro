@@ -1242,6 +1242,38 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
+#### S6-UI-01 — Separación de rutas /staff (Opción C: barbero intacto + /staff/gestion) 🔵 in-progress (impl. 2026-06-29, rama `feat/staff-route-separation`)
+**Origen:** informe de orientación read-only aprobado por Gabriel (2026-06-29). Hoy `/staff` es un dispatcher de 3 experiencias por rol + query string (`barber`→StaffLayout; `barber?view=manage`→AssistantLayout; `assistant`→AssistantLayout; `owner/admin`→redirect /dashboard). Antes de cablear la maqueta v5 de la vista barbero, se separan las rutas. **Decisión cerrada de Gabriel: Opción C ahora** (mínimo riesgo); la migración completa a esquema español (`/agenda`, `/recepcion`) se hace MÁS ADELANTE cuando se diseñe la vista recepcionista — NO adelantarla.
+
+**Esquema objetivo (Opción C):**
+- `/staff` → PinForm + barbero (StaffLayout) — **SIN CAMBIOS** (protege el flujo PIN).
+- `/staff/gestion` → barbero-manage (AssistantLayout) — **reemplaza `?view=manage`**.
+- `/dashboard` → dueño + asistente (sin cambios; el asistente canónico YA vive acá).
+- La rama `assistant` de `/staff` se **elimina** (redundante, confirmado en el informe). La rama `?view=manage` se elimina a favor de `/staff/gestion`.
+
+**Invariantes (no romper):** POST /api/auth/pin solo crea sesión `barber` → landing post-PIN sigue en `/staff`. owner/admin nunca aterrizan en vista barbero (mantener `redirect('/dashboard')`). `app/staff/{actions,assistant-actions}.ts` NO se mueven (biblioteca compartida, 9 imports dependen del path). `proxy.ts` no guarda `/staff`; replicar el patrón "renderiza PinForm si no hay sesión", sin auth nueva.
+
+**Pasos (uno por commit, `tsc --noEmit` verde entre cada uno):**
+1. Crear `app/staff/gestion/page.tsx` (AssistantLayout, misma carga que la rama manage; guard solo barber).
+2. Repuntar link "Gestión →" (`StaffLayout.tsx:258`) a `/staff/gestion`.
+3. Limpiar dispatcher de `/staff` (quitar ramas `?view=manage` y `assistant`).
+4. 🔴 Shim de compat `/staff?view=manage` → `/staff/gestion` + **CHECKPOINT PIN con Gabriel** (ciclo completo con cookie real antes de cerrar).
+5. Limpieza final + smoke de las 3 rutas con sesión de cada rol.
+
+**Criterios de aceptación:**
+- [ ] `/staff/gestion` renderiza AssistantLayout para un barbero; owner/admin→/dashboard; sin sesión→PinForm.
+- [ ] Link "Gestión →" apunta a `/staff/gestion`.
+- [ ] `/staff` solo hace barbero o redirige (assistant→/dashboard); sin parsing de `view` muerto.
+- [ ] `/staff?view=manage` (viejo) rebota a `/staff/gestion`.
+- [ ] Flujo PIN intacto: PIN→cookie→/staff→navegación días→"Gestión →"→/staff/gestion→volver (verificado con Gabriel).
+- [ ] `npx tsc --noEmit` (apps/lifestyle) limpio; sin imports rotos.
+
+**Frontera:** NO adelantar la migración a español. NO mover `actions.ts`/`assistant-actions.ts`. NO tocar el flujo del bot ni las in-progress de S5/S6-BOT.
+
+**Implementación:** rama `feat/staff-route-separation`. Commits chicos. Claude Code no mergea — PR para revisión de Gabriel; checkpoint PIN obligatorio en paso 4.
+
+---
+
 ## Backlog post-sprint (NO trabajar en este sprint)
 
 Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra al sprint sin renegociación.
