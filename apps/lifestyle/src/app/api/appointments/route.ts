@@ -281,9 +281,16 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const admin = getAdminClient();
 
   // ── Update — solo si pertenece a este negocio ───────────────────────────────
+  // Atribución: registramos quién tocó la cita (mismo patrón que el panel del
+  // asistente — migración 023). staff_id puede ser null en sesiones por token
+  // (owner/admin): se guarda null, no rompe el FK (columna nullable).
   const { data: updatedAppt, error: updateError } = await admin
     .from('appointments')
-    .update({ status })
+    .update({
+      status,
+      modified_by_staff_id: session.staff_id ?? null,
+      modified_at:          new Date().toISOString(),
+    })
     .eq('id', id)
     .eq('business_id', businessId)
     .select('id, customer_id, business_id, starts_at, staff_id')
