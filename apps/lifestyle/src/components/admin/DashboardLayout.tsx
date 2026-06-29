@@ -5,7 +5,6 @@
 //   - Header: nombre del negocio + badge de solicitudes pendientes + nav días
 //   - Sección principal: BlockRequestsInbox + DashboardRealtimeProvider
 //   - Sección inferior: MetricsSummary con selector de período
-//   - Link a /staff para cambiar a vista de barbero
 //
 // NO fetcha datos propios — recibe todo del page.tsx.
 
@@ -150,13 +149,6 @@ export default function DashboardLayout({
                   </span>
                 </div>
               )}
-
-              <Link
-                href="/staff"
-                className="text-xs text-gray-500 hover:text-gray-700"
-              >
-                Vista barbero →
-              </Link>
             </div>
           </div>
 
