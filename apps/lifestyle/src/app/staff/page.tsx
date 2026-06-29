@@ -48,8 +48,18 @@ function deriveUpcomingCustomerId(
 export default async function StaffPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>;
+  // `view` es compat-only: el antiguo /staff?view=manage migró a /staff/gestion.
+  searchParams: Promise<{ date?: string; view?: string }>;
 }) {
+  const { date: rawDate, view: rawView } = await searchParams;
+  const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
+
+  // Shim de compatibilidad — bookmarks/links viejos a /staff?view=manage
+  // se redirigen a la ruta propia /staff/gestion (preservando la fecha).
+  if (rawView === 'manage') {
+    redirect(`/staff/gestion?date=${date}`);
+  }
+
   // 1. Sesión activa — ls_session (PIN/token) o Supabase Auth
   const session = await getCurrentSession();
 
@@ -65,10 +75,6 @@ export default async function StaffPage({
   }
 
   const businessId = session.business_id;
-
-  // 2. Resolver fecha desde searchParams (default: hoy)
-  const { date: rawDate } = await searchParams;
-  const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
 
   // ── Barbero: solo sus propias citas ──────────────────────────────────────
   // role === 'barber' — staffId requerido (viene de la sesión PIN)
