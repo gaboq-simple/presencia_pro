@@ -255,7 +255,7 @@ export default function StaffLayout({
                   ))}
                 </div>
                 <a
-                  href="/staff?view=manage"
+                  href="/staff/gestion"
                   className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
                   title="Vista de gestion"
                 >
