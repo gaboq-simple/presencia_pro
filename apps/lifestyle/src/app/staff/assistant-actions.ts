@@ -304,11 +304,43 @@ export async function createAssistantAppointment(
   const isBarber = session.role === 'barber' && !!session.staff_id;
   const effectiveStaffId = isBarber ? session.staff_id! : input.staffId;
 
+  // ── Config del negocio (controles de creación — migración 044) ───────────
+  const { data: bizCfgRaw } = await supabase
+    .from('businesses')
+    .select('require_customer_phone, max_appointments_per_staff_per_day')
+    .eq('id', session.business_id)
+    .maybeSingle();
+  const bizCfg = bizCfgRaw as {
+    require_customer_phone: boolean;
+    max_appointments_per_staff_per_day: number;
+  } | null;
+
   // ── Customer lookup / create ─────────────────────────────────────────────
   let customerId: string | null = null;
   let customerWarning: string | undefined;
   const name  = input.customerName.trim();
   const phone = input.customerPhone?.trim() || null;
+
+  // ── Tope suave de citas/día por barbero (anti-inflado grosero) ───────────
+  // Solo barbero. Cuenta sus citas NO canceladas del día destino; si alcanza el
+  // tope configurable (businesses.max_appointments_per_staff_per_day, default 20),
+  // rechaza ANTES de crear cliente/cita. NOTA: el tope frena el inflado GROSERO
+  // (decenas de citas falsas), NO el fino (ej. tope-1/día) — eso lo cubre el
+  // audit trail visible (fase posterior). Es complemento, no reemplazo.
+  if (isBarber) {
+    const maxPerStaffPerDay = bizCfg?.max_appointments_per_staff_per_day ?? 20;
+    const day = input.startsAt.slice(0, 10); // YYYY-MM-DD (misma convención que getDayAppointments)
+    const { count } = await supabase
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('staff_id', effectiveStaffId)
+      .neq('status', 'cancelled')
+      .gte('starts_at', `${day}T00:00:00`)
+      .lte('starts_at', `${day}T23:59:59`);
+    if ((count ?? 0) >= maxPerStaffPerDay) {
+      throw new Error('Alcanzaste el máximo de citas para ese día, contacta al admin');
+    }
+  }
 
   if (name) {
     if (phone) {
