@@ -10,12 +10,16 @@ Dumps the Supabase database, encrypts it with GPG, uploads to Cloudflare R2, and
 
 ### What it does
 
-1. `supabase db dump` — full schema + data dump
-2. `gzip -9` — compress
-3. `gpg --symmetric --cipher-algo AES256` — encrypt with passphrase
-4. `aws s3 cp` to `presenciapro-backups` bucket (S3-compatible Cloudflare R2)
-5. Deletes any backup in the bucket older than 30 days
-6. Cleans up all local temp files
+1. `supabase db dump` en **tres partes** — roles (best-effort) + schema + data —
+   concatenadas en orden de restore. Un dump sin flags trae solo el esquema; los
+   datos requieren `--data-only`, por eso es explícito.
+2. Verifica que el dump no esté vacío/truncado (esquema con contenido + datos con `COPY`/`INSERT`)
+3. `gzip -9` — compress
+4. `gpg --symmetric --cipher-algo AES256` — encrypt with passphrase
+5. `aws s3 cp` to `presenciapro-backups` bucket (S3-compatible Cloudflare R2)
+6. **Verifica el objeto en R2** con `head-object` (existe + tamaño > 0) — no confía en que `cp` no falló
+7. Deletes any backup in the bucket older than 30 days
+8. Cleans up all local temp files
 
 ### Object naming
 
@@ -27,18 +31,18 @@ backup-YYYY-MM-DD-HHmmss.sql.gz.gpg
 
 | Variable | Description |
 |---|---|
-| `SUPABASE_PROJECT_REF` | Project ref (e.g. `uhhatetytaucucihfyyy`) |
-| `SUPABASE_ACCESS_TOKEN` | Supabase PAT with read access |
+| `SUPABASE_DB_URL` | Connection string de Postgres (password percent-encoded). **Direct connection** o **session pooler** del proyecto de prod `hdqazbuxtpavtioufrsv` — NO el transaction pooler. Dashboard → Project Settings → Database → Connection string (URI). |
 | `BACKUP_ENCRYPTION_PASSPHRASE` | Passphrase for GPG encryption |
 | `R2_ACCESS_KEY_ID` | Cloudflare R2 access key |
 | `R2_SECRET_ACCESS_KEY` | Cloudflare R2 secret key |
 | `R2_ENDPOINT` | R2 S3-compatible endpoint URL |
 
+> El antiguo `SUPABASE_PROJECT_REF=uhhatetytaucucihfyyy` apuntaba al **proyecto equivocado** y `--project-ref`/`--output` ya no existen en `supabase db dump` (CLI 2.x). Reemplazados por `SUPABASE_DB_URL`.
+
 ### Run manually
 
 ```bash
-export SUPABASE_PROJECT_REF=uhhatetytaucucihfyyy
-export SUPABASE_ACCESS_TOKEN=...
+export SUPABASE_DB_URL='postgresql://postgres:<password-encoded>@db.hdqazbuxtpavtioufrsv.supabase.co:5432/postgres'
 export BACKUP_ENCRYPTION_PASSPHRASE=...
 export R2_ACCESS_KEY_ID=...
 export R2_SECRET_ACCESS_KEY=...
