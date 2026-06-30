@@ -295,6 +295,15 @@ export async function createAssistantAppointment(
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
 
+  // ── Gate de staff_id (REGLA DURA, seguridad) ─────────────────────────────
+  // El barbero solo puede crear citas asignadas a SÍ MISMO: ignoramos el
+  // input.staffId del cliente y forzamos su propio staff_id. Recepcionista /
+  // owner / admin (y sesiones por token con staff_id null) conservan la
+  // capacidad de asignar a cualquier barbero. Mismo predicado que el resto del
+  // sistema de control (role==='barber' && staff_id presente).
+  const isBarber = session.role === 'barber' && !!session.staff_id;
+  const effectiveStaffId = isBarber ? session.staff_id! : input.staffId;
+
   // ── Customer lookup / create ─────────────────────────────────────────────
   let customerId: string | null = null;
   let customerWarning: string | undefined;
@@ -370,7 +379,7 @@ export async function createAssistantAppointment(
     .from('appointments')
     .insert({
       business_id:          session.business_id,
-      staff_id:             input.staffId,
+      staff_id:             effectiveStaffId,
       service_id:           input.serviceId,
       customer_id:          customerId,
       starts_at:            input.startsAt,
