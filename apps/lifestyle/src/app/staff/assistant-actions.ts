@@ -321,6 +321,14 @@ export async function createAssistantAppointment(
   const name  = input.customerName.trim();
   const phone = input.customerPhone?.trim() || null;
 
+  // ── Teléfono obligatorio (política de negocio configurable) ──────────────
+  // Si el negocio activó require_customer_phone, toda alta manual (cualquier
+  // rol — barbero Y recepcionista) exige teléfono del cliente. Default FALSE →
+  // preserva el walk-in con solo-nombre. Chequeo ANTES de crear cliente/cita.
+  if ((bizCfg?.require_customer_phone ?? false) && !phone) {
+    throw new Error('Este negocio requiere el teléfono del cliente para agendar');
+  }
+
   // ── Tope suave de citas/día por barbero (anti-inflado grosero) ───────────
   // Solo barbero. Cuenta sus citas NO canceladas del día destino; si alcanza el
   // tope configurable (businesses.max_appointments_per_staff_per_day, default 20),
