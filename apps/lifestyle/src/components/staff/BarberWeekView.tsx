@@ -1,14 +1,12 @@
 // ─── BarberWeekView ───────────────────────────────────────────────────────────
 // Vista semanal del barbero — 7 días compactos + citas del día seleccionado.
+// Cableado al sistema Zentriq claro (tokens de marca).
 //
 // Diseño:
 //   · Fila de 7 pills (Lun–Dom) con conteo de citas por día.
-//   · Hoy marcado con anillo y texto en negrita.
+//   · Hoy marcado con anillo teal; día seleccionado en teal-ink relleno.
 //   · Clic en un día → muestra sus citas abajo (lectura, sin botones de acción).
 //   · Carga lazy al primer render (Server Action getBarberWeekAppointments).
-//
-// El estado de carga / error se maneja localmente.
-// Las citas de la semana se cargan una sola vez por semana.
 
 'use client';
 
@@ -68,12 +66,12 @@ function formatTime(iso: string): string {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-yellow-100 text-yellow-700',
-  confirmed: 'bg-blue-100 text-blue-700',
-  completed: 'bg-green-100 text-green-700',
-  cancelled: 'bg-gray-100 text-gray-400',
-  no_show:   'bg-red-100 text-red-700',
-  walkin:    'bg-purple-100 text-purple-700',
+  pending:   'bg-tint-1 text-teal-ink',
+  confirmed: 'bg-tint-1 text-teal-ink',
+  walkin:    'bg-tint-1 text-teal-ink',
+  completed: 'bg-[#E6E9E9] text-past-ink',
+  no_show:   'bg-red-tint text-red-ink',
+  cancelled: 'bg-past-bg text-past-faint',
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -105,28 +103,26 @@ function DayPill({
   return (
     <button
       onClick={onClick}
-      className={`flex flex-1 flex-col items-center rounded-xl py-2 transition-colors ${
+      className={`flex flex-1 flex-col items-center rounded-md py-2 transition-colors ${
         isSelected
-          ? 'bg-gray-900 text-white'
-          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+          ? 'bg-teal-ink text-card'
+          : 'bg-tint-1 text-ink-2 hover:bg-tint-2'
       }`}
     >
-      <span className={`text-[10px] font-medium ${isSelected ? 'text-gray-300' : 'text-gray-400'}`}>
+      <span className={`text-[10px] font-medium ${isSelected ? 'text-tint-2' : 'text-faint'}`}>
         {abbrev}
       </span>
       <span
-        className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${
-          isToday && !isSelected
-            ? 'ring-2 ring-gray-900 ring-offset-1'
-            : ''
+        className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold tabular-nums ${
+          isToday && !isSelected ? 'ring-2 ring-teal ring-offset-1' : ''
         }`}
       >
         {num}
       </span>
       {count > 0 ? (
         <span
-          className={`mt-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
-            isSelected ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600'
+          className={`mt-1 rounded-pill px-1.5 py-0.5 text-[9px] font-semibold tabular-nums ${
+            isSelected ? 'bg-white/25 text-card' : 'bg-tint-2 text-teal-ink'
           }`}
         >
           {count}
@@ -144,11 +140,9 @@ export default function BarberWeekView({ anchorDate, todayAppointments }: Props)
   const today = todayStr();
   const weekDates = getWeekDates(anchorDate);
 
-  // Inicializar weekData con las citas de hoy que ya están disponibles
   const [weekData, setWeekData] = useState<Record<string, DayAppointmentForStaff[]>>(() => {
     const initial: Record<string, DayAppointmentForStaff[]> = {};
     for (const d of weekDates) initial[d] = [];
-    // Prellenar el día ancla con los datos ya disponibles
     initial[anchorDate] = todayAppointments;
     return initial;
   });
@@ -156,11 +150,9 @@ export default function BarberWeekView({ anchorDate, todayAppointments }: Props)
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
-  // Día seleccionado — default: hoy si está en la semana, si no anchorDate
   const defaultSelected = weekDates.includes(today) ? today : anchorDate;
   const [selected, setSelected] = useState(defaultSelected);
 
-  // Cargar datos de la semana completa (una sola vez)
   useEffect(() => {
     void (async () => {
       try {
@@ -172,12 +164,10 @@ export default function BarberWeekView({ anchorDate, todayAppointments }: Props)
         setLoading(false);
       }
     })();
-   
   }, [anchorDate]);
 
   const selectedAppts = weekData[selected] ?? [];
 
-  // Formato del rango de la semana para el encabezado
   const first = weekDates[0];
   const last  = weekDates[6];
   const { num: firstNum, mon: firstMon } = first ? formatDayLabel(first) : { num: 0, mon: '' };
@@ -190,7 +180,7 @@ export default function BarberWeekView({ anchorDate, todayAppointments }: Props)
   return (
     <div className="space-y-3">
       {/* Encabezado de la semana */}
-      <p className="px-0.5 text-xs font-medium text-gray-500 capitalize">{weekLabel}</p>
+      <p className="px-0.5 text-xs font-semibold capitalize text-ink-2 tabular-nums">{weekLabel}</p>
 
       {/* Fila de pills */}
       <div className="flex gap-1">
@@ -209,44 +199,42 @@ export default function BarberWeekView({ anchorDate, todayAppointments }: Props)
       {/* Citas del día seleccionado */}
       <div className="space-y-1.5">
         {loading && (
-          <p className="py-4 text-center text-xs text-gray-400">Cargando semana…</p>
+          <p className="py-4 text-center text-xs text-faint">Cargando semana…</p>
         )}
 
         {error && !loading && (
-          <p className="py-2 text-center text-xs text-red-500">{error}</p>
+          <p className="py-2 text-center text-xs text-red-ink">{error}</p>
         )}
 
         {!loading && !error && selectedAppts.length === 0 && (
-          <div className="rounded-lg border border-dashed border-gray-200 py-6 text-center">
-            <p className="text-sm text-gray-400">Sin citas este día</p>
+          <div className="rounded-r-card border border-l-[3px] border-line border-l-line-2 py-6 text-center">
+            <p className="text-sm text-ink-2">Sin citas este día</p>
           </div>
         )}
 
         {!loading && selectedAppts.map((appt) => {
-          const badgeClass = STATUS_BADGE[appt.status] ?? 'bg-gray-100 text-gray-500';
+          const badgeClass = STATUS_BADGE[appt.status] ?? 'bg-tint-1 text-teal-ink';
 
           return (
             <div
               key={appt.id}
-              className="flex items-start gap-2 rounded-lg border border-gray-100 bg-white px-3 py-2"
+              className="flex items-start gap-2 rounded-r-[12px] border border-l-[3px] border-line border-l-teal-border bg-card px-3 py-2"
             >
               {/* Hora */}
-              <p className="shrink-0 text-xs font-semibold tabular-nums text-gray-600 pt-0.5">
+              <p className="shrink-0 pt-0.5 text-xs font-semibold tabular-nums text-ink-2">
                 {formatTime(appt.starts_at)}
               </p>
 
               {/* Info */}
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-gray-900">
-                  {appt.service.name}
-                </p>
+                <p className="truncate text-sm font-medium text-ink">{appt.service.name}</p>
                 {appt.customer && (
-                  <p className="truncate text-xs text-gray-400">{appt.customer.name}</p>
+                  <p className="truncate text-xs text-faint">{appt.customer.name}</p>
                 )}
               </div>
 
               {/* Badge */}
-              <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${badgeClass}`}>
+              <span className={`shrink-0 rounded-pill px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
                 {STATUS_LABEL[appt.status] ?? appt.status}
               </span>
             </div>

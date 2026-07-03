@@ -1,16 +1,17 @@
 // ─── StaffDayTimeline ─────────────────────────────────────────────────────────
-// Client Component — lista cronológica de citas del barbero.
+// Client Component — lista cronológica de citas del barbero (jerarquía v5).
 //
 // Recibe appointments desde StaffLayout (que gestiona Realtime).
-// No tiene suscripción Realtime propia.
 //
-// Por cada cita:
-//   · pending / confirmed / walkin → botones "Completar" y "No se presentó"
-//   · completed / no_show / cancelled → solo lectura, estado visual diferenciado
+// Jerarquía visual (maqueta v5 "Estructura 1 — atenuación pura"):
+//   · Futuro / en curso = presencia plena (blanco, teal), gesto B border-left teal.
+//   · Pasado completado = retrocede POR COLOR (past-bg/past-ink), sin opacity.
+//   · No-show pasado = apagado igual, PERO border-left rojo (red-ink) que lo rescata.
+//   · Marcador "Ahora · HH:MM" separando pasado de futuro (solo hoy).
 
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import type { DayAppointmentForStaff } from '@/lib/dashboard.types';
 import { updateAppointmentStatusAsBarber } from '@/app/staff/actions';
 
@@ -21,7 +22,7 @@ type Props = {
   date: string;
 };
 
-// ─── Config visual por status ─────────────────────────────────────────────────
+type VState = 'ongoing' | 'upcoming' | 'done' | 'noshow';
 
 const STATUS_LABEL: Record<string, string> = {
   pending:   'Pendiente',
@@ -30,24 +31,6 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelada',
   no_show:   'No asistió',
   walkin:    'Walk-in',
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-yellow-100 text-yellow-800',
-  confirmed: 'bg-blue-100 text-blue-800',
-  completed: 'bg-green-100 text-green-800',
-  cancelled: 'bg-gray-100 text-gray-500',
-  no_show:   'bg-red-100 text-red-800',
-  walkin:    'bg-purple-100 text-purple-800',
-};
-
-const STATUS_BORDER: Record<string, string> = {
-  pending:   'border-yellow-200',
-  confirmed: 'border-blue-200',
-  completed: 'border-green-200 opacity-70',
-  cancelled: 'border-gray-200 opacity-50',
-  no_show:   'border-red-200 opacity-50',
-  walkin:    'border-purple-200',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,18 +47,69 @@ function isActionable(status: string): boolean {
   return ['pending', 'confirmed', 'walkin'].includes(status);
 }
 
-// ─── StaffAppointmentCard ─────────────────────────────────────────────────────
+function isToday(date: string): boolean {
+  return date === new Date().toISOString().slice(0, 10);
+}
 
-type CardProps = {
-  appointment: DayAppointmentForStaff;
+/** Estado visual de la fila (independiente del status crudo para la jerarquía). */
+function visualState(appt: DayAppointmentForStaff, now: number): VState {
+  if (appt.status === 'completed' || appt.status === 'cancelled') return 'done';
+  if (appt.status === 'no_show') return 'noshow';
+  const start = new Date(appt.starts_at).getTime();
+  const end = new Date(appt.ends_at).getTime();
+  if (start <= now && now < end) return 'ongoing';
+  return 'upcoming';
+}
+
+// Clases del gesto B (border-left) + fondo por estado visual.
+const ROW_SHELL: Record<VState, string> = {
+  ongoing:  'bg-card border-line border-l-teal shadow-card',
+  upcoming: 'bg-card border-line border-l-teal-border shadow-card',
+  done:     'bg-past-bg border-past-line border-l-past-line',
+  noshow:   'bg-past-bg border-past-line border-l-red-ink',
+};
+// Texto atenuado POR COLOR en el pasado (nunca opacity).
+const ROW_TIME: Record<VState, string> = {
+  ongoing:  'text-ink font-semibold',
+  upcoming: 'text-ink font-semibold',
+  done:     'text-past-ink font-medium',
+  noshow:   'text-past-ink font-medium',
+};
+const ROW_SVC: Record<VState, string> = {
+  ongoing:  'text-ink font-medium',
+  upcoming: 'text-ink font-medium',
+  done:     'text-past-ink font-normal',
+  noshow:   'text-past-ink font-normal',
+};
+const ROW_CUST: Record<VState, string> = {
+  ongoing:  'text-ink-2',
+  upcoming: 'text-ink-2',
+  done:     'text-past-faint',
+  noshow:   'text-past-faint',
+};
+const TAG_CLASS: Record<VState, string> = {
+  ongoing:  'text-teal-ink bg-tint-1',
+  upcoming: 'text-teal-ink bg-tint-1',
+  done:     'text-past-ink bg-[#E6E9E9]',
+  noshow:   'text-red-ink bg-red-tint',
 };
 
-function StaffAppointmentCard({ appointment }: CardProps) {
-  const [isPending, startTransition] = useTransition();
+function tagLabel(appt: DayAppointmentForStaff, vs: VState): string {
+  if (vs === 'ongoing') return 'En curso';
+  return STATUS_LABEL[appt.status] ?? appt.status;
+}
 
+// ─── Fila ─────────────────────────────────────────────────────────────────────
+
+function StaffAppointmentRow({
+  appointment,
+  vs,
+}: {
+  appointment: DayAppointmentForStaff;
+  vs: VState;
+}) {
+  const [isPending, startTransition] = useTransition();
   const { id, starts_at, ends_at, status, service, customer } = appointment;
-  const badgeClass = STATUS_BADGE[status] ?? 'bg-gray-100 text-gray-600';
-  const borderClass = STATUS_BORDER[status] ?? 'border-gray-200';
 
   function handleAction(newStatus: 'completed' | 'no_show') {
     startTransition(async () => {
@@ -85,48 +119,54 @@ function StaffAppointmentCard({ appointment }: CardProps) {
 
   return (
     <div
-      className={`rounded-lg border px-3 py-2.5 bg-white transition-opacity ${borderClass} ${isPending ? 'opacity-50' : ''}`}
+      className={`rounded-r-[12px] border border-l-[3px] px-[13px] py-[11px] ${ROW_SHELL[vs]} ${
+        isPending ? 'opacity-60' : ''
+      }`}
     >
-      {/* Fila superior: hora + badge */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold tabular-nums text-gray-700">
-            {formatTime(starts_at)}
-            <span className="font-normal text-gray-400"> – {formatTime(ends_at)}</span>
-          </p>
-          <p className="mt-0.5 truncate text-sm font-medium text-gray-900">
+      <div className="flex items-center gap-[11px]">
+        {/* Hora */}
+        <span className={`text-[13px] tabular-nums ${ROW_TIME[vs]}`}>
+          {formatTime(starts_at)}
+        </span>
+
+        {/* Servicio + cliente */}
+        <div className="min-w-0 flex-1">
+          <div className={`truncate text-[14px] leading-[1.2] ${ROW_SVC[vs]}`}>
             {service.name}
-          </p>
+          </div>
+          <div className={`mt-px truncate text-[12px] ${ROW_CUST[vs]}`}>
+            {customer ? customer.name : 'Sin cliente registrado'}
+          </div>
         </div>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${badgeClass}`}>
-          {STATUS_LABEL[status] ?? status}
+
+        {/* Tag de estado */}
+        <span
+          className={`inline-flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-pill px-[9px] py-[3px] text-[10.5px] font-semibold ${TAG_CLASS[vs]}`}
+        >
+          {vs === 'ongoing' && (
+            <span
+              className="h-[5px] w-[5px] rounded-full bg-teal animate-data-beat motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          )}
+          {tagLabel(appointment, vs)}
         </span>
       </div>
 
-      {/* Cliente + duración */}
-      <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-500">
-        <span className="truncate">
-          {customer ? customer.name : 'Sin cliente registrado'}
-        </span>
-        <span className="ml-auto shrink-0 text-gray-300">
-          {service.duration_minutes} min
-        </span>
-      </div>
-
-      {/* Acciones — solo para estados accionables */}
+      {/* Acciones — solo estados accionables */}
       {isActionable(status) && (
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2.5 flex gap-2">
           <button
             onClick={() => handleAction('completed')}
             disabled={isPending}
-            className="flex-1 rounded border border-green-300 bg-green-50 py-1.5 text-xs font-medium text-green-800 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1 rounded-lg border border-teal-border bg-tint-1 py-1.5 text-[12px] font-semibold text-teal-ink hover:bg-tint-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Completar
           </button>
           <button
             onClick={() => handleAction('no_show')}
             disabled={isPending}
-            className="flex-1 rounded border border-red-200 bg-red-50 py-1.5 text-xs font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1 rounded-lg border border-red-border bg-red-tint py-1.5 text-[12px] font-semibold text-red-ink hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
           >
             No se presentó
           </button>
@@ -136,14 +176,37 @@ function StaffAppointmentCard({ appointment }: CardProps) {
   );
 }
 
+// ─── Marcador "Ahora" ─────────────────────────────────────────────────────────
+
+function NowMarker() {
+  const label = new Date().toLocaleTimeString('es-MX', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return (
+    <div className="my-2.5 flex items-center gap-2" aria-hidden="true">
+      <span className="flex items-center gap-1.5 text-[10.5px] font-semibold text-teal-ink">
+        <span className="h-1.5 w-1.5 rounded-full bg-teal animate-data-beat motion-reduce:animate-none" />
+        Ahora · {label}
+      </span>
+      <span className="h-px flex-1 bg-gradient-to-r from-teal to-transparent" />
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function StaffDayTimeline({ appointments, date }: Props) {
+  // Congelado al montar (lazy init) para no llamar Date.now() durante el render.
+  // Debe ir antes de cualquier return condicional (regla de hooks).
+  const [now] = useState(() => Date.now());
+
   if (appointments.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center">
-        <p className="text-sm text-gray-400">Sin citas para este día.</p>
-        <p className="mt-1 text-xs text-gray-300">{date}</p>
+      <div className="rounded-r-card border border-l-[3px] border-line border-l-line-2 bg-card px-4 py-8 text-center">
+        <p className="text-sm text-ink-2">Sin citas para este día.</p>
+        <p className="mt-1 text-xs text-faint tabular-nums">{date}</p>
       </div>
     );
   }
@@ -152,14 +215,29 @@ export default function StaffDayTimeline({ appointments, date }: Props) {
     a.starts_at.localeCompare(b.starts_at),
   );
 
+  const today = isToday(date);
+  // Índice de la primera cita que NO ha terminado (frontera pasado/futuro).
+  const boundary = today
+    ? sorted.findIndex((a) => new Date(a.ends_at).getTime() > now)
+    : -1;
+  // Solo mostramos el marcador si hay pasado Y futuro alrededor de la frontera.
+  const showNow = boundary > 0 && boundary < sorted.length;
+
   return (
     <div className="space-y-2">
-      <p className="px-1 text-xs font-medium text-gray-500">
-        Tu agenda · {sorted.length} {sorted.length === 1 ? 'cita' : 'citas'}
-      </p>
+      <div className="mb-1 flex items-baseline gap-1.5 px-0.5">
+        <span className="text-[12px] font-semibold text-ink-2">Tu agenda</span>
+        <span className="text-[11px] tabular-nums text-faint">
+          · {sorted.length} {sorted.length === 1 ? 'cita' : 'citas'}
+        </span>
+      </div>
+
       <div className="space-y-2">
-        {sorted.map((appt) => (
-          <StaffAppointmentCard key={appt.id} appointment={appt} />
+        {sorted.map((appt, i) => (
+          <div key={appt.id}>
+            {showNow && i === boundary && <NowMarker />}
+            <StaffAppointmentRow appointment={appt} vs={visualState(appt, now)} />
+          </div>
         ))}
       </div>
     </div>
