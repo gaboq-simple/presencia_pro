@@ -51,11 +51,11 @@
 
   /* ── Radios (valores exactos de v5) ── */
   --radius-hero: 28px;
-  --radius-card: 16px;
-  --radius-md:   13px;
-  --radius-sm:   11px;
-  --radius-xs:   8px;
-  --radius-pill: 999px;
+  --radius-card:   16px;
+  --radius-avatar: 13px;   /* v5 avatar (era --radius-md, que pisaba rounded-md=6px de Tailwind) */
+  --radius-pill:   999px;
+  /* Los radios 11px/8px de v5 se agregarán con nombre propio en PR3, al cablear su uso.
+     No se usan --radius-md/sm/xs para NO sobreescribir la escala default de Tailwind. */
 }
 
 /*
@@ -78,4 +78,16 @@
     linear-gradient(rgba(0, 194, 168, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 194, 168, 0.04) 1px, transparent 1px);
   background-size: 20px 20px;
+}
+
+/*
+ * Microinteracción de marca — pulso del dot "En curso" (v5 --data-beat).
+ * Utilidad Tailwind: animate-data-beat (respeta motion-reduce:animate-none).
+ */
+@keyframes data-beat {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+@theme {
+  --animate-data-beat: data-beat 1.8s ease-in-out infinite;
 }
