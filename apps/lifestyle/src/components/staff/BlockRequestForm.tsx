@@ -33,9 +33,9 @@ const STATUS_LABEL: Record<StaffBlockRequest['status'], string> = {
 };
 
 const STATUS_BADGE: Record<StaffBlockRequest['status'], string> = {
-  pending:  'bg-yellow-100 text-yellow-800',
-  approved: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
+  pending:  'bg-tint-1 text-ink',
+  approved: 'bg-tint-2 text-teal-ink',
+  rejected: 'bg-red-tint text-red-ink',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -159,14 +159,14 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
     <div className="space-y-4">
       {/* ── Formulario ──────────────────────────────────────────────────────── */}
       <div>
-        <p className="text-xs font-medium text-gray-500 mb-2">
+        <p className="text-xs font-medium text-ink-2 mb-2">
           Solicitar bloqueo
         </p>
 
         <form onSubmit={handleSubmit} noValidate className="space-y-3">
           {/* Fecha */}
           <div>
-            <label htmlFor="block-date" className="block text-xs text-gray-600 mb-1">
+            <label htmlFor="block-date" className="block text-xs text-ink-2 mb-1">
               Fecha
             </label>
             <input
@@ -176,14 +176,14 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
               value={date}
               onChange={(e) => setDate(e.target.value)}
               disabled={submitting}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:opacity-50"
+              className="w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:border-line-2 focus:outline-none disabled:opacity-50"
             />
           </div>
 
           {/* Hora inicio + fin en la misma fila */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label htmlFor="block-start" className="block text-xs text-gray-600 mb-1">
+              <label htmlFor="block-start" className="block text-xs text-ink-2 mb-1">
                 Inicio
               </label>
               <input
@@ -192,11 +192,11 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
                 disabled={submitting}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:opacity-50"
+                className="w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:border-line-2 focus:outline-none disabled:opacity-50"
               />
             </div>
             <div>
-              <label htmlFor="block-end" className="block text-xs text-gray-600 mb-1">
+              <label htmlFor="block-end" className="block text-xs text-ink-2 mb-1">
                 Fin
               </label>
               <input
@@ -205,15 +205,15 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
                 disabled={submitting}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:opacity-50"
+                className="w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:border-line-2 focus:outline-none disabled:opacity-50"
               />
             </div>
           </div>
 
           {/* Motivo */}
           <div>
-            <label htmlFor="block-reason" className="block text-xs text-gray-600 mb-1">
-              Motivo <span className="text-gray-400">(opcional)</span>
+            <label htmlFor="block-reason" className="block text-xs text-ink-2 mb-1">
+              Motivo <span className="text-faint">(opcional)</span>
             </label>
             <textarea
               id="block-reason"
@@ -222,7 +222,7 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
               onChange={(e) => setReason(e.target.value)}
               disabled={submitting}
               placeholder="Cita médica, trámite personal…"
-              className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-300 focus:border-gray-400 focus:outline-none disabled:opacity-50"
+              className="w-full resize-none rounded-lg border border-line px-3 py-2 text-sm text-ink placeholder-faint focus:border-line-2 focus:outline-none disabled:opacity-50"
             />
           </div>
 
@@ -238,20 +238,20 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
               />
               <div
                 className={`h-5 w-9 rounded-full transition-colors ${
-                  urgent ? 'bg-red-500' : 'bg-gray-200'
+                  urgent ? 'bg-red-ink' : 'bg-past-line'
                 } ${submitting ? 'opacity-50' : ''}`}
               />
               <div
-                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-card shadow transition-transform ${
                   urgent ? 'translate-x-4' : 'translate-x-0.5'
                 }`}
               />
             </div>
             <div>
-              <span className="text-xs font-medium text-gray-800">
+              <span className="text-xs font-medium text-ink">
                 Marcar como urgente
               </span>
-              <p className="mt-0.5 text-xs text-gray-400">
+              <p className="mt-0.5 text-xs text-faint">
                 Marca como urgente si el bloqueo es para hoy o mañana
                 y el admin debe saberlo de inmediato.
               </p>
@@ -260,16 +260,16 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
 
           {/* Feedback */}
           {error && (
-            <p role="alert" className="text-xs text-red-600">{error}</p>
+            <p role="alert" className="text-xs text-red-ink">{error}</p>
           )}
           {successMsg && (
-            <p role="status" className="text-xs text-green-700">{successMsg}</p>
+            <p role="status" className="text-xs text-teal-ink">{successMsg}</p>
           )}
 
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-lg border border-gray-900 bg-gray-900 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-lg border border-teal-ink bg-teal-ink py-2.5 text-sm font-medium text-card hover:bg-teal-ink disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? 'Enviando…' : 'Enviar solicitud'}
           </button>
@@ -279,20 +279,20 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
       {/* ── Historial de solicitudes ─────────────────────────────────────── */}
       {requests.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-gray-500 mb-2">
+          <p className="text-xs font-medium text-ink-2 mb-2">
             Solicitudes recientes
           </p>
           <div className="space-y-2">
             {requests.map((req) => (
               <div
                 key={req.id}
-                className="rounded-lg border border-gray-100 px-3 py-2.5"
+                className="rounded-lg border border-line px-3 py-2.5"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-xs tabular-nums text-gray-700">
+                    <p className="text-xs tabular-nums text-ink">
                       {formatDateTime(req.starts_at)}
-                      <span className="text-gray-400">
+                      <span className="text-faint">
                         {' '}– {new Date(req.ends_at).toLocaleTimeString('es-MX', {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -301,7 +301,7 @@ export default function BlockRequestForm({ initialBlockRequests }: Props) {
                       </span>
                     </p>
                     {req.reason && (
-                      <p className="mt-0.5 truncate text-xs text-gray-500">
+                      <p className="mt-0.5 truncate text-xs text-ink-2">
                         {req.reason}
                       </p>
                     )}
