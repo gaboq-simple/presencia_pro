@@ -291,7 +291,7 @@ type CreateAppointmentInput = {
  */
 export async function createAssistantAppointment(
   input: CreateAppointmentInput,
-): Promise<{ id: string; warning?: string }> {
+): Promise<{ id?: string; warning?: string; error?: string }> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
 
@@ -326,7 +326,8 @@ export async function createAssistantAppointment(
   // rol — barbero Y recepcionista) exige teléfono del cliente. Default FALSE →
   // preserva el walk-in con solo-nombre. Chequeo ANTES de crear cliente/cita.
   if ((bizCfg?.require_customer_phone ?? false) && !phone) {
-    throw new Error('Este negocio requiere el teléfono del cliente para agendar');
+    // Validación de cara al usuario → return (los throw se redactan en prod).
+    return { error: 'Este negocio requiere el teléfono del cliente para agendar' };
   }
 
   // ── Tope suave de citas/día por barbero (anti-inflado grosero) ───────────
@@ -346,7 +347,8 @@ export async function createAssistantAppointment(
       .gte('starts_at', `${day}T00:00:00`)
       .lte('starts_at', `${day}T23:59:59`);
     if ((count ?? 0) >= maxPerStaffPerDay) {
-      throw new Error('Alcanzaste el máximo de citas para ese día, contacta al admin');
+      // Validación de cara al usuario → return (los throw se redactan en prod).
+      return { error: 'Alcanzaste el máximo de citas para ese día, contacta al admin' };
     }
   }
 

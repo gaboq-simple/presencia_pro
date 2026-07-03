@@ -151,7 +151,7 @@ export default function NewAppointmentForm({
         return `${y}-${mo}-${day}T${h}:${mi}:${s}${offsetStr}`;
       }
 
-      await createAssistantAppointment({
+      const res = await createAssistantAppointment({
         staffId,
         serviceId,
         startsAt:      toIsoLocal(startDate),
@@ -162,8 +162,17 @@ export default function NewAppointmentForm({
         customerPhone: customerPhone.trim() || undefined,
       });
 
+      // Validaciones de cara al usuario (tope, teléfono) vienen como { error }
+      // — no se redactan en prod, a diferencia de un throw.
+      if (res?.error) {
+        setError(res.error);
+        setSubmitting(false);
+        return;
+      }
+
       onCreated();
     } catch (err) {
+      // Errores inesperados del sistema (se redactan en prod, está bien).
       setError(err instanceof Error ? err.message : 'Error al crear la cita');
       setSubmitting(false);
     }
