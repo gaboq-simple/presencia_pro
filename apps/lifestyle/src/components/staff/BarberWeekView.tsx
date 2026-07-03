@@ -199,7 +199,22 @@ export default function BarberWeekView({ anchorDate, todayAppointments }: Props)
       {/* Citas del día seleccionado */}
       <div className="space-y-1.5">
         {loading && (
-          <p className="py-4 text-center text-xs text-faint">Cargando semana…</p>
+          <div className="space-y-1.5" aria-hidden="true">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 rounded-r-[12px] border border-l-[3px] border-line border-l-line-2 bg-card px-3 py-2.5 motion-safe:animate-pulse"
+              >
+                <div className="h-3 w-9 rounded bg-tint-2" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="h-3 w-2/3 rounded bg-tint-2" />
+                  <div className="h-2.5 w-1/3 rounded bg-tint-1" />
+                </div>
+                <div className="h-4 w-12 rounded-pill bg-tint-2" />
+              </div>
+            ))}
+            <span className="sr-only">Cargando semana…</span>
+          </div>
         )}
 
         {error && !loading && (
