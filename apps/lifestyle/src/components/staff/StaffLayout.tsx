@@ -317,7 +317,7 @@ export default function StaffLayout({
           /* ── Vista diaria (default) ────────────────────────────────────── */
           <>
             {/* Resumen de fin de día — visible solo cuando no quedan citas activas */}
-            <EndOfDaySummary appointments={appointments} date={date} />
+            <EndOfDaySummary appointments={appointments} date={date} staffId={staffId} />
 
             {/* Ficha contextual del cliente — solo si hay cita en las próximas 2h */}
             {upcomingCustomerId && (
