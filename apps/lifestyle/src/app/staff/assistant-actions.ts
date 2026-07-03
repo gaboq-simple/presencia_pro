@@ -50,6 +50,30 @@ async function requireAssistantSession(): Promise<{
   };
 }
 
+/**
+ * Gate 2b — "solo mis citas". Si el actor es barbero, exige que la cita a mutar sea
+ * suya; si no, Forbidden. Recepción/dueño (role !== 'barber') o token sin staff_id →
+ * no-op (sin restricción — protege a la recepcionista). Mismo patrón que
+ * updateAppointmentStatusAsBarber (staff/actions.ts): fetch + compare + rechazo.
+ */
+async function assertBarberOwnsAppointment(
+  supabase: ReturnType<typeof getServiceClient>,
+  session: { role: string; staff_id: string | null; business_id: string },
+  appointmentId: string,
+): Promise<void> {
+  if (session.role !== 'barber' || !session.staff_id) return;
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('staff_id')
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+  if (error || !data) throw new Error('Cita no encontrada');
+  if ((data as { staff_id: string | null }).staff_id !== session.staff_id) {
+    throw new Error('Solo puedes modificar tus propias citas');
+  }
+}
+
 // ─── Refresh — todas las citas del negocio para un día ───────────────────────
 
 /**
@@ -75,6 +99,7 @@ export async function cancelAppointment(
 ): Promise<void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  await assertBarberOwnsAppointment(supabase, session, appointmentId);
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -195,6 +220,7 @@ export async function updateAppointmentNotes(
 ): Promise<void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  await assertBarberOwnsAppointment(supabase, session, appointmentId);
 
   const { error } = await supabase
     .from('appointments')
@@ -214,6 +240,7 @@ export async function updateAppointmentNotes(
 export async function completeAppointment(appointmentId: string): Promise<void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  await assertBarberOwnsAppointment(supabase, session, appointmentId);
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -243,6 +270,7 @@ export async function completeAppointment(appointmentId: string): Promise<void> 
 export async function noShowAppointment(appointmentId: string): Promise<void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  await assertBarberOwnsAppointment(supabase, session, appointmentId);
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -457,6 +485,7 @@ type RescheduleInput = {
 export async function rescheduleAppointment(input: RescheduleInput): Promise<void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  await assertBarberOwnsAppointment(supabase, session, input.appointmentId);
 
   // Verificar que la cita pertenece al negocio y obtener datos necesarios
   const { data: raw, error: fetchErr } = await supabase
