@@ -226,28 +226,28 @@ export default function StaffLayout({
   const todayDate = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-canvas bg-grid">
       {/* ── Header ────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-10 border-b border-gray-100 bg-white px-4 py-3">
+      <header className="sticky top-0 z-10 border-b border-line bg-card px-4 py-3">
         <div className="mx-auto max-w-xl">
           {/* Nombre + toggle Hoy/Semana */}
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+            <p className="text-xs font-semibold uppercase tracking-wide text-faint">
               {staffName}
             </p>
 
             {/* Toggle + link gestion — solo para barberos */}
             {role === 'barber' && (
               <div className="flex items-center gap-2">
-                <div className="flex rounded-lg border border-gray-200 p-0.5">
+                <div className="flex rounded-md border border-line p-0.5">
                   {(['day', 'week'] as StaffView[]).map((v) => (
                     <button
                       key={v}
                       onClick={() => setView(v)}
-                      className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                      className={`rounded px-2.5 py-1 text-xs font-semibold transition-colors ${
                         view === v
-                          ? 'bg-gray-900 text-white'
-                          : 'text-gray-500 hover:text-gray-700'
+                          ? 'bg-teal-ink text-card'
+                          : 'text-ink-2 hover:text-ink'
                       }`}
                     >
                       {v === 'day' ? 'Hoy' : 'Semana'}
@@ -256,7 +256,7 @@ export default function StaffLayout({
                 </div>
                 <a
                   href="/staff/gestion"
-                  className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                  className="rounded-md border border-line px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-tint-1 hover:text-teal-ink"
                   title="Vista de gestion"
                 >
                   Gestion →
@@ -271,19 +271,19 @@ export default function StaffLayout({
               <button
                 onClick={() => navigate(prevDate)}
                 aria-label="Día anterior"
-                className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 active:bg-gray-100"
+                className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-2 hover:bg-tint-1 active:bg-tint-2"
               >
                 ‹
               </button>
 
               <div className="text-center">
-                <p className="text-sm font-semibold text-gray-900 capitalize">
+                <p className="text-sm font-semibold capitalize text-ink">
                   {formatDateHeader(date)}
                 </p>
                 {!isToday(date) && (
                   <button
                     onClick={() => navigate(todayDate)}
-                    className="mt-0.5 text-xs text-gray-400 underline hover:text-gray-600"
+                    className="mt-0.5 text-xs text-teal-ink underline hover:text-teal-border"
                   >
                     Ir a hoy
                   </button>
@@ -293,7 +293,7 @@ export default function StaffLayout({
               <button
                 onClick={() => navigate(nextDate)}
                 aria-label="Día siguiente"
-                className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 active:bg-gray-100"
+                className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-2 hover:bg-tint-1 active:bg-tint-2"
               >
                 ›
               </button>
@@ -339,14 +339,14 @@ export default function StaffLayout({
           <>
             <section
               aria-label="Solicitar bloqueo"
-              className="rounded-xl border border-gray-100 bg-white px-4 py-4"
+              className="rounded-card border border-line bg-card px-4 py-4 shadow-card"
             >
               <BlockRequestForm initialBlockRequests={initialBlockRequests} />
             </section>
 
             <section
               aria-label="Horario semanal"
-              className="rounded-xl border border-gray-100 bg-white px-4 py-4"
+              className="rounded-card border border-line bg-card px-4 py-4 shadow-card"
             >
               <RecurringAvailability availability={availability} />
             </section>
