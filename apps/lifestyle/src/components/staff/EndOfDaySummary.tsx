@@ -73,6 +73,14 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Frase del pool, sembrada por la fecha (puro → mismo valor en server/client,
+ *  sin hydration mismatch; cambia cada día, estable dentro del día). */
+function pickPhrase(dateStr: string): string {
+  let h = 0;
+  for (const ch of dateStr) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return FRASES[Math.abs(h) % FRASES.length]!;
+}
+
 // ─── Celda de la matriz ───────────────────────────────────────────────────────
 
 function Cell({
@@ -103,12 +111,7 @@ function Cell({
 
 export default function EndOfDaySummary({ appointments, date, staffId }: Props) {
   const [tomorrowCount, setTomorrowCount] = useState<number | null>(null);
-  const [phrase, setPhrase] = useState<string | null>(null);
-
-  // Frase aleatoria — client-only para evitar hydration mismatch.
-  useEffect(() => {
-    setPhrase(FRASES[Math.floor(Math.random() * FRASES.length)] ?? null);
-  }, []);
+  const phrase = pickPhrase(date);
 
   // Citas de mañana (dato abierto "y subiendo") — RLS garantiza solo las propias.
   useEffect(() => {

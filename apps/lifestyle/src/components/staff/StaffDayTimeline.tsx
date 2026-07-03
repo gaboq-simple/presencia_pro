@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import type { DayAppointmentForStaff } from '@/lib/dashboard.types';
 import { updateAppointmentStatusAsBarber } from '@/app/staff/actions';
 
@@ -198,6 +198,10 @@ function NowMarker() {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function StaffDayTimeline({ appointments, date }: Props) {
+  // Congelado al montar (lazy init) para no llamar Date.now() durante el render.
+  // Debe ir antes de cualquier return condicional (regla de hooks).
+  const [now] = useState(() => Date.now());
+
   if (appointments.length === 0) {
     return (
       <div className="rounded-r-card border border-l-[3px] border-line border-l-line-2 bg-card px-4 py-8 text-center">
@@ -211,7 +215,6 @@ export default function StaffDayTimeline({ appointments, date }: Props) {
     a.starts_at.localeCompare(b.starts_at),
   );
 
-  const now = Date.now();
   const today = isToday(date);
   // Índice de la primera cita que NO ha terminado (frontera pasado/futuro).
   const boundary = today
