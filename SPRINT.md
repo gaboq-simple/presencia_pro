@@ -1307,8 +1307,8 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 **Partición de PRs (aprobada — chicos y verificables, cadence del barbero):**
 1. **Shell** — `AssistantControlDesk.tsx`, layout dos zonas (panorama scroll propio + cola sticky), montado en `/dashboard`. *Puro front.* 🟢 done (PR-1, rama `feat/assistant-control-desk-shell`)
 2. **Panorama** — `PanoramaTimeline.tsx`: carriles barbero×tiempo, ventana 3h navegable, "Ahora", densidad 8, sub-rejilla 15 min, citas reales. *Puro front (lee props).* ← **este PR**
-3. **Gesto click-to-place** — levantar cita → huecos válidos por duración → chips de destino → "NO CABE". *Puro front (drop local).*
-4. **Cablear mutaciones** — drop → `rescheduleAppointment`; walk-in → `createAssistantAppointment`; polling → `refreshAssistantAppointments`; estados carga/error. *Toca actions (consume).*
+3. **Gesto click-to-place + reschedule real** — levantar cita → huecos válidos por duración → chips → **drop → `rescheduleAppointment`** (optimista + revert). *Front + action (Gabriel fusionó el drop-mutation aquí).* ← **este PR**
+4. **Polling + walk-in a mano** — `refreshAssistantAppointments` (con skeleton/error) + `createAssistantAppointment`. *Toca actions.*
 5. **Cola de acción** — `ActionQueue.tsx`: walk-in/atrasados/sugerencias 1-tap + acciones de tarjeta. *Mixto.*
 6. **Granularidad fina + pulido** — toggle ajuste-fino, cola encogida vacía (§7.6), `prefers-reduced-motion`, microcopy CDMX, clip de bordes. *Puro front.*
 
@@ -1340,6 +1340,15 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 - **Skeleton de carga:** el panorama recibe las citas ya cargadas server-side (props) → NO hay estado de carga en el render inicial. El skeleton aplica al **polling** (PR-4, cuando el cliente re-fetchea). Igual el **error de fetch** → PR-4.
 - **Estado "atrasado"** (border rojo + pulso): derivado aquí de forma conservadora (confirmada cuya ventana ya pasó sin cerrar); su lógica fina (retrasos reportados, `adjusted_starts_at`) vive en la cola (PR-5).
 - 🟠 **HALLAZGO (pre-existente, query compartida) — límite de día en UTC en `getDayAppointments`:** filtra `starts_at` entre `${date}T00:00:00` y `T23:59:59` interpretados en **UTC**, no en la tz del negocio. Para un negocio UTC-6 (America/Mexico_City), las citas **≥18:00 locales caen al día UTC siguiente y se descartan** (y las de 18:00–24:00 del día previo se colarían como "hoy"). Detectado en el seed (una cita 18:13 no apareció). **AssistantLayout usa la MISMA query** → mismo bug ahí. Fuera del alcance de PR-2 (se reusa la fuente por decisión de Gabriel); registrado en Backlog post-sprint para arreglo propio (usar límites en tz del negocio).
+
+**PR-3 (gesto click-to-place) — criterios de aceptación:**
+- [x] Modelo **click-to-place** (NO drag): tocar cita movible → se **levanta** (ring + resto atenuado) → chips de hora **solo donde CABE** el servicio (validación por duración) → tocar chip → la cita se reagenda. Cancelar: **Esc**, botón Cancelar, o tocar la cita levantada de nuevo. Estado en React (`move`/`fineMode`), destinos derivados en render (no DOM imperativo).
+- [x] **Citas movibles**: pending/confirmada y **futura** (no en-curso/pasada/cerrada) — coincide con lo que `rescheduleAppointment` acepta. Grip `⠿` como affordance.
+- [x] **Destinos válidos por carril**: complemento libre de la agenda del barbero (excluye la cita levantada), acotado a `[max(ahora, turno_inicio), turno_fin]`. Chips **sugeridos** (lo antes posible + :00/:30 ≥30 min) por defecto; toggle **"Cada 15 min"** → chips finos. Huecos demasiado cortos → marca **"no cabe"** (no clickable).
+- [x] **Drop → `rescheduleAppointment`** (ya existe, gate 2b; recepción sin restricción): `{ appointmentId, newDate, newStartTime, newStaffId }`. **Update optimista** (la cita vuela ya) + **revert + toast de error** si la action falla (conflicto de solape, etc.); `router.refresh()` reconcilia con el servidor. `appointments` subido a estado del desk (siembra de props; base del polling de PR-4).
+- [x] **Verificado por RUTA REAL** (seed reversible: 2 barberos con turno + citas futuras confirmadas + token): levantar → 11 chips sugeridos → toggle a 22 chips cada-15 → **drop cross-barbero** (Cliente Gesto 1: Test A 18:10 → **Test B 18:30**) **persistido en DB** (`staff_id` cambiado, `starts_at`=18:30, `modified_at` estampado); "no cabe" visible para combo de 45 min; Esc cancela; consola sin errores. Seed 100% revertido; demo intacto. `tsc` 0 · `lint` 0 errores · `build` verde.
+
+**Lo que la maqueta no anticipó (marcado):** el "colocar" alimenta `rescheduleAppointment` con la hora-de-pared del negocio, pero la action la interpreta en la **tz del servidor** (`setHours` local) — bug latente para negocios en otra tz. En el demo (servidor≈negocio CST) coincide. Registrado como **S6-DATA-02** en Backlog (fix aparte, decisión de Gabriel). El FLIP/"fly" de la maqueta se simplificó a una transición CSS; el cancel por click-en-fondo (backdrop) quedó como refinamiento (hay Esc + Cancelar + tocar-de-nuevo).
 
 **Frontera:** NO reescribir server actions (se consumen). NO tocar `/staff`, `/staff/gestion`, owner/admin ni el flujo del bot. NO borrar `AssistantLayout` (barbero-gestión lo usa). Una pieza a la vez, cada una contra la maqueta congelada; reportar y esperar OK entre PRs.
 
@@ -1376,6 +1385,9 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 
 ### ✅ `getDayAppointments` límite de día en UTC → **PROMOVIDO a S6-DATA-01 (done, 2026-07-04)**
 Gabriel lo priorizó e intercaló antes del gesto (PR-3 de S6-UI-02). Ver el bloque **S6-DATA-01** en la sección de tareas. Ya no es backlog.
+
+### 🟠 S6-DATA-02 — `rescheduleAppointment` interpreta `newStartTime` en la tz del servidor, no del negocio
+`rescheduleAppointment` calcula el nuevo `starts_at` con `new Date(\`${input.newDate}T00:00:00\`).setHours(hh, mm)` → usa la tz del **servidor** (Vercel = UTC), no la del negocio. Misma familia que S6-DATA-01. En el demo (servidor CST ≈ negocio CST durante dev local) coincide, pero en producción (servidor UTC) una hora `newStartTime='18:00'` se guardaría como 18:00 UTC = 12:00 local México → **la cita reagendada aterriza 6h antes de lo que el asistente eligió**. Detectado al cablear el gesto click-to-place (S6-UI-02 PR-3), que alimenta `newStartTime` con la hora-de-pared del negocio. Fix: interpretar `newStartTime`/`newDate` en `businesses.timezone` al construir el `timestamptz` (reusar el helper `zonedWallTimeToUtc` de `dashboard.types.ts`). Revisar también `createAssistantAppointment` por el mismo patrón. Tarea propia (toca action compartida + notificaciones/recordatorios que derivan del `starts_at`).
 
 ### 🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path de agendamiento
 
