@@ -1299,6 +1299,36 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
+#### S6-UI-02 — Cableado de la vista Asistente/Recepción (mesa de control) 🔵 in-progress (PR-1 shell impl. 2026-07-04, rama `feat/assistant-control-desk-shell`)
+**Origen:** cierre de la fase de diseño de la vista Asistente (maqueta congelada `design-studies/asistente-FINAL.html`, aprobada por Gabriel usándola; handoff en `design-studies/HANDOFF.md` §7). Se cablea la mesa de control operativa como **vista propia que DIVERGE** del `AssistantLayout` que hoy comparte con el barbero-gestión. Consume server actions existentes (Fases 2a/2b ya en main); no crea actions ni migraciones para el núcleo.
+
+**🔴 Hallazgo del arranque (corrige §7.1 del HANDOFF):** el §7.1 apuntaba a montar la mesa de control en la rama `role==='assistant'` de `/staff/page.tsx`. Eso quedó obsoleto tras **S6-UI-01** (#47, separación de rutas): en `origin/main` la vista del asistente **vive en `/dashboard`** (rama `role==='assistant'`, `dashboard/page.tsx`). **Decisión Gabriel (2026-07-04): divergir en `/dashboard`** — `AssistantControlDesk` reemplaza al `AssistantLayout` solo en esa rama; `/staff/gestion` (barbero) sigue con `AssistantLayout` **intacto** (su migración es decisión aparte, §7.6).
+
+**Partición de PRs (aprobada — chicos y verificables, cadence del barbero):**
+1. **Shell** — `AssistantControlDesk.tsx`, layout dos zonas (panorama scroll propio + cola sticky), montado en `/dashboard`. *Puro front.* ← **este PR**
+2. **Panorama** — `PanoramaTimeline.tsx`: carriles barbero×tiempo, ventana 3h navegable, "Ahora", densidad 8, sub-rejilla 15 min, citas reales. *Puro front.*
+3. **Gesto click-to-place** — levantar cita → huecos válidos por duración → chips de destino → "NO CABE". *Puro front (drop local).*
+4. **Cablear mutaciones** — drop → `rescheduleAppointment`; walk-in → `createAssistantAppointment`; polling → `refreshAssistantAppointments`; estados carga/error. *Toca actions (consume).*
+5. **Cola de acción** — `ActionQueue.tsx`: walk-in/atrasados/sugerencias 1-tap + acciones de tarjeta. *Mixto.*
+6. **Granularidad fina + pulido** — toggle ajuste-fino, cola encogida vacía (§7.6), `prefers-reduced-motion`, microcopy CDMX, clip de bordes. *Puro front.*
+
+**Sistema visual:** tokens Zentriq claro de `globals.css` (bg-canvas, teal, ink, border-line, tabular-nums, bg-grid). Cero paleta numérica de Tailwind. Altura del panorama por `calc`/flex, no el `440px` de la maqueta (§7.5).
+
+**PR-1 (shell) — criterios de aceptación:**
+- [x] `dashboard/page.tsx` rama `assistant` monta `AssistantControlDesk` (reemplaza `AssistantLayout` solo ahí); import + comentario, sin tocar owner/admin/organización.
+- [x] Layout dos zonas: panorama (scroll propio) + cola de acción fija (348px); apila en <lg. Header con datos reales (Ahora en vivo, nav de día, citas hoy, barberos).
+- [x] Tokens Zentriq; `tsc --noEmit` 0, `eslint` 0 errores (solo warnings pre-existentes ajenos), `build` verde.
+- [x] `/staff/gestion` (barbero) intacto — sigue usando `AssistantLayout`; `AssistantLayout.tsx` no borrado.
+- [x] Preview del shell verificado (harness temporal desechable con props mock; dos zonas a 1320px; consola sin errores; teardown limpio).
+
+**Frontera:** NO reescribir server actions (se consumen). NO tocar `/staff`, `/staff/gestion`, owner/admin ni el flujo del bot. NO borrar `AssistantLayout` (barbero-gestión lo usa). Una pieza a la vez, cada una contra la maqueta congelada; reportar y esperar OK entre PRs.
+
+**Notas de ejecución:**
+- El worktree estaba 15 commits atrás de `origin/main`; los tokens Zentriq (PR #52-55) y las rutas separadas (#47) solo viven en main. Rama del shell creada fresca desde `origin/main` (`015f49d`).
+- Acceso: el asistente entra por token (`/dashboard?token=…`, `businesses.assistant_token`); el token del demo está en NULL → el preview del shell se hizo con harness mock, no con sesión real. La verificación end-to-end con token real queda para cuando Gabriel lo provisione o se cablee PR-4.
+
+---
+
 ## Backlog post-sprint (NO trabajar en este sprint)
 
 Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra al sprint sin renegociación.
