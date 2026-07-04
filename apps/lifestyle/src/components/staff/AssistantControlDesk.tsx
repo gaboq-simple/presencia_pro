@@ -23,6 +23,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
+import PanoramaTimeline from './PanoramaTimeline';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 
@@ -69,13 +70,6 @@ function isToday(dateStr: string): boolean {
   return dateStr === new Date().toISOString().slice(0, 10);
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  const first = parts[0]?.[0] ?? '';
-  const second = parts[1]?.[0] ?? '';
-  return (first + second).toUpperCase() || '·';
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AssistantControlDesk({
@@ -105,12 +99,6 @@ export default function AssistantControlDesk({
 
   function navigate(targetDate: string) {
     router.push(`/dashboard?date=${targetDate}`);
-  }
-
-  // Citas por barbero — base del panorama (skeleton estructural en el shell).
-  const apptCountByStaff = new Map<string, number>();
-  for (const a of initialAppointments) {
-    apptCountByStaff.set(a.staff.id, (apptCountByStaff.get(a.staff.id) ?? 0) + 1);
   }
 
   const today = isToday(date);
@@ -201,35 +189,12 @@ export default function AssistantControlDesk({
               className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:border-r lg:border-line"
               aria-label="Panorama de barberos"
             >
-              {/* Eje de tiempo — sticky (base del que renderiza el panorama real) */}
-              <div className="sticky top-0 z-10 border-b border-line bg-canvas px-4 py-2 text-xs font-medium text-faint">
-                Panorama del día · ventana de tiempo navegable (próxima pieza)
-              </div>
-
-              {staffWithAvailability.length === 0 ? (
-                <p className="p-6 text-sm text-ink-2">
-                  No hay barberos con horario para este día.
-                </p>
-              ) : (
-                <ul>
-                  {staffWithAvailability.map((s) => (
-                    <li
-                      key={s.id}
-                      className="flex min-h-[62px] items-center gap-3 border-b border-line-2 px-4"
-                    >
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-avatar bg-ink text-xs font-semibold text-card">
-                        {initials(s.name)}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                        {s.name}
-                      </span>
-                      <span className="tabular-nums text-xs text-faint">
-                        {apptCountByStaff.get(s.id) ?? 0} citas
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <PanoramaTimeline
+                date={date}
+                timezone={timezone}
+                appointments={initialAppointments}
+                staff={staffWithAvailability}
+              />
             </section>
 
             {/* COLA DE ACCIÓN — fija; se puebla en PR-5 */}

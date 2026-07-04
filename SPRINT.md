@@ -1305,8 +1305,8 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 **🔴 Hallazgo del arranque (corrige §7.1 del HANDOFF):** el §7.1 apuntaba a montar la mesa de control en la rama `role==='assistant'` de `/staff/page.tsx`. Eso quedó obsoleto tras **S6-UI-01** (#47, separación de rutas): en `origin/main` la vista del asistente **vive en `/dashboard`** (rama `role==='assistant'`, `dashboard/page.tsx`). **Decisión Gabriel (2026-07-04): divergir en `/dashboard`** — `AssistantControlDesk` reemplaza al `AssistantLayout` solo en esa rama; `/staff/gestion` (barbero) sigue con `AssistantLayout` **intacto** (su migración es decisión aparte, §7.6).
 
 **Partición de PRs (aprobada — chicos y verificables, cadence del barbero):**
-1. **Shell** — `AssistantControlDesk.tsx`, layout dos zonas (panorama scroll propio + cola sticky), montado en `/dashboard`. *Puro front.* ← **este PR**
-2. **Panorama** — `PanoramaTimeline.tsx`: carriles barbero×tiempo, ventana 3h navegable, "Ahora", densidad 8, sub-rejilla 15 min, citas reales. *Puro front.*
+1. **Shell** — `AssistantControlDesk.tsx`, layout dos zonas (panorama scroll propio + cola sticky), montado en `/dashboard`. *Puro front.* 🟢 done (PR-1, rama `feat/assistant-control-desk-shell`)
+2. **Panorama** — `PanoramaTimeline.tsx`: carriles barbero×tiempo, ventana 3h navegable, "Ahora", densidad 8, sub-rejilla 15 min, citas reales. *Puro front (lee props).* ← **este PR**
 3. **Gesto click-to-place** — levantar cita → huecos válidos por duración → chips de destino → "NO CABE". *Puro front (drop local).*
 4. **Cablear mutaciones** — drop → `rescheduleAppointment`; walk-in → `createAssistantAppointment`; polling → `refreshAssistantAppointments`; estados carga/error. *Toca actions (consume).*
 5. **Cola de acción** — `ActionQueue.tsx`: walk-in/atrasados/sugerencias 1-tap + acciones de tarjeta. *Mixto.*
@@ -1320,6 +1320,16 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 - [x] Tokens Zentriq; `tsc --noEmit` 0, `eslint` 0 errores (solo warnings pre-existentes ajenos), `build` verde.
 - [x] `/staff/gestion` (barbero) intacto — sigue usando `AssistantLayout`; `AssistantLayout.tsx` no borrado.
 - [x] Preview del shell verificado (harness temporal desechable con props mock; dos zonas a 1320px; consola sin errores; teardown limpio).
+
+**PR-2 (panorama) — criterios de aceptación:**
+- [x] `PanoramaTimeline.tsx` (nuevo): carriles horizontales barbero×tiempo, altura fija 62px, densidad 8 sin colapsar. Motor de ventana portado del §6 (idiomático React: posiciones derivadas de `winStart` en render, no `layout()` imperativo). `pctOf(min)=(min-winStart)/WIN*100`, `WIN=180`.
+- [x] Ventana 3h navegable: ‹ ›(±1h) + botón **"Ahora"** (resalta en teal cuando estás fuera de foco → invita a volver; verificado que recentra). Línea "ahora" roja + pastilla en el eje; eje con marcas cada 30 min (tabular-nums). Se oculta la línea "ahora" fuera de la ventana / en días ≠ hoy.
+- [x] Citas reales por props (`initialAppointments` = misma fuente que `AssistantLayout`; sin nueva query). Ancho = duración real. Estados por border-left: en-curso (teal), confirmada (neutral), completada (past/gris), atrasado (rojo + pulso), **no-show (rojo semántico)**, **walk-in (violeta)**. Huecos "libre" punteados dentro de la disponibilidad del barbero. Cancelled no se dibuja.
+- [x] Sub-rejilla de 15 min tenue de fondo (re-escalada a la ventana). Barba de 15 min legible (hora+nombre; servicio solo en combos ≥45 min para no apilar 3 líneas en 62px).
+- [x] Tokens Zentriq; **2 tokens nuevos** en `globals.css` (la maqueta usa violeta y sub-rejilla que Zentriq no tenía): `--color-walk`/`-tint`/`-border` (walk-in) + `--grid-15` (sub-rejilla, var directa en `:root` como `--grad-teal`). No colisionan con la escala default de Tailwind.
+- [x] `tsc` 0 · `eslint` 0 errores · `build` verde. Preview con 8 barberos + 19 citas relativas a "ahora" (harness mock): densidad, ventana 3h, "Ahora", nav ‹ ›, en-curso/no-show/walk-in/completada, barba 15 min — todo OK, consola sin errores. Shell y otras ramas intactos.
+
+**Lo que la maqueta no anticipó (marcado, no improvisado):** el panorama recibe las citas ya cargadas server-side (props), así que NO hay estado de carga en el render inicial — el **skeleton de carga** aplica al **polling** (llega en PR-4, cuando el cliente re-fetchea). El estado "atrasado" (border rojo + pulso) se deriva aquí de forma conservadora (confirmada cuya ventana ya pasó sin cerrar); su lógica fina (retrasos reportados, adjusted_starts_at) vive en la cola (PR-5).
 
 **Frontera:** NO reescribir server actions (se consumen). NO tocar `/staff`, `/staff/gestion`, owner/admin ni el flujo del bot. NO borrar `AssistantLayout` (barbero-gestión lo usa). Una pieza a la vez, cada una contra la maqueta congelada; reportar y esperar OK entre PRs.
 

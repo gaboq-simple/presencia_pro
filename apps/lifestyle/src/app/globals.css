@@ -36,6 +36,11 @@
   --color-red-tint:    #FBF1F0;             /* v5 --red-tint */
   --color-red-border:  #D98A85;             /* v5 --red-border */
 
+  /* ── Walk-in (violeta) — cita sin reserva; se distingue del resto en el panorama del asistente ── */
+  --color-walk:        #5B4CC4;             /* maqueta asistente --violet */
+  --color-walk-tint:   #ECEAF8;             /* maqueta asistente --violet-wash */
+  --color-walk-border: #A79EE6;             /* borde AA-safe derivado */
+
   /* ── Pasado — apagado por COLOR (no opacity): el borde rojo del no-show NO se atenúa ── */
   --color-past-bg:     #F0F2F2;             /* v5 --past-bg */
   --color-past-line:   #C7CBCB;             /* v5 --past-line */
@@ -64,6 +69,10 @@
  */
 :root {
   --grad-teal: linear-gradient(135deg, #00C2A8, #008F76);
+
+  /* Sub-rejilla de 15 min del panorama (asistente): estructura temporal silenciosa
+     de fondo. No es color plano de UI → var directa (como --grad-teal), no token @theme. */
+  --grid-15: rgba(21, 25, 27, 0.035);
 }
 
 @utility bg-hero-grad {
