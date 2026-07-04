@@ -310,7 +310,12 @@ export default function PanoramaTimeline({
 
       {/* ── Carriles ── */}
       {lanes.length === 0 ? (
-        <p className="p-6 text-sm text-ink-2">No hay barberos con horario para este día.</p>
+        <div className="flex flex-col items-center justify-center gap-1 px-6 py-16 text-center">
+          <b className="text-sm">Ningún barbero con turno hoy</b>
+          <p className="max-w-[36ch] text-xs text-ink-2">
+            No hay horarios asignados para este día. Revisa los turnos del equipo o elige otra fecha.
+          </p>
+        </div>
       ) : (
         <ul>
           {lanes.map(({ staff: s, blocks, gaps, hasAvail }) => (
@@ -330,7 +335,9 @@ export default function PanoramaTimeline({
                 <div className="min-w-0 leading-tight">
                   <b className="block truncate text-[12.5px] font-semibold">{s.name}</b>
                   <span className="text-[10px] text-faint">
-                    {hasAvail ? `${blocks.length} citas` : 'Sin horario'}
+                    {hasAvail
+                      ? `${blocks.length} ${blocks.length === 1 ? 'cita' : 'citas'}`
+                      : 'Sin turno'}
                   </span>
                 </div>
               </div>

@@ -103,6 +103,23 @@ export default function AssistantControlDesk({
 
   const today = isToday(date);
 
+  // Barberos del panorama: los que TIENEN TURNO HOY (availabilityToday != null →
+  // fila en staff_availability para el día), ordenados por actividad (más citas
+  // arriba — el asistente los vigila más). Un barbero con turno pero SIN citas SÍ
+  // aparece: su carril vacío = disponibilidad para encajar walk-ins, no ruido.
+  const apptCountByStaff = new Map<string, number>();
+  for (const a of initialAppointments) {
+    if (a.status === 'cancelled') continue;
+    apptCountByStaff.set(a.staff.id, (apptCountByStaff.get(a.staff.id) ?? 0) + 1);
+  }
+  const workingStaff = [...staffWithAvailability]
+    .filter((s) => s.availabilityToday !== null)
+    .sort(
+      (a, b) =>
+        (apptCountByStaff.get(b.id) ?? 0) - (apptCountByStaff.get(a.id) ?? 0) ||
+        a.name.localeCompare(b.name),
+    );
+
   return (
     <div className="min-h-dvh bg-canvas bg-grid text-ink">
       <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col gap-3 p-3 sm:p-4">
@@ -158,8 +175,8 @@ export default function AssistantControlDesk({
                 <span className="text-xs text-faint">Citas hoy</span>
               </div>
               <div className="flex flex-col leading-tight">
-                <b className="tabular-nums text-base">{staffWithAvailability.length}</b>
-                <span className="text-xs text-faint">Barberos</span>
+                <b className="tabular-nums text-base">{workingStaff.length}</b>
+                <span className="text-xs text-faint">Barberos hoy</span>
               </div>
             </div>
 
@@ -193,7 +210,7 @@ export default function AssistantControlDesk({
                 date={date}
                 timezone={timezone}
                 appointments={initialAppointments}
-                staff={staffWithAvailability}
+                staff={workingStaff}
               />
             </section>
 
