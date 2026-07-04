@@ -1305,8 +1305,8 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 **🔴 Hallazgo del arranque (corrige §7.1 del HANDOFF):** el §7.1 apuntaba a montar la mesa de control en la rama `role==='assistant'` de `/staff/page.tsx`. Eso quedó obsoleto tras **S6-UI-01** (#47, separación de rutas): en `origin/main` la vista del asistente **vive en `/dashboard`** (rama `role==='assistant'`, `dashboard/page.tsx`). **Decisión Gabriel (2026-07-04): divergir en `/dashboard`** — `AssistantControlDesk` reemplaza al `AssistantLayout` solo en esa rama; `/staff/gestion` (barbero) sigue con `AssistantLayout` **intacto** (su migración es decisión aparte, §7.6).
 
 **Partición de PRs (aprobada — chicos y verificables, cadence del barbero):**
-1. **Shell** — `AssistantControlDesk.tsx`, layout dos zonas (panorama scroll propio + cola sticky), montado en `/dashboard`. *Puro front.* ← **este PR**
-2. **Panorama** — `PanoramaTimeline.tsx`: carriles barbero×tiempo, ventana 3h navegable, "Ahora", densidad 8, sub-rejilla 15 min, citas reales. *Puro front.*
+1. **Shell** — `AssistantControlDesk.tsx`, layout dos zonas (panorama scroll propio + cola sticky), montado en `/dashboard`. *Puro front.* 🟢 done (PR-1, rama `feat/assistant-control-desk-shell`)
+2. **Panorama** — `PanoramaTimeline.tsx`: carriles barbero×tiempo, ventana 3h navegable, "Ahora", densidad 8, sub-rejilla 15 min, citas reales. *Puro front (lee props).* ← **este PR**
 3. **Gesto click-to-place** — levantar cita → huecos válidos por duración → chips de destino → "NO CABE". *Puro front (drop local).*
 4. **Cablear mutaciones** — drop → `rescheduleAppointment`; walk-in → `createAssistantAppointment`; polling → `refreshAssistantAppointments`; estados carga/error. *Toca actions (consume).*
 5. **Cola de acción** — `ActionQueue.tsx`: walk-in/atrasados/sugerencias 1-tap + acciones de tarjeta. *Mixto.*
@@ -1321,6 +1321,26 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 - [x] `/staff/gestion` (barbero) intacto — sigue usando `AssistantLayout`; `AssistantLayout.tsx` no borrado.
 - [x] Preview del shell verificado (harness temporal desechable con props mock; dos zonas a 1320px; consola sin errores; teardown limpio).
 
+**PR-2 (panorama) — criterios de aceptación:**
+- [x] `PanoramaTimeline.tsx` (nuevo): carriles horizontales barbero×tiempo, altura fija 62px, densidad 8 sin colapsar. Motor de ventana portado del §6 (idiomático React: posiciones derivadas de `winStart` en render, no `layout()` imperativo). `pctOf(min)=(min-winStart)/WIN*100`, `WIN=180`.
+- [x] Ventana 3h navegable: ‹ ›(±1h) + botón **"Ahora"** (resalta en teal cuando estás fuera de foco → invita a volver; verificado que recentra). Línea "ahora" roja + pastilla en el eje; eje con marcas cada 30 min (tabular-nums). Se oculta la línea "ahora" fuera de la ventana / en días ≠ hoy.
+- [x] Citas reales por props (`initialAppointments` = misma fuente que `AssistantLayout`; sin nueva query). Ancho = duración real. Estados por border-left: en-curso (teal), confirmada (neutral), completada (past/gris), atrasado (rojo + pulso), **no-show (rojo semántico)**, **walk-in (violeta)**. Huecos "libre" punteados dentro de la disponibilidad del barbero. Cancelled no se dibuja.
+- [x] Sub-rejilla de 15 min tenue de fondo (re-escalada a la ventana). Barba de 15 min legible (hora+nombre; servicio solo en combos ≥45 min para no apilar 3 líneas en 62px).
+- [x] Tokens Zentriq; **2 tokens nuevos** en `globals.css` (la maqueta usa violeta y sub-rejilla que Zentriq no tenía): `--color-walk`/`-tint`/`-border` (walk-in) + `--grid-15` (sub-rejilla, var directa en `:root` como `--grad-teal`). No colisionan con la escala default de Tailwind.
+- [x] `tsc` 0 · `eslint` 0 errores · `build` verde. Preview con 8 barberos + 19 citas relativas a "ahora" (harness mock): densidad, ventana 3h, "Ahora", nav ‹ ›, en-curso/no-show/walk-in/completada, barba 15 min — todo OK, consola sin errores. Shell y otras ramas intactos.
+
+**PR-2 · resolución del fetch real (3 decisiones de Gabriel):**
+- [x] **Rango = día completo, ventana 3h = recorte de presentación en cliente.** El fetch ya trae el día entero (`getDayAppointments`, misma fuente); navegar la ventana (‹ ›/"Ahora") es instantáneo, sin re-fetch. Confirmado: ya era así por arquitectura.
+- [x] **Barberos = los que TIENEN TURNO HOY**, ordenados por actividad (más citas arriba). Filtro `availabilityToday !== null` (fila en `staff_availability` para el `day_of_week` — misma tabla del horario semanal del barbero) + sort por conteo de citas desc. Header pasó a "Barberos hoy".
+- [x] **Barbero libre hoy SÍ aparece** (turno pero sin citas → carril vacío = disponibilidad para walk-ins, no ruido). No se filtra por "tiene citas".
+- [x] **Estado vacío** implementado (ningún barbero con turno hoy → mensaje sobrio "Ningún barbero con turno hoy"). **Loading/error NO** en PR-2 (ver nota) — se marcan diferidos a PR-4.
+- [x] **Verificado por RUTA REAL** (no solo harness): seed reversible de 8 barberos "Test Densidad" con turno hoy + 13 citas + `assistant_token` temporal → login `/dashboard?token=…&role=assistant` (proxy firma cookie `ls_session`) → panorama con **10 carriles** (Carlos+Andrés reales + 8 seed), ordenados por actividad (ocupados arriba, libres Andrés/TD7/TD8 abajo), estados por color reales (en-curso/atrasado/no-show/walk-in/completada), ventana 3h navegable. **Seed 100% revertido** (0 filas residuales, token restaurado a NULL; demo original intacto: 3 staff, 11 disponibilidades, 8 citas). tsc 0 · lint 0 · build ✓.
+
+**Lo que la maqueta no anticipó (marcado, no improvisado):**
+- **Skeleton de carga:** el panorama recibe las citas ya cargadas server-side (props) → NO hay estado de carga en el render inicial. El skeleton aplica al **polling** (PR-4, cuando el cliente re-fetchea). Igual el **error de fetch** → PR-4.
+- **Estado "atrasado"** (border rojo + pulso): derivado aquí de forma conservadora (confirmada cuya ventana ya pasó sin cerrar); su lógica fina (retrasos reportados, `adjusted_starts_at`) vive en la cola (PR-5).
+- 🟠 **HALLAZGO (pre-existente, query compartida) — límite de día en UTC en `getDayAppointments`:** filtra `starts_at` entre `${date}T00:00:00` y `T23:59:59` interpretados en **UTC**, no en la tz del negocio. Para un negocio UTC-6 (America/Mexico_City), las citas **≥18:00 locales caen al día UTC siguiente y se descartan** (y las de 18:00–24:00 del día previo se colarían como "hoy"). Detectado en el seed (una cita 18:13 no apareció). **AssistantLayout usa la MISMA query** → mismo bug ahí. Fuera del alcance de PR-2 (se reusa la fuente por decisión de Gabriel); registrado en Backlog post-sprint para arreglo propio (usar límites en tz del negocio).
+
 **Frontera:** NO reescribir server actions (se consumen). NO tocar `/staff`, `/staff/gestion`, owner/admin ni el flujo del bot. NO borrar `AssistantLayout` (barbero-gestión lo usa). Una pieza a la vez, cada una contra la maqueta congelada; reportar y esperar OK entre PRs.
 
 **Notas de ejecución:**
@@ -1332,6 +1352,9 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 ## Backlog post-sprint (NO trabajar en este sprint)
 
 Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra al sprint sin renegociación.
+
+### 🟠 `getDayAppointments` — límite de día en UTC, no en tz del negocio (hallazgo S6-UI-02 PR-2)
+`getDayAppointments(businessId, date)` filtra `starts_at` entre `${date}T00:00:00` y `${date}T23:59:59` **sin offset de zona** → Postgres los interpreta en UTC. Para un negocio en `America/Mexico_City` (UTC-6), las citas **≥18:00 hora local caen al día UTC siguiente y se descartan**; simétricamente, las citas de 18:00–24:00 del día anterior se colarían como "hoy". Impacto: la agenda del día (dashboard dueño/asistente **y** el nuevo panorama, que reusan la misma query) **pierde las citas de la tarde/noche** — crítico para una barbería que opera de tarde. Detectado al seedear una cita de 18:13 que no apareció en el panorama. Fix propuesto: calcular los límites `[00:00, 24:00)` en la tz del negocio (`businesses.timezone`) y compararlos como `timestamptz`, o usar `starts_at AT TIME ZONE tz`. Afecta también métricas de ingresos del día si se agregan por esta query. Tarea propia (toca infra compartida + tests).
 
 ### 🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path de agendamiento
 
