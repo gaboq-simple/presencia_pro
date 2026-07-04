@@ -263,15 +263,71 @@ type RawMetricsRow = {
 // ─── Query: citas del día ─────────────────────────────────────────────────────
 
 /**
+ * Instante UTC que corresponde a una hora-de-pared (naive) en una tz IANA.
+ * Usa el offset real de la tz en ese instante (México es UTC-6 fijo; maneja DST
+ * donde aplique, salvo el borde exacto de una transición a medianoche — irrelevante
+ * para límites de día en producción).
+ */
+function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: string): Date {
+  const asIfUtc = new Date(`${dateStr}T${timeStr}Z`).getTime();
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(asIfUtc));
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  const localAsUtc = Date.UTC(
+    Number(m['year']),
+    Number(m['month']) - 1,
+    Number(m['day']),
+    Number(m['hour'] === '24' ? '0' : m['hour']),
+    Number(m['minute']),
+    Number(m['second']),
+  );
+  return new Date(asIfUtc - (localAsUtc - asIfUtc));
+}
+
+/**
+ * Rango `[inicio, fin)` del día `date` en la tz del negocio, como instantes UTC ISO.
+ * El día local va de 00:00 a 00:00 del día siguiente.
+ */
+function localDayRangeUtc(date: string, timeZone: string): { start: string; end: string } {
+  const next = new Date(`${date}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const nextStr = next.toISOString().slice(0, 10);
+  return {
+    start: zonedWallTimeToUtc(date, '00:00:00', timeZone).toISOString(),
+    end: zonedWallTimeToUtc(nextStr, '00:00:00', timeZone).toISOString(),
+  };
+}
+
+/**
  * Retorna las citas de un día dado con staff, servicio y cliente.
+ * El día se acota a la **tz del negocio** (`businesses.timezone`), no a UTC: sin
+ * esto, un negocio UTC-6 perdía las citas ≥18:00 locales (caían al día UTC siguiente).
  * @param businessId - UUID del negocio (del staff autenticado — nunca del cliente)
- * @param date - 'YYYY-MM-DD' en hora local del servidor
+ * @param date - 'YYYY-MM-DD' en la tz del negocio
  */
 export async function getDayAppointments(
   businessId: string,
   date: string,
 ): Promise<DashboardAppointment[]> {
   const supabase = getServiceClient();
+
+  // Límites del día en la tz del negocio → instantes UTC para filtrar timestamptz.
+  const { data: bizRow } = await supabase
+    .from('businesses')
+    .select('timezone')
+    .eq('id', businessId)
+    .maybeSingle();
+  const timeZone = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
+  const { start, end } = localDayRangeUtc(date, timeZone);
 
   const { data, error } = await supabase
     .from('appointments')
@@ -290,8 +346,8 @@ export async function getDayAppointments(
       modified_by:modified_by_staff_id(id, name)
     `)
     .eq('business_id', businessId)
-    .gte('starts_at', `${date}T00:00:00`)
-    .lte('starts_at', `${date}T23:59:59`)
+    .gte('starts_at', start)
+    .lt('starts_at', end)
     .order('starts_at');
 
   if (error) throw new Error(`getDayAppointments failed: ${error.message}`);

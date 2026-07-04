@@ -1349,12 +1349,33 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
+#### S6-DATA-01 — `getDayAppointments`: límite de día en tz del negocio, no en UTC 🟢 done (2026-07-04, rama `fix/getdayappointments-timezone`)
+**Origen:** hallazgo del seed de verificación de S6-UI-02 PR-2 (una cita de 18:13 local no apareció en el panorama). Gabriel lo **priorizó e intercaló ANTES del gesto** (PR-3): es un fix chico de fondo que desbloquea que el panorama recién mergeado muestre las citas de la tarde de verdad — no conviene construir el gesto sobre un panorama que descarta las citas ≥18:00.
+
+**El bug:** `getDayAppointments(businessId, date)` filtraba `starts_at` entre `${date}T00:00:00` y `${date}T23:59:59` **sin offset de zona** → Postgres los interpreta en UTC. Para un negocio UTC-6 (`America/Mexico_City`), las citas **≥18:00 locales caían al día UTC siguiente y se descartaban**; y las de 18:00–24:00 del día previo se colaban como "hoy".
+
+**El fix:** dentro de `getDayAppointments` se resuelve `businesses.timezone` y se calculan los límites `[00:00, 24:00)` del día **en esa tz** como instantes UTC (`zonedWallTimeToUtc`/`localDayRangeUtc`, helpers `Intl` puros), filtrando `starts_at >= inicio` y `< fin`. **Self-contained: sin cambiar firma ni call-sites** → los 4 consumidores se benefician sin tocarlos.
+
+**Query COMPARTIDA — 4 consumidores mapeados (ninguno dependía del bug):** (1) `dashboard/page.tsx` rama asistente (el panorama nuevo), (2) `dashboard/page.tsx` rama owner/admin (`DashboardLayout`), (3) `assistant-actions.ts:refreshAssistantAppointments` (polling), (4) `staff/gestion/page.tsx` (barbero → `AssistantLayout`). Todos sufrían el mismo bug; el fix los cura por igual.
+
+**Verificado:**
+- Matemática del helper (Node puro): 18:30/20:00 locales → DENTRO; 23:30 del día previo → FUERA (antes se colaba).
+- **DB old-vs-new** (seed reversible de 2 citas 18:30 y 20:00 locales): filtro UTC viejo encuentra **0**, filtro tz-negocio nuevo encuentra **2**.
+- **Ruta real** (panorama vía token): la línea "Test TZ Tarde" muestra las **2 citas de tarde** (6:30 PM y 8:00 PM visibles al navegar la ventana) — antes se descartaban.
+- Seed 100% revertido (demo intacto: 3 staff, token NULL). `tsc` 0 · `eslint` 0 errores · `build` verde.
+
+**Nota:** `computeDayRevenue` opera sobre los appointments ya traídos por esta query → también se corrige de rebote (ya no pierde ingresos de citas de tarde). No se agregaron tests unitarios (no hay suite para `dashboard.types.ts`; la lógica pura del helper se validó por script + DB); un test del helper de tz queda como mejora menor.
+
+**Frontera:** solo `getDayAppointments` + helpers privados. NO se tocó ningún consumidor, ni el schema, ni otras queries.
+
+---
+
 ## Backlog post-sprint (NO trabajar en este sprint)
 
 Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra al sprint sin renegociación.
 
-### 🟠 `getDayAppointments` — límite de día en UTC, no en tz del negocio (hallazgo S6-UI-02 PR-2)
-`getDayAppointments(businessId, date)` filtra `starts_at` entre `${date}T00:00:00` y `${date}T23:59:59` **sin offset de zona** → Postgres los interpreta en UTC. Para un negocio en `America/Mexico_City` (UTC-6), las citas **≥18:00 hora local caen al día UTC siguiente y se descartan**; simétricamente, las citas de 18:00–24:00 del día anterior se colarían como "hoy". Impacto: la agenda del día (dashboard dueño/asistente **y** el nuevo panorama, que reusan la misma query) **pierde las citas de la tarde/noche** — crítico para una barbería que opera de tarde. Detectado al seedear una cita de 18:13 que no apareció en el panorama. Fix propuesto: calcular los límites `[00:00, 24:00)` en la tz del negocio (`businesses.timezone`) y compararlos como `timestamptz`, o usar `starts_at AT TIME ZONE tz`. Afecta también métricas de ingresos del día si se agregan por esta query. Tarea propia (toca infra compartida + tests).
+### ✅ `getDayAppointments` límite de día en UTC → **PROMOVIDO a S6-DATA-01 (done, 2026-07-04)**
+Gabriel lo priorizó e intercaló antes del gesto (PR-3 de S6-UI-02). Ver el bloque **S6-DATA-01** en la sección de tareas. Ya no es backlog.
 
 ### 🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path de agendamiento
 
