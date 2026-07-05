@@ -1354,9 +1354,9 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 - [x] **Exceptions** de fecha (`getDayExceptions`, query nueva): día libre → saca al barbero del panorama; horario especial → reemplaza su ventana.
 - [x] **Verificado por ruta real** (seed con descanso 19:00–19:30 + bloqueo aprobado 20:00–20:30): los chips **saltan ambos** (chip 20:00 desaparece tras cargar el bloqueo); contraste vs. un barbero sin restricciones (chips 15-min continuos). 2 bandas "no disp." renderizadas.
 
-**Dos bugs descubiertos al cablear (arreglados en este PR):**
-- 🔴 **`isTodayInTz` (mi desk):** `isToday` usaba fecha **UTC** → entre 18:00–24:00 en México el header mostraba la fecha en vez de "Hoy" y perdía el pip "Ahora". Fijado a la tz del negocio (`en-CA` locale). Bug propio del componente nuevo.
-- 🟠 **`getStaffBlocksForDay` (query compartida, family S6-DATA-01):** filtraba el día en **UTC** → perdía los bloqueos ≥18:00 locales (por eso el chip 20:00 aparecía). Fijado a límites en tz del negocio (reusa `localDayRangeUtc`, ahora exportado). **Beneficia también a AssistantLayout/gestion** (timeline del barbero). *Ojo Gabriel: es un fix de query compartida bundleado en el PR del gesto — si preferís mantenerlo separado (como S6-DATA-01), lo extraigo a su propio PR.*
+**Dos bugs de tz descubiertos al cablear:**
+- 🟢 **`isTodayInTz`** — queda en ESTE PR: es un helper **cliente local del desk del asistente**, NO una query compartida (no toca barbero/dueño). `isToday` usaba fecha UTC → entre 18:00–24:00 en México el header mostraba la fecha en vez de "Hoy" y perdía el pip "Ahora". Fijado a la tz del negocio (`en-CA` locale).
+- 🟠 **`getStaffBlocksForDay`** — **EXTRAÍDO a su propio PR → S6-DATA-03 (#65, mergeado)** por ser query compartida (AssistantLayout/gestion/dueño, family S6-DATA-01). No vive en este PR; el panorama consume el resultado ya corregido.
 
 **Lo que la maqueta no anticipó (marcado):** el "colocar" alimenta `rescheduleAppointment` con la hora-de-pared del negocio, pero la action la interpreta en la **tz del servidor** (`setHours` local) — **S6-DATA-02** (Backlog). El FLIP/"fly" → transición CSS; cancel por click-en-fondo → refinamiento (hay Esc + Cancelar + tocar-de-nuevo). Exceptions implementadas pero verificadas por código, no por seed en vivo.
 
@@ -1368,7 +1368,7 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 **El choque y su solución (Opción C — investigación read-only aprobada por Gabriel):** la constraint DB `no_overlapping_appointments` (EXCLUDE gist, migración 016 — última defensa anti-doble-reserva del bot) prohíbe TODO solape. Se investigaron 3 opciones (A quitar / B no permitir / C columna condicionada); Gabriel eligió **C**. **Migración 046**: `allow_overlap boolean DEFAULT false` + se recrea el EXCLUDE con `WHERE (status NOT IN cancelled AND allow_overlap = false)`. **Solo las filas marcadas `allow_overlap=true` quedan exentas**, y **solo `rescheduleAppointment(force=true)` las marca** — solo cuando un HUMANO fuerza. El bot, `createAssistantAppointment`, `PATCH /api/appointments` nunca lo setean (default false) → **siguen 100% protegidos** contra el solape accidental. Distingue intencional-humano vs accidental-automático sin abrir la puerta a todos.
 
 **PR-3 — solape blando (Opción C) — criterios:**
-- [x] **Migración 046** aplicada al demo: columna + constraint condicionado. Verificado en DB: solape normal → **bloqueado (23P01)**; solape con `allow_overlap=true` → **permitido**.
+- [x] **Migración 046** aplicada al demo: columna + constraint condicionado. Verificado en DB: solape normal → **bloqueado (23P01)**; solape con `allow_overlap=true` → **permitido**. ⚠️ **Deuda de setup (no bloqueante):** ya está aplicada al proyecto demo; si se **recrea el proyecto Supabase**, hay que **re-aplicar `046_allow_overlap.sql`** (mismo caveat que los crons de edge functions).
 - [x] **`rescheduleAppointment` param `force`**: salta el pre-check de solape + marca `allow_overlap=true`; reacomodo limpio resetea a false. Gate 2b y notificaciones intactas.
 - [x] **Cliente**: `laneDrops` clasifica limpio (teal) / solape (ámbar ⚠ con minutos y cliente); frontera dura = turno − descansos − bloqueos. Toast de solape (`warn`, no frena). Tokens ámbar nuevos en `globals.css`.
 - [x] **Confirmación consciente en contexto** (decisión Gabriel: consciente pero buen UX, sin formulario): tocar un chip ámbar NO mueve — abre un prompt en la barra de modo-mover "⚠ Se encima N min con [cliente] a las HH:MM" + **"Encajar igual"** (1 tap → mueve) / **"Elegir otra hora"** (vuelve a los chips, no mueve). Chip limpio (teal) mueve directo. Esc con prompt abierto → cancela solo el prompt.
@@ -1403,6 +1403,11 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 **Nota:** `computeDayRevenue` opera sobre los appointments ya traídos por esta query → también se corrige de rebote (ya no pierde ingresos de citas de tarde). No se agregaron tests unitarios (no hay suite para `dashboard.types.ts`; la lógica pura del helper se validó por script + DB); un test del helper de tz queda como mejora menor.
 
 **Frontera:** solo `getDayAppointments` + helpers privados. NO se tocó ningún consumidor, ni el schema, ni otras queries.
+
+---
+
+#### S6-DATA-03 — `getStaffBlocksForDay`: límite de día en tz del negocio, no en UTC 🟢 done (2026-07-04, PR #65 mergeado)
+**Origen:** mismo bug que S6-DATA-01, en otra **query compartida**. Detectado al cablear el gesto (S6-UI-02 PR-3): un bloqueo aprobado 20:00–20:30 local no se restaba de los destinos porque `getStaffBlocksForDay` lo descartaba. **El bug:** filtraba el día con `${date}T00:00:00`..`T23:59:59` en **UTC** → para un negocio UTC-6, los bloqueos ≥18:00 locales caían al día UTC siguiente. **El fix:** resuelve `businesses.timezone` + usa `localDayRangeUtc` (exportado desde `dashboard.types`) para los límites en tz. **Query compartida** — la usan el timeline del asistente (`AssistantLayout`), del barbero (`/staff/gestion`) y el panorama nuevo → los tres recuperan sus bloqueos de tarde. **Extraído del PR del gesto (#64)** para historia/revert independiente (decisión Gabriel: no mezclar tz-fix con el gesto). `tsc` 0 · `eslint` 0.
 
 ---
 
