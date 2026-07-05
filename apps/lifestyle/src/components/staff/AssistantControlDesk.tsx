@@ -344,23 +344,29 @@ export default function AssistantControlDesk({
 
     mutatingRef.current = true;
     try {
-      await rescheduleAppointment({
+      const res = await rescheduleAppointment({
         appointmentId: apptId,
         newDate: date,
         newStartTime: `${String(Math.floor(newStartMin / 60)).padStart(2, '0')}:${String(newStartMin % 60).padStart(2, '0')}`,
         newStaffId,
         force: opts?.force, // solape intencional forzado por la recepción
       });
+      // Rechazo esperado (gate 2b "solo tus citas", solape, cita no encontrada) →
+      // llega como { error }, NO throw. Revertir el optimista y avisar inline.
+      if (res?.error) {
+        setAppointments(snapshot); // revert
+        setToast({ msg: res.error, kind: 'err' });
+        return;
+      }
       // Aviso sutil de solape forzado (no frena el flujo).
       const msg = opts?.force
         ? `Movida a ${newStaffName} · ${fmtHora(newStartMin)} · se solapa ${opts.overlapMin} min con ${opts.overlapName}`
         : `Movida a ${newStaffName} · ${fmtHora(newStartMin)}`;
       setToast({ msg, kind: opts?.force ? 'warn' : 'ok' });
       router.refresh(); // reconciliar con la verdad del servidor
-    } catch (err) {
-      setAppointments(snapshot); // revert
-      const msg = err instanceof Error ? err.message : 'No se pudo reagendar';
-      setToast({ msg, kind: 'err' });
+    } catch {
+      setAppointments(snapshot); // revert — fallo de sistema, no tumba la mesa
+      setToast({ msg: 'No se pudo reagendar', kind: 'err' });
     } finally {
       mutatingRef.current = false;
     }
@@ -542,13 +548,18 @@ export default function AssistantControlDesk({
     setAppointments((cur) => cur.map((a) => (a.id === apptId ? { ...a, status: 'no_show' } : a)));
     mutatingRef.current = true;
     try {
-      await noShowAppointment(apptId);
+      const res = await noShowAppointment(apptId);
+      // Rechazo esperado (gate 2b, cita no encontrada) → { error }, no throw.
+      if (res?.error) {
+        setAppointments(snapshot); // revert
+        setToast({ msg: res.error, kind: 'err' });
+        return;
+      }
       setToast({ msg: `${appt.customer?.name ?? 'Cliente'} marcado como no llegó`, kind: 'ok' });
       router.refresh();
-    } catch (err) {
-      setAppointments(snapshot); // revert
-      const msg = err instanceof Error ? err.message : 'No se pudo marcar';
-      setToast({ msg, kind: 'err' });
+    } catch {
+      setAppointments(snapshot); // revert — fallo de sistema, no tumba la mesa
+      setToast({ msg: 'No se pudo marcar', kind: 'err' });
     } finally {
       mutatingRef.current = false;
     }
