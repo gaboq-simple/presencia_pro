@@ -19,12 +19,18 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DashboardAppointment, DayException } from '@/lib/dashboard.types';
 import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
-import { rescheduleAppointment } from '@/app/staff/assistant-actions';
-import PanoramaTimeline from './PanoramaTimeline';
+import {
+  rescheduleAppointment,
+  refreshAssistantAppointments,
+  createAssistantAppointment,
+} from '@/app/staff/assistant-actions';
+import PanoramaTimeline, { type MoveState, type WalkinRequest, type PlaceOpts } from './PanoramaTimeline';
+
+const POLL_MS = 20_000; // 20s — auto-refresh de la mesa de control (se pausa en gesto)
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 
@@ -60,7 +66,11 @@ export type AssistantControlDeskProps = {
   staffWithAvailability: StaffWithAvailability[];// barberos con horario (para panorama)
   initialStaffBlocks: StaffBlockForDay[];        // bloques aprobados del día
   dayExceptions: DayException[];                 // día libre / horario especial por fecha
+  requireCustomerPhone: boolean;                 // businesses.require_customer_phone (walk-in)
 };
+
+// Servicio del catálogo (para el picker del walk-in).
+type CatalogService = { id: string; name: string; duration_minutes: number };
 
 // ─── Helpers de fecha ─────────────────────────────────────────────────────────
 
@@ -114,12 +124,14 @@ function fmtHora(min: number): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AssistantControlDesk({
+  businessId,
   date,
   timezone,
   initialAppointments,
   staffWithAvailability,
   initialStaffBlocks,
   dayExceptions,
+  requireCustomerPhone,
 }: AssistantControlDeskProps) {
   const router = useRouter();
 
@@ -146,13 +158,36 @@ export default function AssistantControlDesk({
 
   const today = isTodayInTz(date, timezone);
 
-  // Citas en estado local: sembradas de props (server) para poder mover en optimista
-  // y (a futuro, PR-4) refrescar por polling. Se re-siembra cuando cambian las props
-  // (navegación de fecha o router.refresh()).
+  // Citas en estado local: sembradas de props (server) para el optimismo del gesto
+  // y el polling. Se re-siembra cuando cambian las props (navegación de fecha o
+  // router.refresh()).
   const [appointments, setAppointments] = useState<DashboardAppointment[]>(initialAppointments);
   useEffect(() => {
     setAppointments(initialAppointments);
   }, [initialAppointments]);
+
+  // ── Guardas del polling: NUNCA refrescar a mitad de un gesto o una mutación ──
+  const interactingRef = useRef(false); // el panorama tiene una cita levantada / walk-in en curso
+  const mutatingRef = useRef(false);    // hay un reschedule/create en vuelo
+  const dateRef = useRef(date);
+  dateRef.current = date;
+
+  // Polling cada 20s — refresca las citas del día sin recargar (cita nueva del bot,
+  // cambio de otro dispositivo). Se SALTA si hay un gesto en curso o una mutación en
+  // vuelo → no le regenera el panorama al asistente a mitad de un reacomodo.
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (interactingRef.current || mutatingRef.current) return;
+      try {
+        const fresh = await refreshAssistantAppointments(dateRef.current);
+        // Re-chequear el guard: el asistente pudo empezar un gesto durante el await.
+        if (!interactingRef.current && !mutatingRef.current) setAppointments(fresh);
+      } catch {
+        // silencioso — el próximo tick reintenta
+      }
+    }, POLL_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // Toast breve para confirmar/errar el reagendado.
   const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' | 'warn' } | null>(null);
@@ -161,6 +196,46 @@ export default function AssistantControlDesk({
     const id = setTimeout(() => setToast(null), 3500);
     return () => clearTimeout(id);
   }, [toast]);
+
+  // ── Walk-in a mano ─────────────────────────────────────────────────────────
+  const [walkin, setWalkin] = useState<WalkinRequest | null>(null); // gesto de colocar activo
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [services, setServices] = useState<CatalogService[]>([]);
+  const [wiName, setWiName] = useState('');
+  const [wiPhone, setWiPhone] = useState('');
+  const [wiServiceId, setWiServiceId] = useState('');
+
+  // Catálogo de servicios (lazy, al abrir la hoja) — para el picker de servicio.
+  useEffect(() => {
+    if (!sheetOpen || services.length > 0) return;
+    fetch(`/api/catalog?businessId=${businessId}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((body: { services?: CatalogService[] }) => {
+        const svc = body.services ?? [];
+        setServices(svc);
+        if (svc[0] && !wiServiceId) setWiServiceId(svc[0].id);
+      })
+      .catch(() => {});
+  }, [sheetOpen, businessId, services.length, wiServiceId]);
+
+  function startWalkin() {
+    const name = wiName.trim();
+    if (!name) return; // nombre requerido
+    if (requireCustomerPhone && !wiPhone.trim()) return; // teléfono requerido por el negocio
+    // Servicio opcional → default al primero del catálogo (su duración). Su serviceId
+    // es real (createAssistantAppointment lo exige); la duración ilumina los huecos.
+    const svc = services.find((s) => s.id === wiServiceId) ?? services[0];
+    setWalkin({
+      serviceId: svc?.id ?? '',
+      dur: svc?.duration_minutes ?? 30,
+      name,
+      service: svc?.name ?? 'Walk-in',
+      phone: wiPhone.trim() || undefined,
+    });
+    setSheetOpen(false);
+    setWiName('');
+    setWiPhone('');
+  }
 
   // Barberos del panorama: los que TIENEN TURNO HOY (availabilityToday != null →
   // fila en staff_availability para el día), ordenados por actividad (más citas
@@ -197,14 +272,22 @@ export default function AssistantControlDesk({
         a.name.localeCompare(b.name),
     );
 
-  // Drop del gesto → reagendar. Optimista (la cita "vuela" ya) + revert si la
-  // action falla (conflicto de solape, etc.). rescheduleAppointment tiene el gate
-  // 2b (barbero solo sus citas; recepción sin restricción).
-  async function handleMove(
+  // Drop del gesto → despacha por tipo de sujeto: reacomodo de cita existente o
+  // colocación de un walk-in nuevo. Ambos: optimista + revert si el server rechaza.
+  function handlePlace(move: MoveState, newStaffId: string, newStartMin: number, opts?: PlaceOpts) {
+    if (move.kind === 'reschedule') {
+      void handleReschedule(move.apptId, newStaffId, newStartMin, opts);
+    } else {
+      void handleWalkinPlace(move, newStaffId, newStartMin, opts);
+    }
+  }
+
+  // Reacomodo → rescheduleAppointment (gate 2b; recepción sin restricción).
+  async function handleReschedule(
     apptId: string,
     newStaffId: string,
     newStartMin: number,
-    opts?: { force: boolean; overlapMin: number; overlapName: string },
+    opts?: PlaceOpts,
   ) {
     const snapshot = appointments;
     const appt = snapshot.find((a) => a.id === apptId);
@@ -232,6 +315,7 @@ export default function AssistantControlDesk({
       ),
     );
 
+    mutatingRef.current = true;
     try {
       await rescheduleAppointment({
         appointmentId: apptId,
@@ -250,6 +334,74 @@ export default function AssistantControlDesk({
       setAppointments(snapshot); // revert
       const msg = err instanceof Error ? err.message : 'No se pudo reagendar';
       setToast({ msg, kind: 'err' });
+    } finally {
+      mutatingRef.current = false;
+    }
+  }
+
+  // Walk-in → createAssistantAppointment (source='walkin'). Optimista con una cita
+  // sintética + revert si el server rechaza (teléfono requerido, tope, solape sin
+  // forzar…). createAssistantAppointment devuelve { error } de cara al usuario.
+  async function handleWalkinPlace(
+    move: Extract<MoveState, { kind: 'walkin' }>,
+    newStaffId: string,
+    newStartMin: number,
+    opts?: PlaceOpts,
+  ) {
+    const snapshot = appointments;
+    const startIso = wallMinToIso(date, newStartMin, timezone);
+    const endIso = new Date(Date.parse(startIso) + move.dur * 60_000).toISOString();
+    const newStaffName = workingStaff.find((s) => s.id === newStaffId)?.name ?? '';
+    const tempId = `temp-walkin-${startIso}`;
+
+    // Optimista: cita sintética (se reconcilia con router.refresh tras el create).
+    const optimistic = {
+      id: tempId,
+      starts_at: startIso,
+      ends_at: endIso,
+      status: 'walkin',
+      source: 'walkin',
+      notes: null,
+      staff: { id: newStaffId, name: newStaffName },
+      service: { id: move.serviceId, name: move.service, duration_minutes: move.dur, price: 0, currency: 'MXN' },
+      customer: { id: tempId, name: move.name, phone: move.phone ?? null },
+      created_by: null,
+      modified_by: null,
+      modified_at: null,
+      allow_overlap: opts?.force === true,
+    } as unknown as DashboardAppointment;
+    setAppointments((cur) => [...cur, optimistic]);
+
+    mutatingRef.current = true;
+    try {
+      const res = await createAssistantAppointment({
+        staffId: newStaffId,
+        serviceId: move.serviceId,
+        startsAt: startIso,
+        endsAt: endIso,
+        source: 'walkin',
+        customerName: move.name,
+        customerPhone: move.phone,
+        force: opts?.force,
+      });
+      if (res.error) {
+        setAppointments(snapshot); // revert
+        setToast({ msg: res.error, kind: 'err' });
+        return;
+      }
+      const overlapNote = opts?.force ? ` · se solapa ${opts.overlapMin} min con ${opts.overlapName}` : '';
+      const flagNote = res.warning ? ` · ⚠ ${res.warning}` : '';
+      setToast({
+        msg: `Walk-in de ${move.name} → ${newStaffName} · ${fmtHora(newStartMin)}${overlapNote}${flagNote}`,
+        kind: opts?.force || res.warning ? 'warn' : 'ok',
+      });
+      router.refresh();
+    } catch (err) {
+      setAppointments(snapshot); // revert
+      const msg = err instanceof Error ? err.message : 'No se pudo crear el walk-in';
+      setToast({ msg, kind: 'err' });
+    } finally {
+      mutatingRef.current = false;
     }
   }
 
@@ -316,7 +468,7 @@ export default function AssistantControlDesk({
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              {/* Acciones del header — se cablean en sus PRs (buscar → PR-5, nueva cita → PR-4). */}
+              {/* Buscar cliente → PR-5 (cola). */}
               <button
                 disabled
                 title="Disponible en la próxima iteración"
@@ -325,11 +477,11 @@ export default function AssistantControlDesk({
                 Buscar cliente
               </button>
               <button
-                disabled
-                title="Disponible en la próxima iteración"
-                className="cursor-not-allowed rounded-pill border border-line bg-canvas px-3 py-1.5 text-sm font-medium text-faint"
+                onClick={() => setSheetOpen(true)}
+                disabled={walkin !== null}
+                className="rounded-pill border border-teal-border bg-tint-1 px-3 py-1.5 text-sm font-semibold text-teal-ink transition hover:bg-tint-2 disabled:opacity-40"
               >
-                + Nueva cita
+                + Walk-in
               </button>
             </div>
           </header>
@@ -347,7 +499,10 @@ export default function AssistantControlDesk({
                 appointments={appointments}
                 staff={workingStaff}
                 staffBlocks={initialStaffBlocks}
-                onMove={handleMove}
+                onPlace={handlePlace}
+                walkinRequest={walkin}
+                onWalkinConsumed={() => setWalkin(null)}
+                onInteractingChange={(active) => { interactingRef.current = active; }}
               />
             </section>
 
@@ -373,6 +528,77 @@ export default function AssistantControlDesk({
           </div>
         </div>
       </div>
+
+      {/* Hoja de captura del walk-in (mínima: nombre + tel + servicio) */}
+      {sheetOpen && (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-ink/30 sm:items-center"
+          onClick={() => setSheetOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-t-card border border-line bg-card p-5 shadow-hero sm:rounded-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold">Nuevo walk-in</h2>
+            <p className="mt-0.5 text-xs text-faint">
+              Captura lo mínimo; después tocás el hueco donde encaja.
+            </p>
+            <div className="mt-4 flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">Nombre</span>
+                <input
+                  value={wiName}
+                  onChange={(e) => setWiName(e.target.value)}
+                  autoFocus
+                  placeholder="Cliente"
+                  className="rounded-pill border border-line px-3 py-2 text-sm outline-none focus:border-teal-border"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">
+                  Teléfono {requireCustomerPhone ? <span className="text-red-ink">(requerido)</span> : <span className="text-faint">(opcional)</span>}
+                </span>
+                <input
+                  value={wiPhone}
+                  onChange={(e) => setWiPhone(e.target.value)}
+                  inputMode="tel"
+                  placeholder="55…"
+                  className="rounded-pill border border-line px-3 py-2 text-sm tabular-nums outline-none focus:border-teal-border"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">Servicio <span className="text-faint">(opcional)</span></span>
+                <select
+                  value={wiServiceId}
+                  onChange={(e) => setWiServiceId(e.target.value)}
+                  className="rounded-pill border border-line px-3 py-2 text-sm outline-none focus:border-teal-border"
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} · {s.duration_minutes} min
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setSheetOpen(false)}
+                className="rounded-pill border border-line px-4 py-2 text-sm font-semibold text-ink-2 transition hover:bg-canvas"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={startWalkin}
+                disabled={!wiName.trim() || (requireCustomerPhone && !wiPhone.trim())}
+                className="rounded-pill bg-teal px-4 py-2 text-sm font-bold text-card shadow-card transition hover:opacity-90 disabled:opacity-40"
+              >
+                Elegir hueco →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast de reagendado (confirmación / error) */}
       {toast && (

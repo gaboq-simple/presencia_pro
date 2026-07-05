@@ -410,6 +410,17 @@ export type DayException = {
  * Excepciones de fecha específica (staff_schedule_exceptions) para un día del negocio.
  * Consumido por la mesa de control para acotar la disponibilidad del panorama.
  */
+/** businesses.require_customer_phone — si el negocio exige teléfono al agendar (walk-in). */
+export async function getRequireCustomerPhone(businessId: string): Promise<boolean> {
+  const supabase = getServiceClient();
+  const { data } = await supabase
+    .from('businesses')
+    .select('require_customer_phone')
+    .eq('id', businessId)
+    .maybeSingle();
+  return (data as { require_customer_phone: boolean } | null)?.require_customer_phone ?? false;
+}
+
 export async function getDayExceptions(
   businessId: string,
   date: string,
