@@ -1360,7 +1360,18 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 **Lo que la maqueta no anticipó (marcado):** el "colocar" alimenta `rescheduleAppointment` con la hora-de-pared del negocio, pero la action la interpreta en la **tz del servidor** (`setHours` local) — **S6-DATA-02** (Backlog). El FLIP/"fly" → transición CSS; cancel por click-en-fondo → refinamiento (hay Esc + Cancelar + tocar-de-nuevo). Exceptions implementadas pero verificadas por código, no por seed en vivo.
 
-**Política de validación (decisión Gabriel):** solo **imposible-duro** se bloquea (fuera de turno / descanso / bloqueo / solape con otra cita → no se ilumina). El **solape blando forzado** (recepción fuerza un overlap parcial) NO entra en PR-3: choca con la constraint DB `no_overlapping_appointments` (última defensa anti-doble-reserva del bot) → requiere relajar el invariante primero → **S6-UI-03** (backlog). Así, "iluminado limpio" vs "no iluminado" cubre la política; el caso "solape ámbar avisado" queda para S6-UI-03.
+**Política de validación (decisión Gabriel) — IMPLEMENTADA (Opción C):** el sistema es copiloto, no jefe. Dos tipos:
+- **Imposible-duro** (fuera de turno / descanso / bloqueo) → **no se ilumina** (frontera física; el tiempo disponible = turno − descansos − bloqueos).
+- **Solape blando** (el destino pisaría otra cita) → **se ilumina en ámbar con ⚠** + aviso "se solaparía N min con [cliente]"; **clickeable — la recepción PUEDE forzar** (sabe cosas que el sistema no).
+- **Limpio** (no pisa nada) → chip teal normal.
+
+**El choque y su solución (Opción C — investigación read-only aprobada por Gabriel):** la constraint DB `no_overlapping_appointments` (EXCLUDE gist, migración 016 — última defensa anti-doble-reserva del bot) prohíbe TODO solape. Se investigaron 3 opciones (A quitar / B no permitir / C columna condicionada); Gabriel eligió **C**. **Migración 046**: `allow_overlap boolean DEFAULT false` + se recrea el EXCLUDE con `WHERE (status NOT IN cancelled AND allow_overlap = false)`. **Solo las filas marcadas `allow_overlap=true` quedan exentas**, y **solo `rescheduleAppointment(force=true)` las marca** — solo cuando un HUMANO fuerza. El bot, `createAssistantAppointment`, `PATCH /api/appointments` nunca lo setean (default false) → **siguen 100% protegidos** contra el solape accidental. Distingue intencional-humano vs accidental-automático sin abrir la puerta a todos.
+
+**PR-3 — solape blando (Opción C) — criterios:**
+- [x] **Migración 046** aplicada al demo: columna + constraint condicionado. Verificado en DB: solape normal → **bloqueado (23P01)**; solape con `allow_overlap=true` → **permitido**.
+- [x] **`rescheduleAppointment` param `force`**: salta el pre-check de solape + marca `allow_overlap=true`; reacomodo limpio resetea a false. Gate 2b y notificaciones intactas.
+- [x] **Cliente**: `laneDrops` clasifica limpio (teal) / solape (ámbar ⚠ con minutos y cliente); frontera dura = turno − descansos − bloqueos. Toast de solape (`warn`, no frena). Tokens ámbar nuevos en `globals.css`.
+- [x] **Verificado por ruta real** (seed Ana 20:01 + Beto movible): chips ámbar sobre Ana ("se solaparía N min con Ana") vs teal limpios; **drop forzado persistido en DB** (Beto 19:33–20:03 `allow_overlap=true` solapando a Ana 20:01–20:31 `allow_overlap=false`; audit `rescheduled`); el solape normal sigue bloqueado. Seed revertido; `tsc` 0 · `lint` 0 · `build` verde.
 
 **Frontera:** NO reescribir server actions (se consumen). NO tocar `/staff`, `/staff/gestion`, owner/admin ni el flujo del bot. NO borrar `AssistantLayout` (barbero-gestión lo usa). Una pieza a la vez, cada una contra la maqueta congelada; reportar y esperar OK entre PRs.
 
@@ -1404,10 +1415,8 @@ Gabriel lo priorizó e intercaló antes del gesto (PR-3 de S6-UI-02). Ver el blo
 ### 🟠 S6-DATA-04 — Default de fecha del dashboard en UTC, no en tz del negocio
 `dashboard/page.tsx` (y `staff/gestion`, `staff`) computan el día por defecto con `toDateStr(new Date())` → fecha del **servidor** (Vercel = UTC). En producción, entre 18:00–24:00 hora de México, `new Date()` UTC ya es "mañana" → el dashboard abriría por defecto en el día equivocado (y `getDayAppointments`/blocks buscarían el día equivocado). Family S6-DATA-01. Detectado al cablear el gesto (el cliente ya lo mitiga en el header con `isTodayInTz`, pero el **default del servidor** sigue en UTC). Fix: calcular "hoy" en `businesses.timezone` al resolver el default de `?date`. Afecta owner/admin/asistente/gestion por igual (query/param compartido).
 
-### 🟠 S6-UI-03 — Solape blando forzado por la recepción (política "el panorama manda")
-**Origen:** política de validación de Gabriel para el gesto (S6-UI-02 PR-3). El principio: el asistente PUEDE forzar un solape parcial (ej. padre+hijo se cortan juntos, overlap 10 min) porque sabe cosas que el sistema no; el sistema es copiloto. Distinto del imposible-duro (fuera de turno/descanso/bloqueo), que sí se bloquea.
-**El choque:** la DB tiene `no_overlapping_appointments` (EXCLUDE `gist(staff_id =, tstzrange(starts_at,ends_at) &&) WHERE status NOT IN cancelled`, migración 016) — **la última línea de defensa anti-doble-reserva del bot** (migración 017). Forzar un solape crea 2 citas solapadas → la DB lo rechaza. Una EXCLUDE no puede ser "blanda": o prohíbe a todos (incl. el asistente) o se relaja (y el bot podría doble-reservar en un race, salvo compensación app-level).
-**Decisión Gabriel (2026-07-04):** **PR-3 se shippea SIN solape-forzado** — el gesto ya cumple el imposible-duro (turno/descanso/bloqueo/solape no se iluminan). Esta tarea (forzar solape blando: iluminar en ámbar + aviso sutil + permitir en server) requiere PRIMERO decidir cómo relajar el invariante sin exponer al bot: opciones = condicionar la EXCLUDE por `source`/flag, o mover la garantía a nivel app con transacción. Diseño read-only antes de tocar la migración.
+### ✅ Solape blando forzado → **RESUELTO en S6-UI-02 PR-3 (Opción C, 2026-07-04)**
+Ya no es backlog. Gabriel pidió investigar el constraint antes de tocarlo; se evaluaron 3 opciones y eligió **C** (columna `allow_overlap` + EXCLUDE condicionado, migración 046). Ver el bloque **S6-UI-02 → "PR-3 — solape blando (Opción C)"** en la sección de tareas: el bot y los flujos automáticos siguen 100% protegidos; solo el reacomodo manual explícito del asistente puede forzar. Verificado por ruta real + DB (solape normal bloqueado / forzado permitido).
 
 ### 🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path de agendamiento
 

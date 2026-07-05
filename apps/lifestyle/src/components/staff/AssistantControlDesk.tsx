@@ -155,7 +155,7 @@ export default function AssistantControlDesk({
   }, [initialAppointments]);
 
   // Toast breve para confirmar/errar el reagendado.
-  const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' | 'warn' } | null>(null);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(null), 3500);
@@ -200,7 +200,12 @@ export default function AssistantControlDesk({
   // Drop del gesto → reagendar. Optimista (la cita "vuela" ya) + revert si la
   // action falla (conflicto de solape, etc.). rescheduleAppointment tiene el gate
   // 2b (barbero solo sus citas; recepción sin restricción).
-  async function handleMove(apptId: string, newStaffId: string, newStartMin: number) {
+  async function handleMove(
+    apptId: string,
+    newStaffId: string,
+    newStartMin: number,
+    opts?: { force: boolean; overlapMin: number; overlapName: string },
+  ) {
     const snapshot = appointments;
     const appt = snapshot.find((a) => a.id === apptId);
     if (!appt) return;
@@ -226,8 +231,13 @@ export default function AssistantControlDesk({
         newDate: date,
         newStartTime: `${String(Math.floor(newStartMin / 60)).padStart(2, '0')}:${String(newStartMin % 60).padStart(2, '0')}`,
         newStaffId,
+        force: opts?.force, // solape intencional forzado por la recepción
       });
-      setToast({ msg: `Movida a ${newStaffName} · ${fmtHora(newStartMin)}`, kind: 'ok' });
+      // Aviso sutil de solape forzado (no frena el flujo).
+      const msg = opts?.force
+        ? `Movida a ${newStaffName} · ${fmtHora(newStartMin)} · se solapa ${opts.overlapMin} min con ${opts.overlapName}`
+        : `Movida a ${newStaffName} · ${fmtHora(newStartMin)}`;
+      setToast({ msg, kind: opts?.force ? 'warn' : 'ok' });
       router.refresh(); // reconciliar con la verdad del servidor
     } catch (err) {
       setAppointments(snapshot); // revert
@@ -364,7 +374,9 @@ export default function AssistantControlDesk({
           className={`fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-pill border px-4 py-2 text-sm font-semibold shadow-card ${
             toast.kind === 'ok'
               ? 'border-teal-border bg-tint-1 text-teal-ink'
-              : 'border-red-border bg-red-tint text-red-ink'
+              : toast.kind === 'warn'
+                ? 'border-amber-border bg-amber-tint text-amber'
+                : 'border-red-border bg-red-tint text-red-ink'
           }`}
         >
           {toast.msg}

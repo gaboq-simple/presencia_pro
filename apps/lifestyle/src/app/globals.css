@@ -41,6 +41,11 @@
   --color-walk-tint:   #ECEAF8;             /* maqueta asistente --violet-wash */
   --color-walk-border: #A79EE6;             /* borde AA-safe derivado */
 
+  /* ── Ámbar (advertencia) — destino que SOLAPARÍA otra cita (forzable por la recepción) ── */
+  --color-amber:        #B45309;            /* maqueta asistente --amber */
+  --color-amber-tint:   #FBF0E2;            /* maqueta asistente --amber-wash */
+  --color-amber-border: #E0A868;            /* borde AA-safe derivado */
+
   /* ── Pasado — apagado por COLOR (no opacity): el borde rojo del no-show NO se atenúa ── */
   --color-past-bg:     #F0F2F2;             /* v5 --past-bg */
   --color-past-line:   #C7CBCB;             /* v5 --past-line */

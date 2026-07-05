@@ -49,7 +49,13 @@ type PanoramaTimelineProps = {
   staff: PanoramaStaff[];  // barberos (carriles), en orden
   staffBlocks: PanoramaBlock[]; // bloqueos aprobados (vacaciones/emergencias) del día
   // Reagendar (drop del gesto). El desk lo conecta a rescheduleAppointment.
-  onMove?: (apptId: string, newStaffId: string, newStartMin: number) => void;
+  // opts presente = solape FORZADO (recepción): fuerza el reagendado + aviso.
+  onMove?: (
+    apptId: string,
+    newStaffId: string,
+    newStartMin: number,
+    opts?: { force: boolean; overlapMin: number; overlapName: string },
+  ) => void;
 };
 
 // Estado visual derivado de una cita.
@@ -68,6 +74,9 @@ type LaneBlock = {
 type Interval = { start: number; end: number };
 
 type MoveState = { apptId: string; fromLaneId: string; dur: number; name: string; service: string };
+
+// Un destino ofrecido: limpio (soft=false) o solape forzable (soft=true).
+type DropChip = { min: number; soft: boolean; overlapMin: number; overlapName: string };
 
 // ─── Helpers de tiempo (todo en minutos-desde-medianoche, tz del negocio) ──────
 
@@ -303,47 +312,57 @@ export default function PanoramaTimeline({
   const atEnd = win >= maxWinStart;
   const offNow = isToday && win !== defaultStart;
 
-  // ── Destinos válidos del carril durante el gesto (validación por duración) ──
-  function laneDrops(lane: (typeof lanes)[number]): { chips: number[]; nofit: Interval[] } {
-    if (!move) return { chips: [], nofit: [] };
+  // ── Destinos del carril durante el gesto ───────────────────────────────────
+  // DURO (no se ofrece): fuera del turno / descanso / bloqueo. Dentro de ese
+  // tiempo físicamente disponible se ofrecen chips: LIMPIO (no pisa nada) o
+  // SOLAPE (pisaría otra cita — forzable por la recepción, marcado en ámbar).
+  function laneDrops(lane: (typeof lanes)[number]): DropChip[] {
+    if (!move) return [];
     const dur = move.dur;
     const floor = isToday && nowMin !== null ? nowMin : -Infinity;
     const domainStart = Math.max(lane.availFrom, floor);
-    // Ocupado: otras citas (excluye la levantada) + descanso + bloqueos.
-    const occ = [
-      ...lane.blocks.filter((b) => b.id !== move.apptId).map((b) => [b.start, b.start + b.dur] as [number, number]),
-      ...lane.unavail.map((u) => [u.start, u.end] as [number, number]),
-    ].sort((x, y) => x[0] - y[0]);
-    // Complemento libre en [domainStart, availTo].
-    const free: Interval[] = [];
-    let cur = domainStart;
-    for (const [s, e] of occ) {
-      if (e <= cur) continue;
-      if (s > cur) free.push({ start: cur, end: Math.min(s, lane.availTo) });
-      cur = Math.max(cur, e);
-      if (cur >= lane.availTo) break;
-    }
-    if (cur < lane.availTo) free.push({ start: cur, end: lane.availTo });
+    const domainEnd = lane.availTo;
 
-    const chips: number[] = [];
-    const nofit: Interval[] = [];
-    for (const g of free) {
-      if (g.end - g.start >= dur) {
-        const starts = fineMode ? fineStarts(g.start, g.end, dur) : suggestedStarts(g.start, g.end, dur);
-        for (const s of starts) {
-          const p = pctOf(s);
-          if (p >= 0 && p <= 100) chips.push(s);
+    // Tiempo físicamente disponible = turno − descanso − bloqueos (frontera DURA).
+    const blocked = lane.unavail.map((u) => [u.start, u.end] as [number, number]).sort((a, b) => a[0] - b[0]);
+    const available: Interval[] = [];
+    let cur = domainStart;
+    for (const [bs, be] of blocked) {
+      if (be <= cur) continue;
+      if (bs > cur) available.push({ start: cur, end: Math.min(bs, domainEnd) });
+      cur = Math.max(cur, be);
+      if (cur >= domainEnd) break;
+    }
+    if (cur < domainEnd) available.push({ start: cur, end: domainEnd });
+
+    // Citas (excluye la levantada) para clasificar solape.
+    const appts = lane.blocks.filter((b) => b.id !== move.apptId);
+
+    const chips: DropChip[] = [];
+    for (const av of available) {
+      const last = av.end - dur; // último inicio donde el servicio cabe en el tiempo disponible
+      if (last < av.start - 0.5) continue;
+      const starts = fineMode ? fineStarts(av.start, av.end, dur) : suggestedStarts(av.start, av.end, dur);
+      for (const s of starts) {
+        if (s > last + 0.5) continue;
+        const p = pctOf(s);
+        if (p < 0 || p > 100) continue;
+        // ¿solaparía alguna cita? (toma el solape mayor para el aviso)
+        let overlapMin = 0;
+        let overlapName = '';
+        for (const b of appts) {
+          const ov = Math.min(s + dur, b.start + b.dur) - Math.max(s, b.start);
+          if (ov > 0 && ov > overlapMin) { overlapMin = Math.round(ov); overlapName = b.name; }
         }
-      } else if (g.end - g.start >= MIN_GAP) {
-        nofit.push(g);
+        chips.push({ min: s, soft: overlapMin > 0, overlapMin, overlapName });
       }
     }
-    return { chips, nofit };
+    return chips;
   }
 
-  function doDrop(laneId: string, startMin: number) {
+  function doDrop(laneId: string, chip: DropChip) {
     if (!move || !onMove) return;
-    onMove(move.apptId, laneId, startMin);
+    onMove(move.apptId, laneId, chip.min, chip.soft ? { force: true, overlapMin: chip.overlapMin, overlapName: chip.overlapName } : undefined);
     setMove(null);
   }
 
@@ -598,37 +617,28 @@ export default function PanoramaTimeline({
                     );
                   })}
 
-                  {/* Chips de destino (gesto) — solo donde CABE el servicio */}
+                  {/* Chips de destino (gesto): teal = limpio · ámbar = solaparía (forzable) */}
                   {move &&
-                    drops.chips.map((startMin) => {
-                      const p = pctOf(startMin);
-                      return (
-                        <button
-                          key={`chip-${startMin}`}
-                          onClick={() => doDrop(s.id, startMin)}
-                          className="absolute top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-[9px] border-[1.5px] border-teal-border bg-card px-2 py-1 tabular-nums text-[11px] font-bold text-teal-ink shadow-card transition hover:bg-tint-1 hover:shadow-hero"
-                          style={{ left: `${p}%` }}
-                        >
-                          {fmtMin(startMin).replace(' AM', '').replace(' PM', '')}
-                        </button>
-                      );
-                    })}
-
-                  {/* Marcas "no cabe" (huecos demasiado cortos para el servicio) */}
-                  {move &&
-                    drops.nofit.map((g, i) => {
-                      const p = pctOf((g.start + g.end) / 2);
-                      if (p < 0 || p > 100) return null;
-                      return (
-                        <span
-                          key={`nofit-${i}`}
-                          className="absolute top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded border border-dashed border-line px-1.5 py-0.5 text-[9px] font-semibold text-faint"
-                          style={{ left: `${p}%` }}
-                        >
-                          no cabe
-                        </span>
-                      );
-                    })}
+                    drops.map((chip) => (
+                      <button
+                        key={`chip-${chip.min}`}
+                        onClick={() => doDrop(s.id, chip)}
+                        title={
+                          chip.soft
+                            ? `Se solaparía ${chip.overlapMin} min con ${chip.overlapName} — la recepción puede forzarlo`
+                            : undefined
+                        }
+                        className={`absolute top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-[9px] border-[1.5px] px-2 py-1 tabular-nums text-[11px] font-bold shadow-card transition hover:shadow-hero ${
+                          chip.soft
+                            ? 'border-amber-border bg-amber-tint text-amber hover:bg-amber-tint'
+                            : 'border-teal-border bg-card text-teal-ink hover:bg-tint-1'
+                        }`}
+                        style={{ left: `${pctOf(chip.min)}%` }}
+                      >
+                        {chip.soft && <span aria-hidden>⚠ </span>}
+                        {fmtMin(chip.min).replace(' AM', '').replace(' PM', '')}
+                      </button>
+                    ))}
 
                   {/* Línea "ahora" (roja) */}
                   {nowInWin && (
