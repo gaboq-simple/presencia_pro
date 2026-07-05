@@ -10,8 +10,8 @@
 // header con datos reales. Estado de las piezas:
 //   · PanoramaTimeline — carriles, ventana 3h navegable, densidad     ✓ PR-2
 //   · Gesto click-to-place → rescheduleAppointment (este handleMove)   ✓ PR-3
-//   · Polling + walk-in (createAssistantAppointment)                   → PR-4
-//   · ActionQueue (walk-in, atrasados, sugerencias 1-tap)             → PR-5
+//   · Polling + walk-in (createAssistantAppointment)                   ✓ PR-4
+//   · ActionQueue (atrasados + sugerencia + conexión viva + tranquilo) ✓ PR-5
 //   · Granularidad fina + pulido                                       → PR-6
 //
 // Sistema visual: tokens Zentriq claro de globals.css (bg-canvas, teal, ink,
@@ -27,8 +27,24 @@ import {
   rescheduleAppointment,
   refreshAssistantAppointments,
   createAssistantAppointment,
+  noShowAppointment,
 } from '@/app/staff/assistant-actions';
-import PanoramaTimeline, { type MoveState, type WalkinRequest, type PlaceOpts } from './PanoramaTimeline';
+import PanoramaTimeline, {
+  type MoveState,
+  type WalkinRequest,
+  type PlaceOpts,
+  type RescheduleRequest,
+} from './PanoramaTimeline';
+import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
+import {
+  type EngineLane,
+  type Interval,
+  type OverlapAppt,
+  partsInTz,
+  minutesOfDay,
+  hhmmToMin,
+  firstCompatibleSlot,
+} from './panoramaEngine';
 
 const POLL_MS = 20_000; // 20s — auto-refresh de la mesa de control (se pausa en gesto)
 
@@ -67,6 +83,7 @@ export type AssistantControlDeskProps = {
   initialStaffBlocks: StaffBlockForDay[];        // bloques aprobados del día
   dayExceptions: DayException[];                 // día libre / horario especial por fecha
   requireCustomerPhone: boolean;                 // businesses.require_customer_phone (walk-in)
+  maxLateMinutes: number;                        // businesses.max_late_minutes (piso de "atrasado")
 };
 
 // Servicio del catálogo (para el picker del walk-in).
@@ -132,15 +149,21 @@ export default function AssistantControlDesk({
   initialStaffBlocks,
   dayExceptions,
   requireCustomerPhone,
+  maxLateMinutes,
 }: AssistantControlDeskProps) {
   const router = useRouter();
 
-  // Reloj "Ahora" — se calcula en cliente para no romper la hidratación.
+  // Reloj "Ahora" — se calcula en cliente para no romper la hidratación. `nowMs` es
+  // el instante (para detectar atraso por instante, tz-independiente); `nowLabel` el
+  // texto del header. Ambos refrescan cada 30s.
   const [nowLabel, setNowLabel] = useState<string>('—');
+  const [nowMs, setNowMs] = useState<number | null>(null);
   useEffect(() => {
     function tick() {
+      const d = new Date();
+      setNowMs(d.getTime());
       setNowLabel(
-        new Date().toLocaleTimeString('es-MX', {
+        d.toLocaleTimeString('es-MX', {
           hour: 'numeric',
           minute: '2-digit',
           timeZone: timezone,
@@ -196,6 +219,10 @@ export default function AssistantControlDesk({
     const id = setTimeout(() => setToast(null), 3500);
     return () => clearTimeout(id);
   }, [toast]);
+
+  // ── Cola de acción: conexión viva + reacomodo desde tarjeta ─────────────────
+  const [highlightId, setHighlightId] = useState<string | null>(null); // hover en tarjeta → resalta panorama
+  const [reschedReq, setReschedReq] = useState<RescheduleRequest | null>(null); // "Mover" → levanta la cita
 
   // ── Walk-in a mano ─────────────────────────────────────────────────────────
   const [walkin, setWalkin] = useState<WalkinRequest | null>(null); // gesto de colocar activo
@@ -405,6 +432,128 @@ export default function AssistantControlDesk({
     }
   }
 
+  // ── Cola de acción: atrasados + sugerencia + próxima cita ───────────────────
+  // "Ahora" en min-desde-medianoche (tz) — piso de la sugerencia y hora de display.
+  const nowMin = nowMs !== null ? partsInTz(new Date(nowMs).toISOString(), timezone).min : null;
+
+  // Carriles reducidos para el motor: MISMA aritmética que el gesto (panoramaEngine),
+  // no una copia. Breaks + bloqueos aprobados como frontera dura; guard de duración.
+  const engineLanes: EngineLane[] = workingStaff.map((s) => {
+    const av = s.availabilityToday!; // workingStaff ya filtró availabilityToday !== null
+    const unavail: Interval[] = [];
+    if (av.break_start && av.break_end) {
+      unavail.push({ start: hhmmToMin(av.break_start), end: hhmmToMin(av.break_end) });
+    }
+    for (const bl of initialStaffBlocks) {
+      if (bl.staffId !== s.id) continue;
+      const bs = minutesOfDay(bl.startsAt, timezone);
+      const be = minutesOfDay(bl.endsAt, timezone);
+      if (be > bs) unavail.push({ start: bs, end: be });
+    }
+    const appts: OverlapAppt[] = appointments
+      .filter((a) => a.staff.id === s.id && a.status !== 'cancelled')
+      .map((a) => {
+        const start = minutesOfDay(a.starts_at, timezone);
+        let end = minutesOfDay(a.ends_at, timezone);
+        if (end <= start) end = start + 30;
+        return { id: a.id, start, dur: end - start, name: a.customer?.name ?? 'Sin nombre' };
+      });
+    return {
+      staffId: s.id,
+      availFrom: hhmmToMin(av.start_time),
+      availTo: hhmmToMin(av.end_time),
+      unavail,
+      appts,
+    };
+  });
+
+  const staffNameById = new Map(workingStaff.map((s) => [s.id, s.name]));
+
+  // Señal "atrasado" anclada en schema: status='confirmed' cuya hora EFECTIVA
+  // (adjusted_starts_at ?? starts_at) ya pasó por más de `maxLateMinutes`. Comparación
+  // por INSTANTE (tz-independiente). Techo natural: dispatch-auto-cancel la vuelve
+  // no_show y sale sola. Solo HOY (la cola es "ahora"); walk-ins quedan fuera (modo B).
+  const lateItems: LateItem[] =
+    today && nowMs !== null && nowMin !== null
+      ? appointments
+          .filter((a) => {
+            if (a.status !== 'confirmed') return false;
+            const effStart = Date.parse(a.adjusted_starts_at ?? a.starts_at);
+            return nowMs >= effStart + maxLateMinutes * 60_000;
+          })
+          .map((a) => {
+            const effIso = a.adjusted_starts_at ?? a.starts_at;
+            const dur = Math.max(1, Math.round((Date.parse(a.ends_at) - Date.parse(a.starts_at)) / 60_000));
+            const lateMin = Math.max(0, Math.round((nowMs - Date.parse(effIso)) / 60_000));
+            const slot = firstCompatibleSlot(engineLanes, dur, nowMin, a.id);
+            return {
+              apptId: a.id,
+              customerName: a.customer?.name ?? 'Sin nombre',
+              serviceName: a.service?.name ?? '',
+              staffName: a.staff.name,
+              startMin: minutesOfDay(effIso, timezone),
+              lateMin,
+              suggestion: slot ? { staffName: staffNameById.get(slot.staffId) ?? '', min: slot.min } : null,
+            };
+          })
+          .sort((a, b) => b.lateMin - a.lateMin) // más atrasado primero
+      : [];
+
+  // Próxima cita (estado tranquilo): siguiente confirmada de hoy tras "ahora".
+  const nextUp: NextUpItem | null =
+    today && nowMin !== null
+      ? (() => {
+          const upcoming = appointments
+            .filter((a) => a.status === 'confirmed' && minutesOfDay(a.starts_at, timezone) > nowMin)
+            .sort((a, b) => minutesOfDay(a.starts_at, timezone) - minutesOfDay(b.starts_at, timezone))[0];
+          return upcoming
+            ? {
+                customerName: upcoming.customer?.name ?? 'Sin nombre',
+                serviceName: upcoming.service?.name ?? '',
+                staffName: upcoming.staff.name,
+                startMin: minutesOfDay(upcoming.starts_at, timezone),
+              }
+            : null;
+        })()
+      : null;
+
+  // "Mover" en la tarjeta → levanta la cita en el panorama (MISMO gesto #64, no
+  // reimplementa el reacomodo). El drop de la cita cae en handleReschedule.
+  function handleMoveFromQueue(apptId: string) {
+    const appt = appointments.find((a) => a.id === apptId);
+    if (!appt) return;
+    const dur = Math.max(1, Math.round((Date.parse(appt.ends_at) - Date.parse(appt.starts_at)) / 60_000));
+    setHighlightId(null);
+    setReschedReq({
+      apptId,
+      dur,
+      name: appt.customer?.name ?? 'Sin nombre',
+      service: appt.service?.name ?? '',
+      fromLaneId: appt.staff.id,
+    });
+  }
+
+  // "Marcar no llegó" → no_show (libera el hueco). Optimista + revert.
+  async function handleNoShow(apptId: string) {
+    const snapshot = appointments;
+    const appt = snapshot.find((a) => a.id === apptId);
+    if (!appt) return;
+    setHighlightId(null);
+    setAppointments((cur) => cur.map((a) => (a.id === apptId ? { ...a, status: 'no_show' } : a)));
+    mutatingRef.current = true;
+    try {
+      await noShowAppointment(apptId);
+      setToast({ msg: `${appt.customer?.name ?? 'Cliente'} marcado como no llegó`, kind: 'ok' });
+      router.refresh();
+    } catch (err) {
+      setAppointments(snapshot); // revert
+      const msg = err instanceof Error ? err.message : 'No se pudo marcar';
+      setToast({ msg, kind: 'err' });
+    } finally {
+      mutatingRef.current = false;
+    }
+  }
+
   return (
     <div className="min-h-dvh bg-canvas bg-grid text-ink">
       <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col gap-3 p-3 sm:p-4">
@@ -468,7 +617,7 @@ export default function AssistantControlDesk({
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              {/* Buscar cliente → PR-5 (cola). */}
+              {/* Buscar cliente → pieza aparte (searchCustomers), fuera del núcleo PR-5. */}
               <button
                 disabled
                 title="Disponible en la próxima iteración"
@@ -502,29 +651,21 @@ export default function AssistantControlDesk({
                 onPlace={handlePlace}
                 walkinRequest={walkin}
                 onWalkinConsumed={() => setWalkin(null)}
+                rescheduleRequest={reschedReq}
+                onRescheduleConsumed={() => setReschedReq(null)}
+                highlightApptId={highlightId}
                 onInteractingChange={(active) => { interactingRef.current = active; }}
               />
             </section>
 
-            {/* COLA DE ACCIÓN — fija; se puebla en PR-5 */}
-            <aside
-              className="flex min-h-0 shrink-0 flex-col bg-canvas lg:w-[348px]"
-              aria-label="Cola de acción"
-            >
-              <div className="border-b border-line px-4 py-3">
-                <b className="text-sm">Cola de acción</b>
-                <p className="text-xs text-faint">Lo que necesita tu atención ahora</p>
-              </div>
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-                <span className="grid h-12 w-12 place-items-center rounded-pill bg-tint-1 text-teal-ink">
-                  ✓
-                </span>
-                <b className="text-sm">Todo bajo control</b>
-                <p className="max-w-[24ch] text-xs text-ink-2">
-                  Cuando llegue un walk-in o alguien se retrase, aparece aquí.
-                </p>
-              </div>
-            </aside>
+            {/* COLA DE ACCIÓN — fija; atrasados + tranquilo (PR-5) */}
+            <ActionQueue
+              lateItems={lateItems}
+              nextUp={nextUp}
+              onMove={handleMoveFromQueue}
+              onNoShow={handleNoShow}
+              onHover={setHighlightId}
+            />
           </div>
         </div>
       </div>

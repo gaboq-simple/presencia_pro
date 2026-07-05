@@ -23,6 +23,7 @@ import {
   getActiveStaffWithAvailability,
   getDayExceptions,
   getRequireCustomerPhone,
+  getMaxLateMinutes,
   computeDayRevenue,
   getPendingBlockRequests,
   getActiveStaffWithPhoto,
@@ -114,7 +115,7 @@ export default async function DashboardPage({
   // Diverge de owner/admin: monta AssistantControlDesk (diseño congelado).
   // /staff/gestion del barbero sigue usando AssistantLayout intacto.
   if (session.role === 'assistant') {
-    const [businessName, timezone, appointments, allStaff, staffBlocks, dayExceptions, requireCustomerPhone] =
+    const [businessName, timezone, appointments, allStaff, staffBlocks, dayExceptions, requireCustomerPhone, maxLateMinutes] =
       await Promise.all([
         getBusinessName(businessId),
         getBusinessTimezone(businessId),
@@ -123,6 +124,7 @@ export default async function DashboardPage({
         getStaffBlocksForDay(date),
         getDayExceptions(businessId, date),
         getRequireCustomerPhone(businessId),
+        getMaxLateMinutes(businessId),
       ]);
     const staffOptions = allStaff
       .filter((s) => s.role === 'barber')
@@ -154,6 +156,7 @@ export default async function DashboardPage({
         initialStaffBlocks={staffBlocks}
         dayExceptions={dayExceptions}
         requireCustomerPhone={requireCustomerPhone}
+        maxLateMinutes={maxLateMinutes}
       />
     );
   }
