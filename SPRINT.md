@@ -1360,6 +1360,8 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 **Lo que la maqueta no anticipó (marcado):** el "colocar" alimenta `rescheduleAppointment` con la hora-de-pared del negocio, pero la action la interpreta en la **tz del servidor** (`setHours` local) — **S6-DATA-02** (Backlog). El FLIP/"fly" → transición CSS; cancel por click-en-fondo → refinamiento (hay Esc + Cancelar + tocar-de-nuevo). Exceptions implementadas pero verificadas por código, no por seed en vivo.
 
+**Política de validación (decisión Gabriel):** solo **imposible-duro** se bloquea (fuera de turno / descanso / bloqueo / solape con otra cita → no se ilumina). El **solape blando forzado** (recepción fuerza un overlap parcial) NO entra en PR-3: choca con la constraint DB `no_overlapping_appointments` (última defensa anti-doble-reserva del bot) → requiere relajar el invariante primero → **S6-UI-03** (backlog). Así, "iluminado limpio" vs "no iluminado" cubre la política; el caso "solape ámbar avisado" queda para S6-UI-03.
+
 **Frontera:** NO reescribir server actions (se consumen). NO tocar `/staff`, `/staff/gestion`, owner/admin ni el flujo del bot. NO borrar `AssistantLayout` (barbero-gestión lo usa). Una pieza a la vez, cada una contra la maqueta congelada; reportar y esperar OK entre PRs.
 
 **Notas de ejecución:**
@@ -1401,6 +1403,11 @@ Gabriel lo priorizó e intercaló antes del gesto (PR-3 de S6-UI-02). Ver el blo
 
 ### 🟠 S6-DATA-04 — Default de fecha del dashboard en UTC, no en tz del negocio
 `dashboard/page.tsx` (y `staff/gestion`, `staff`) computan el día por defecto con `toDateStr(new Date())` → fecha del **servidor** (Vercel = UTC). En producción, entre 18:00–24:00 hora de México, `new Date()` UTC ya es "mañana" → el dashboard abriría por defecto en el día equivocado (y `getDayAppointments`/blocks buscarían el día equivocado). Family S6-DATA-01. Detectado al cablear el gesto (el cliente ya lo mitiga en el header con `isTodayInTz`, pero el **default del servidor** sigue en UTC). Fix: calcular "hoy" en `businesses.timezone` al resolver el default de `?date`. Afecta owner/admin/asistente/gestion por igual (query/param compartido).
+
+### 🟠 S6-UI-03 — Solape blando forzado por la recepción (política "el panorama manda")
+**Origen:** política de validación de Gabriel para el gesto (S6-UI-02 PR-3). El principio: el asistente PUEDE forzar un solape parcial (ej. padre+hijo se cortan juntos, overlap 10 min) porque sabe cosas que el sistema no; el sistema es copiloto. Distinto del imposible-duro (fuera de turno/descanso/bloqueo), que sí se bloquea.
+**El choque:** la DB tiene `no_overlapping_appointments` (EXCLUDE `gist(staff_id =, tstzrange(starts_at,ends_at) &&) WHERE status NOT IN cancelled`, migración 016) — **la última línea de defensa anti-doble-reserva del bot** (migración 017). Forzar un solape crea 2 citas solapadas → la DB lo rechaza. Una EXCLUDE no puede ser "blanda": o prohíbe a todos (incl. el asistente) o se relaja (y el bot podría doble-reservar en un race, salvo compensación app-level).
+**Decisión Gabriel (2026-07-04):** **PR-3 se shippea SIN solape-forzado** — el gesto ya cumple el imposible-duro (turno/descanso/bloqueo/solape no se iluminan). Esta tarea (forzar solape blando: iluminar en ámbar + aviso sutil + permitir en server) requiere PRIMERO decidir cómo relajar el invariante sin exponer al bot: opciones = condicionar la EXCLUDE por `source`/flag, o mover la garantía a nivel app con transacción. Diseño read-only antes de tocar la migración.
 
 ### 🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path de agendamiento
 
