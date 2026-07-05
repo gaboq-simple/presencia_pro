@@ -114,6 +114,7 @@ export type DashboardAppointment = {
   created_by: StaffRef | null;   // quien creó la cita (Feature 5)
   modified_by: StaffRef | null;  // quien hizo la última modificación (Feature 5)
   modified_at: string | null;    // timestamp de la última modificación (Feature 5)
+  allow_overlap: boolean;        // TRUE = solape intencional aprobado por la recepción (S6-UI-02 PR-3)
 };
 
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
@@ -340,6 +341,7 @@ export async function getDayAppointments(
       source,
       notes,
       modified_at,
+      allow_overlap,
       staff:staff_id(id, name),
       service:service_id(id, name, duration_minutes, price, currency),
       customer:customer_id(id, name, phone),

@@ -68,7 +68,8 @@ type LaneBlock = {
   state: BlockState;
   name: string;
   service: string;
-  movable: boolean; // pending/confirmed y futura → se puede reagendar
+  movable: boolean;        // pending/confirmed y futura → se puede reagendar
+  approvedOverlap: boolean; // solape intencional aprobado por la recepción (visible)
 };
 
 type Interval = { start: number; end: number };
@@ -177,13 +178,25 @@ export default function PanoramaTimeline({
   // ── Gesto: cita levantada + modo ajuste-fino ──────────────────────────────
   const [move, setMove] = useState<MoveState | null>(null);
   const [fineMode, setFineMode] = useState(false);
+  // Destino ámbar pendiente de confirmación consciente (no se mueve hasta el 2º tap).
+  const [pendingOverlap, setPendingOverlap] = useState<{ laneId: string; chip: DropChip } | null>(null);
   const canMove = typeof onMove === 'function';
 
-  // Esc cancela el modo mover.
+  // Salir del modo mover limpia también la confirmación pendiente.
+  useEffect(() => {
+    if (!move) setPendingOverlap(null);
+  }, [move]);
+
+  // Esc: si hay confirmación de solape pendiente → vuelve a los chips; si no → cancela.
   useEffect(() => {
     if (!move) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setMove(null);
+      if (e.key !== 'Escape') return;
+      setPendingOverlap((p) => {
+        if (p) return null; // cancela solo la confirmación
+        setMove(null);
+        return null;
+      });
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -228,6 +241,7 @@ export default function PanoramaTimeline({
         name: a.customer?.name ?? 'Sin nombre',
         service: a.service?.name ?? '',
         movable,
+        approvedOverlap: a.allow_overlap === true,
       });
       minStart = Math.min(minStart, start);
       maxEnd = Math.max(maxEnd, end);
@@ -362,7 +376,22 @@ export default function PanoramaTimeline({
 
   function doDrop(laneId: string, chip: DropChip) {
     if (!move || !onMove) return;
-    onMove(move.apptId, laneId, chip.min, chip.soft ? { force: true, overlapMin: chip.overlapMin, overlapName: chip.overlapName } : undefined);
+    if (chip.soft) {
+      setPendingOverlap({ laneId, chip }); // confirmación consciente (2º tap)
+      return;
+    }
+    onMove(move.apptId, laneId, chip.min);
+    setMove(null);
+  }
+
+  function confirmOverlap() {
+    if (!move || !onMove || !pendingOverlap) return;
+    const { laneId, chip } = pendingOverlap;
+    onMove(move.apptId, laneId, chip.min, {
+      force: true,
+      overlapMin: chip.overlapMin,
+      overlapName: chip.overlapName,
+    });
     setMove(null);
   }
 
@@ -371,7 +400,35 @@ export default function PanoramaTimeline({
       {/* ── Cabecera sticky: barra de modo-mover (si aplica) + nav + eje ── */}
       <div className="sticky top-0 z-20 border-b border-line bg-canvas">
         {/* Barra de modo mover */}
-        {move && (
+        {move && pendingOverlap && (
+          // Confirmación consciente del solape (no se movió nada todavía).
+          <div className="flex flex-wrap items-center gap-2 bg-ink px-4 py-2 text-card">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-[color:var(--color-amber-border)]">
+              <span aria-hidden>⚠</span> Se encima {pendingOverlap.chip.overlapMin} min con{' '}
+              <span className="rounded-[6px] bg-white/15 px-2 py-0.5 text-card">{pendingOverlap.chip.overlapName}</span>
+            </span>
+            <span className="text-[11px] text-card/70">
+              a las <b className="tabular-nums">{fmtMin(pendingOverlap.chip.min).replace(' AM', '').replace(' PM', '')}</b>
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => setPendingOverlap(null)}
+                className="rounded-pill border border-white/30 px-3 py-1 text-xs font-semibold transition hover:border-white"
+              >
+                Elegir otra hora
+              </button>
+              <button
+                onClick={confirmOverlap}
+                style={{ backgroundColor: 'var(--color-amber)' }}
+                className="rounded-pill px-3 py-1 text-xs font-bold text-card shadow-card transition hover:opacity-90"
+              >
+                Encajar igual
+              </button>
+            </div>
+          </div>
+        )}
+
+        {move && !pendingOverlap && (
           <div className="flex flex-wrap items-center gap-2 bg-ink px-4 py-2 text-card">
             <span className="text-xs font-semibold">
               Moviendo <span className="rounded-[6px] bg-white/15 px-2 py-0.5">{move.name}</span>
@@ -586,7 +643,7 @@ export default function PanoramaTimeline({
                           b.state === 'late' && !move ? 'animate-data-beat motion-reduce:animate-none' : ''
                         } ${interactive ? 'cursor-pointer' : ''} ${
                           lifted ? 'z-20 -translate-y-1 shadow-hero ring-2 ring-ink' : ''
-                        } ${dimmed ? 'opacity-40' : ''}`}
+                        } ${b.approvedOverlap && !lifted ? 'ring-2 ring-amber-border' : ''} ${dimmed ? 'opacity-40' : ''}`}
                         style={{
                           left: `${cl}%`,
                           width: `${cr - cl}%`,
@@ -598,11 +655,12 @@ export default function PanoramaTimeline({
                           padding: '6px 9px',
                           pointerEvents: dimmed ? 'none' : undefined,
                         }}
-                        title={`${fmtMin(b.start)} · ${b.name}${b.service ? ` · ${b.service}` : ''}`}
+                        title={`${fmtMin(b.start)} · ${b.name}${b.service ? ` · ${b.service}` : ''}${b.approvedOverlap ? ' · solape aprobado' : ''}`}
                       >
                         <div
                           className={`flex items-center gap-1 overflow-hidden whitespace-nowrap tabular-nums text-[9.5px] font-semibold ${st.ink}`}
                         >
+                          {b.approvedOverlap && <span className="text-amber" title="Solape aprobado" aria-hidden>⚠</span>}
                           {fmtMin(b.start).replace(' AM', '').replace(' PM', '')}
                           {b.state === 'curso' && <span>· En curso</span>}
                           {b.state === 'late' && <span>· Atrasado</span>}

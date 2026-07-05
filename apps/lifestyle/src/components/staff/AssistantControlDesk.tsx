@@ -220,7 +220,14 @@ export default function AssistantControlDesk({
     setAppointments((cur) =>
       cur.map((a) =>
         a.id === apptId
-          ? { ...a, staff: { id: newStaffId, name: newStaffName }, starts_at: startIso, ends_at: endIso, status: 'confirmed' }
+          ? {
+              ...a,
+              staff: { id: newStaffId, name: newStaffName },
+              starts_at: startIso,
+              ends_at: endIso,
+              status: 'confirmed',
+              allow_overlap: opts?.force === true, // solape aprobado → indicador visible ya
+            }
           : a,
       ),
     );
