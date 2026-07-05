@@ -8,7 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
-import { getDayAppointments } from '@/lib/dashboard.types';
+import { getDayAppointments, localDayRangeUtc } from '@/lib/dashboard.types';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
@@ -728,9 +728,15 @@ export async function getStaffBlocksForDay(
   const staffIds = (staffData as { id: string }[]).map((s) => s.id);
   if (staffIds.length === 0) return [];
 
-  // 2. Bloques aprobados que se solapan con el día
-  const dayStart = `${date}T00:00:00`;
-  const dayEnd   = `${date}T23:59:59`;
+  // 2. Bloques aprobados que se solapan con el día — límites en la TZ del negocio
+  //    (no UTC), si no se perdían los bloqueos de la tarde/noche (≥18:00 en UTC-6).
+  const { data: bizRow } = await supabase
+    .from('businesses')
+    .select('timezone')
+    .eq('id', session.business_id)
+    .maybeSingle();
+  const tz = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
+  const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, tz);
 
   const { data, error } = await supabase
     .from('staff_blocks')
