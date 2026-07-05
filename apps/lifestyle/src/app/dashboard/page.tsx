@@ -21,6 +21,7 @@ import { redirect } from 'next/navigation';
 import {
   getDayAppointments,
   getActiveStaffWithAvailability,
+  getDayExceptions,
   computeDayRevenue,
   getPendingBlockRequests,
   getActiveStaffWithPhoto,
@@ -112,23 +113,30 @@ export default async function DashboardPage({
   // Diverge de owner/admin: monta AssistantControlDesk (diseño congelado).
   // /staff/gestion del barbero sigue usando AssistantLayout intacto.
   if (session.role === 'assistant') {
-    const [businessName, timezone, appointments, allStaff, staffBlocks] = await Promise.all([
+    const [businessName, timezone, appointments, allStaff, staffBlocks, dayExceptions] = await Promise.all([
       getBusinessName(businessId),
       getBusinessTimezone(businessId),
       getDayAppointments(businessId, date),
       getActiveStaffWithAvailability(businessId, dayOfWeek),
       getStaffBlocksForDay(date),
+      getDayExceptions(businessId, date),
     ]);
     const staffOptions = allStaff
       .filter((s) => s.role === 'barber')
       .map((s) => ({ id: s.id, name: s.name }));
+    // Disponibilidad del panorama: incluye breaks (para validar dónde cabe un reacomodo).
     const staffWithAvailability = allStaff
       .filter((s) => s.role === 'barber')
       .map((s) => ({
         id: s.id,
         name: s.name,
         availabilityToday: s.availabilityToday
-          ? { start_time: s.availabilityToday.start_time, end_time: s.availabilityToday.end_time }
+          ? {
+              start_time: s.availabilityToday.start_time,
+              end_time: s.availabilityToday.end_time,
+              break_start: s.availabilityToday.break_start ?? null,
+              break_end: s.availabilityToday.break_end ?? null,
+            }
           : null,
       }));
     return (
@@ -141,6 +149,7 @@ export default async function DashboardPage({
         staffOptions={staffOptions}
         staffWithAvailability={staffWithAvailability}
         initialStaffBlocks={staffBlocks}
+        dayExceptions={dayExceptions}
       />
     );
   }

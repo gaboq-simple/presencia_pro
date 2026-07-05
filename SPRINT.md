@@ -1307,8 +1307,8 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 **Partición de PRs (aprobada — chicos y verificables, cadence del barbero):**
 1. **Shell** — `AssistantControlDesk.tsx`, layout dos zonas (panorama scroll propio + cola sticky), montado en `/dashboard`. *Puro front.* 🟢 done (PR-1, rama `feat/assistant-control-desk-shell`)
 2. **Panorama** — `PanoramaTimeline.tsx`: carriles barbero×tiempo, ventana 3h navegable, "Ahora", densidad 8, sub-rejilla 15 min, citas reales. *Puro front (lee props).* ← **este PR**
-3. **Gesto click-to-place** — levantar cita → huecos válidos por duración → chips de destino → "NO CABE". *Puro front (drop local).*
-4. **Cablear mutaciones** — drop → `rescheduleAppointment`; walk-in → `createAssistantAppointment`; polling → `refreshAssistantAppointments`; estados carga/error. *Toca actions (consume).*
+3. **Gesto click-to-place + reschedule real** — levantar cita → huecos válidos por duración → chips → **drop → `rescheduleAppointment`** (optimista + revert). *Front + action (Gabriel fusionó el drop-mutation aquí).* ← **este PR**
+4. **Polling + walk-in a mano** — `refreshAssistantAppointments` (con skeleton/error) + `createAssistantAppointment`. *Toca actions.*
 5. **Cola de acción** — `ActionQueue.tsx`: walk-in/atrasados/sugerencias 1-tap + acciones de tarjeta. *Mixto.*
 6. **Granularidad fina + pulido** — toggle ajuste-fino, cola encogida vacía (§7.6), `prefers-reduced-motion`, microcopy CDMX, clip de bordes. *Puro front.*
 
@@ -1341,6 +1341,42 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 - **Estado "atrasado"** (border rojo + pulso): derivado aquí de forma conservadora (confirmada cuya ventana ya pasó sin cerrar); su lógica fina (retrasos reportados, `adjusted_starts_at`) vive en la cola (PR-5).
 - 🟠 **HALLAZGO (pre-existente, query compartida) — límite de día en UTC en `getDayAppointments`:** filtra `starts_at` entre `${date}T00:00:00` y `T23:59:59` interpretados en **UTC**, no en la tz del negocio. Para un negocio UTC-6 (America/Mexico_City), las citas **≥18:00 locales caen al día UTC siguiente y se descartan** (y las de 18:00–24:00 del día previo se colarían como "hoy"). Detectado en el seed (una cita 18:13 no apareció). **AssistantLayout usa la MISMA query** → mismo bug ahí. Fuera del alcance de PR-2 (se reusa la fuente por decisión de Gabriel); registrado en Backlog post-sprint para arreglo propio (usar límites en tz del negocio).
 
+**PR-3 (gesto click-to-place) — criterios de aceptación:**
+- [x] Modelo **click-to-place** (NO drag): tocar cita movible → se **levanta** (ring + resto atenuado) → chips de hora **solo donde CABE** el servicio (validación por duración) → tocar chip → la cita se reagenda. Cancelar: **Esc**, botón Cancelar, o tocar la cita levantada de nuevo. Estado en React (`move`/`fineMode`), destinos derivados en render (no DOM imperativo).
+- [x] **Citas movibles**: pending/confirmada y **futura** (no en-curso/pasada/cerrada) — coincide con lo que `rescheduleAppointment` acepta. Grip `⠿` como affordance.
+- [x] **Destinos válidos por carril**: complemento libre de la agenda del barbero (excluye la cita levantada), acotado a `[max(ahora, turno_inicio), turno_fin]`. Chips **sugeridos** (lo antes posible + :00/:30 ≥30 min) por defecto; toggle **"Cada 15 min"** → chips finos. Huecos demasiado cortos → marca **"no cabe"** (no clickable).
+- [x] **Drop → `rescheduleAppointment`** (ya existe, gate 2b; recepción sin restricción): `{ appointmentId, newDate, newStartTime, newStaffId }`. **Update optimista** (la cita vuela ya) + **revert + toast de error** si la action falla (conflicto de solape, etc.); `router.refresh()` reconcilia con el servidor. `appointments` subido a estado del desk (siembra de props; base del polling de PR-4).
+- [x] **Verificado por RUTA REAL** (seed reversible: 2 barberos con turno + citas futuras confirmadas + token): levantar → 11 chips sugeridos → toggle a 22 chips cada-15 → **drop cross-barbero** (Cliente Gesto 1: Test A 18:10 → **Test B 18:30**) **persistido en DB** (`staff_id` cambiado, `starts_at`=18:30, `modified_at` estampado); "no cabe" visible para combo de 45 min; Esc cancela; consola sin errores. Seed 100% revertido; demo intacto. `tsc` 0 · `lint` 0 errores · `build` verde.
+
+**Iteración "dónde cabe" = datos completos (decisión Gabriel):** un freeIntervals cliente-solo (v1 del PR) ignoraba breaks/blocks/exceptions, y el reschedule server tampoco los checa (solo overlap de citas). Se descartó tocar el engine (`getDayAvailability` cuenta la cita movida como ocupada → rompe el "nudge"; y da salida deduplicada). En su lugar, el panorama recibe **datos completos** y valida en cliente (excluye la cita levantada naturalmente):
+- [x] **Breaks** del día (`staff_availability.break_start/break_end` — se agregaron al select de `getActiveStaffWithAvailability`, aditivo) → restados de los destinos + banda "no disp.".
+- [x] **Blocks** aprobados (`initialStaffBlocks`, ya llegaban al desk) → restados + banda "no disp.".
+- [x] **Exceptions** de fecha (`getDayExceptions`, query nueva): día libre → saca al barbero del panorama; horario especial → reemplaza su ventana.
+- [x] **Verificado por ruta real** (seed con descanso 19:00–19:30 + bloqueo aprobado 20:00–20:30): los chips **saltan ambos** (chip 20:00 desaparece tras cargar el bloqueo); contraste vs. un barbero sin restricciones (chips 15-min continuos). 2 bandas "no disp." renderizadas.
+
+**Dos bugs de tz descubiertos al cablear:**
+- 🟢 **`isTodayInTz`** — queda en ESTE PR: es un helper **cliente local del desk del asistente**, NO una query compartida (no toca barbero/dueño). `isToday` usaba fecha UTC → entre 18:00–24:00 en México el header mostraba la fecha en vez de "Hoy" y perdía el pip "Ahora". Fijado a la tz del negocio (`en-CA` locale).
+- 🟠 **`getStaffBlocksForDay`** — **EXTRAÍDO a su propio PR → S6-DATA-03 (#65, mergeado)** por ser query compartida (AssistantLayout/gestion/dueño, family S6-DATA-01). No vive en este PR; el panorama consume el resultado ya corregido.
+
+**Lo que la maqueta no anticipó (marcado):** el "colocar" alimenta `rescheduleAppointment` con la hora-de-pared del negocio, pero la action la interpreta en la **tz del servidor** (`setHours` local) — **S6-DATA-02** (Backlog). El FLIP/"fly" → transición CSS; cancel por click-en-fondo → refinamiento (hay Esc + Cancelar + tocar-de-nuevo). Exceptions implementadas pero verificadas por código, no por seed en vivo.
+
+**Política de validación (decisión Gabriel) — IMPLEMENTADA (Opción C):** el sistema es copiloto, no jefe. Dos tipos:
+- **Imposible-duro** (fuera de turno / descanso / bloqueo) → **no se ilumina** (frontera física; el tiempo disponible = turno − descansos − bloqueos).
+- **Solape blando** (el destino pisaría otra cita) → **se ilumina en ámbar con ⚠** + aviso "se solaparía N min con [cliente]"; **clickeable — la recepción PUEDE forzar** (sabe cosas que el sistema no).
+- **Limpio** (no pisa nada) → chip teal normal.
+
+**El choque y su solución (Opción C — investigación read-only aprobada por Gabriel):** la constraint DB `no_overlapping_appointments` (EXCLUDE gist, migración 016 — última defensa anti-doble-reserva del bot) prohíbe TODO solape. Se investigaron 3 opciones (A quitar / B no permitir / C columna condicionada); Gabriel eligió **C**. **Migración 046**: `allow_overlap boolean DEFAULT false` + se recrea el EXCLUDE con `WHERE (status NOT IN cancelled AND allow_overlap = false)`. **Solo las filas marcadas `allow_overlap=true` quedan exentas**, y **solo `rescheduleAppointment(force=true)` las marca** — solo cuando un HUMANO fuerza. El bot, `createAssistantAppointment`, `PATCH /api/appointments` nunca lo setean (default false) → **siguen 100% protegidos** contra el solape accidental. Distingue intencional-humano vs accidental-automático sin abrir la puerta a todos.
+
+**PR-3 — solape blando (Opción C) — criterios:**
+- [x] **Migración 046** aplicada al demo: columna + constraint condicionado. Verificado en DB: solape normal → **bloqueado (23P01)**; solape con `allow_overlap=true` → **permitido**. ⚠️ **Deuda de setup (no bloqueante):** ya está aplicada al proyecto demo; si se **recrea el proyecto Supabase**, hay que **re-aplicar `046_allow_overlap.sql`** (mismo caveat que los crons de edge functions).
+- [x] **`rescheduleAppointment` param `force`**: salta el pre-check de solape + marca `allow_overlap=true`; reacomodo limpio resetea a false. Gate 2b y notificaciones intactas.
+- [x] **Cliente**: `laneDrops` clasifica limpio (teal) / solape (ámbar ⚠ con minutos y cliente); frontera dura = turno − descansos − bloqueos. Toast de solape (`warn`, no frena). Tokens ámbar nuevos en `globals.css`.
+- [x] **Confirmación consciente en contexto** (decisión Gabriel: consciente pero buen UX, sin formulario): tocar un chip ámbar NO mueve — abre un prompt en la barra de modo-mover "⚠ Se encima N min con [cliente] a las HH:MM" + **"Encajar igual"** (1 tap → mueve) / **"Elegir otra hora"** (vuelve a los chips, no mueve). Chip limpio (teal) mueve directo. Esc con prompt abierto → cancela solo el prompt.
+- [x] **Solape aprobado VISIBLE** en el panorama: el bloque con `allow_overlap=true` se pinta con **anillo ámbar + ⚠** (title "solape aprobado") → se entiende que fue a propósito, no un bug. `allow_overlap` se trae en `getDayAppointments` + `DashboardAppointment`.
+- [x] **Audit registra el solape aprobado** — sin migración extra: el trigger 2c-i ya guarda `new_data` (fila entera → `allow_overlap`) + `changed_fields`. Verificado: la fila `rescheduled` tiene `new_data->>'allow_overlap'='true'` y `'allow_overlap' ∈ changed_fields`.
+- [x] **Verificado por ruta real — los 4 casos** (seed Ana + Beto movible + descanso 21:00–21:30): (1) **limpio** → chip teal → mueve; (2) **imposible-duro** → descanso = banda "no disp.", no se ilumina; (3) **solape sin confirmar** → prompt, Beto NO se mueve, "Elegir otra hora" vuelve a chips; (4) **solape confirmado** → "Encajar igual" → Beto 20:07–20:37 `allow_overlap=true` solapando a Ana (audit lo registra), **indicador ⚠+anillo ámbar visible**. **Constraint sigue protegiendo**: insert normal (source='bot', sin flag) solapando → **rechazado (23P01)** pese a la fila aprobada al lado. Seed revertido; `tsc` 0 · `lint` 0 · `build` verde.
+- **Aislable al reschedule manual (verificado):** el flag solo lo setea `rescheduleAppointment(force=true)` desde la confirmación consciente del asistente; bot/create/PATCH nunca lo pasan → su red queda **idéntica** (la protección es DB-level EXCLUDE, más fuerte que un trigger app — no bypasseable). Falta (capa posterior): mismo gesto para **encajar walk-in** (create, con la cola PR-5) + aviso-WhatsApp.
+
 **Frontera:** NO reescribir server actions (se consumen). NO tocar `/staff`, `/staff/gestion`, owner/admin ni el flujo del bot. NO borrar `AssistantLayout` (barbero-gestión lo usa). Una pieza a la vez, cada una contra la maqueta congelada; reportar y esperar OK entre PRs.
 
 **Notas de ejecución:**
@@ -1370,12 +1406,26 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
+#### S6-DATA-03 — `getStaffBlocksForDay`: límite de día en tz del negocio, no en UTC 🟢 done (2026-07-04, PR #65 mergeado)
+**Origen:** mismo bug que S6-DATA-01, en otra **query compartida**. Detectado al cablear el gesto (S6-UI-02 PR-3): un bloqueo aprobado 20:00–20:30 local no se restaba de los destinos porque `getStaffBlocksForDay` lo descartaba. **El bug:** filtraba el día con `${date}T00:00:00`..`T23:59:59` en **UTC** → para un negocio UTC-6, los bloqueos ≥18:00 locales caían al día UTC siguiente. **El fix:** resuelve `businesses.timezone` + usa `localDayRangeUtc` (exportado desde `dashboard.types`) para los límites en tz. **Query compartida** — la usan el timeline del asistente (`AssistantLayout`), del barbero (`/staff/gestion`) y el panorama nuevo → los tres recuperan sus bloqueos de tarde. **Extraído del PR del gesto (#64)** para historia/revert independiente (decisión Gabriel: no mezclar tz-fix con el gesto). `tsc` 0 · `eslint` 0.
+
+---
+
 ## Backlog post-sprint (NO trabajar en este sprint)
 
 Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra al sprint sin renegociación.
 
 ### ✅ `getDayAppointments` límite de día en UTC → **PROMOVIDO a S6-DATA-01 (done, 2026-07-04)**
 Gabriel lo priorizó e intercaló antes del gesto (PR-3 de S6-UI-02). Ver el bloque **S6-DATA-01** en la sección de tareas. Ya no es backlog.
+
+### 🟠 S6-DATA-02 — `rescheduleAppointment` interpreta `newStartTime` en la tz del servidor, no del negocio
+`rescheduleAppointment` calcula el nuevo `starts_at` con `new Date(\`${input.newDate}T00:00:00\`).setHours(hh, mm)` → usa la tz del **servidor** (Vercel = UTC), no la del negocio. Misma familia que S6-DATA-01. En el demo (servidor CST ≈ negocio CST durante dev local) coincide, pero en producción (servidor UTC) una hora `newStartTime='18:00'` se guardaría como 18:00 UTC = 12:00 local México → **la cita reagendada aterriza 6h antes de lo que el asistente eligió**. Detectado al cablear el gesto click-to-place (S6-UI-02 PR-3), que alimenta `newStartTime` con la hora-de-pared del negocio. Fix: interpretar `newStartTime`/`newDate` en `businesses.timezone` al construir el `timestamptz` (reusar el helper `zonedWallTimeToUtc` de `dashboard.types.ts`). Revisar también `createAssistantAppointment` por el mismo patrón. Tarea propia (toca action compartida + notificaciones/recordatorios que derivan del `starts_at`).
+
+### 🟠 S6-DATA-04 — Default de fecha del dashboard en UTC, no en tz del negocio
+`dashboard/page.tsx` (y `staff/gestion`, `staff`) computan el día por defecto con `toDateStr(new Date())` → fecha del **servidor** (Vercel = UTC). En producción, entre 18:00–24:00 hora de México, `new Date()` UTC ya es "mañana" → el dashboard abriría por defecto en el día equivocado (y `getDayAppointments`/blocks buscarían el día equivocado). Family S6-DATA-01. Detectado al cablear el gesto (el cliente ya lo mitiga en el header con `isTodayInTz`, pero el **default del servidor** sigue en UTC). Fix: calcular "hoy" en `businesses.timezone` al resolver el default de `?date`. Afecta owner/admin/asistente/gestion por igual (query/param compartido).
+
+### ✅ Solape blando forzado → **RESUELTO en S6-UI-02 PR-3 (Opción C, 2026-07-04)**
+Ya no es backlog. Gabriel pidió investigar el constraint antes de tocarlo; se evaluaron 3 opciones y eligió **C** (columna `allow_overlap` + EXCLUDE condicionado, migración 046). Ver el bloque **S6-UI-02 → "PR-3 — solape blando (Opción C)"** en la sección de tareas: el bot y los flujos automáticos siguen 100% protegidos; solo el reacomodo manual explícito del asistente puede forzar. Verificado por ruta real + DB (solape normal bloqueado / forzado permitido).
 
 ### 🔴 DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path de agendamiento
 

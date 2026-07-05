@@ -6,13 +6,13 @@
 // la rama role==='assistant' de dashboard/page.tsx; /staff/gestion (barbero)
 // sigue usando AssistantLayout intacto.
 //
-// Este es el SHELL (PR-1 del cableado): estructura de dos zonas (panorama con
-// scroll propio + cola de acción fija) + header con datos reales. Las piezas
-// ricas llegan en sus PRs:
-//   · PanoramaTimeline (carriles, ventana 3h, gesto) → PR-2/PR-3
-//   · Cableado de mutaciones (reschedule/create/polling) → PR-4
-//   · ActionQueue (walk-in, atrasados, sugerencias 1-tap) → PR-5
-//   · Granularidad fina + pulido → PR-6
+// Estructura de dos zonas (panorama con scroll propio + cola de acción fija) +
+// header con datos reales. Estado de las piezas:
+//   · PanoramaTimeline — carriles, ventana 3h navegable, densidad     ✓ PR-2
+//   · Gesto click-to-place → rescheduleAppointment (este handleMove)   ✓ PR-3
+//   · Polling + walk-in (createAssistantAppointment)                   → PR-4
+//   · ActionQueue (walk-in, atrasados, sugerencias 1-tap)             → PR-5
+//   · Granularidad fina + pulido                                       → PR-6
 //
 // Sistema visual: tokens Zentriq claro de globals.css (bg-canvas, teal, ink,
 // border-line, tabular-nums…). Cero paleta numérica de Tailwind.
@@ -21,8 +21,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import type { DashboardAppointment } from '@/lib/dashboard.types';
+import type { DashboardAppointment, DayException } from '@/lib/dashboard.types';
 import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
+import { rescheduleAppointment } from '@/app/staff/assistant-actions';
 import PanoramaTimeline from './PanoramaTimeline';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
@@ -32,10 +33,17 @@ type StaffOption = {
   name: string;
 };
 
+type AvailabilityToday = {
+  start_time: string;
+  end_time: string;
+  break_start?: string | null;
+  break_end?: string | null;
+};
+
 type StaffWithAvailability = {
   id: string;
   name: string;
-  availabilityToday: { start_time: string; end_time: string } | null;
+  availabilityToday: AvailabilityToday | null;
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -51,6 +59,7 @@ export type AssistantControlDeskProps = {
   staffOptions: StaffOption[];                   // barberos activos (para nueva cita)
   staffWithAvailability: StaffWithAvailability[];// barberos con horario (para panorama)
   initialStaffBlocks: StaffBlockForDay[];        // bloques aprobados del día
+  dayExceptions: DayException[];                 // día libre / horario especial por fecha
 };
 
 // ─── Helpers de fecha ─────────────────────────────────────────────────────────
@@ -66,8 +75,40 @@ function formatDateHeader(dateStr: string): string {
   return d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-function isToday(dateStr: string): boolean {
-  return dateStr === new Date().toISOString().slice(0, 10);
+// Hoy en la tz del NEGOCIO (no UTC): entre 18:00 y 24:00 en México, la fecha UTC
+// ya es "mañana" y rompería el "Hoy" del header. 'en-CA' → 'YYYY-MM-DD'.
+function isTodayInTz(dateStr: string, timeZone: string): boolean {
+  return dateStr === new Date().toLocaleDateString('en-CA', { timeZone });
+}
+
+function todayInTz(timeZone: string): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone });
+}
+
+// Instante UTC ISO de una hora-de-pared (min desde medianoche) en la tz del negocio.
+// Espejo de zonedWallTimeToUtc de dashboard.types.ts — para el update optimista del drop.
+function wallMinToIso(dateStr: string, min: number, timeZone: string): string {
+  const timeStr = `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}:00`;
+  const asIfUtc = new Date(`${dateStr}T${timeStr}Z`).getTime();
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(asIfUtc));
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  const localAsUtc = Date.UTC(
+    Number(m['year']), Number(m['month']) - 1, Number(m['day']),
+    Number(m['hour'] === '24' ? '0' : m['hour']), Number(m['minute']), Number(m['second']),
+  );
+  return new Date(asIfUtc - (localAsUtc - asIfUtc)).toISOString();
+}
+
+function fmtHora(min: number): string {
+  const h = Math.floor(min / 60);
+  const mm = String(min % 60).padStart(2, '0');
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${mm}`;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -77,6 +118,8 @@ export default function AssistantControlDesk({
   timezone,
   initialAppointments,
   staffWithAvailability,
+  initialStaffBlocks,
+  dayExceptions,
 }: AssistantControlDeskProps) {
   const router = useRouter();
 
@@ -101,24 +144,114 @@ export default function AssistantControlDesk({
     router.push(`/dashboard?date=${targetDate}`);
   }
 
-  const today = isToday(date);
+  const today = isTodayInTz(date, timezone);
+
+  // Citas en estado local: sembradas de props (server) para poder mover en optimista
+  // y (a futuro, PR-4) refrescar por polling. Se re-siembra cuando cambian las props
+  // (navegación de fecha o router.refresh()).
+  const [appointments, setAppointments] = useState<DashboardAppointment[]>(initialAppointments);
+  useEffect(() => {
+    setAppointments(initialAppointments);
+  }, [initialAppointments]);
+
+  // Toast breve para confirmar/errar el reagendado.
+  const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' | 'warn' } | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   // Barberos del panorama: los que TIENEN TURNO HOY (availabilityToday != null →
   // fila en staff_availability para el día), ordenados por actividad (más citas
   // arriba — el asistente los vigila más). Un barbero con turno pero SIN citas SÍ
   // aparece: su carril vacío = disponibilidad para encajar walk-ins, no ruido.
   const apptCountByStaff = new Map<string, number>();
-  for (const a of initialAppointments) {
+  for (const a of appointments) {
     if (a.status === 'cancelled') continue;
     apptCountByStaff.set(a.staff.id, (apptCountByStaff.get(a.staff.id) ?? 0) + 1);
   }
-  const workingStaff = [...staffWithAvailability]
+  // Excepciones de fecha: día libre saca al barbero del panorama; horario especial
+  // reemplaza su ventana del día. Se aplican ANTES del filtro "trabaja hoy".
+  const exceptionByStaff = new Map<string, DayException>();
+  for (const e of dayExceptions) exceptionByStaff.set(e.staff_id, e);
+
+  const workingStaff = staffWithAvailability
+    .map((s) => {
+      const ex = exceptionByStaff.get(s.id);
+      if (!ex) return s;
+      if (!ex.available) return { ...s, availabilityToday: null }; // día libre
+      if (ex.start_time && ex.end_time && s.availabilityToday) {
+        // Horario especial: reemplaza la ventana (y elimina el break del día base).
+        return {
+          ...s,
+          availabilityToday: { start_time: ex.start_time, end_time: ex.end_time, break_start: null, break_end: null },
+        };
+      }
+      return s;
+    })
     .filter((s) => s.availabilityToday !== null)
     .sort(
       (a, b) =>
         (apptCountByStaff.get(b.id) ?? 0) - (apptCountByStaff.get(a.id) ?? 0) ||
         a.name.localeCompare(b.name),
     );
+
+  // Drop del gesto → reagendar. Optimista (la cita "vuela" ya) + revert si la
+  // action falla (conflicto de solape, etc.). rescheduleAppointment tiene el gate
+  // 2b (barbero solo sus citas; recepción sin restricción).
+  async function handleMove(
+    apptId: string,
+    newStaffId: string,
+    newStartMin: number,
+    opts?: { force: boolean; overlapMin: number; overlapName: string },
+  ) {
+    const snapshot = appointments;
+    const appt = snapshot.find((a) => a.id === apptId);
+    if (!appt) return;
+    const dur = Math.max(
+      1,
+      Math.round((Date.parse(appt.ends_at) - Date.parse(appt.starts_at)) / 60_000),
+    );
+    const startIso = wallMinToIso(date, newStartMin, timezone);
+    const endIso = new Date(Date.parse(startIso) + dur * 60_000).toISOString();
+    const newStaffName = workingStaff.find((s) => s.id === newStaffId)?.name ?? appt.staff.name;
+
+    setAppointments((cur) =>
+      cur.map((a) =>
+        a.id === apptId
+          ? {
+              ...a,
+              staff: { id: newStaffId, name: newStaffName },
+              starts_at: startIso,
+              ends_at: endIso,
+              status: 'confirmed',
+              allow_overlap: opts?.force === true, // solape aprobado → indicador visible ya
+            }
+          : a,
+      ),
+    );
+
+    try {
+      await rescheduleAppointment({
+        appointmentId: apptId,
+        newDate: date,
+        newStartTime: `${String(Math.floor(newStartMin / 60)).padStart(2, '0')}:${String(newStartMin % 60).padStart(2, '0')}`,
+        newStaffId,
+        force: opts?.force, // solape intencional forzado por la recepción
+      });
+      // Aviso sutil de solape forzado (no frena el flujo).
+      const msg = opts?.force
+        ? `Movida a ${newStaffName} · ${fmtHora(newStartMin)} · se solapa ${opts.overlapMin} min con ${opts.overlapName}`
+        : `Movida a ${newStaffName} · ${fmtHora(newStartMin)}`;
+      setToast({ msg, kind: opts?.force ? 'warn' : 'ok' });
+      router.refresh(); // reconciliar con la verdad del servidor
+    } catch (err) {
+      setAppointments(snapshot); // revert
+      const msg = err instanceof Error ? err.message : 'No se pudo reagendar';
+      setToast({ msg, kind: 'err' });
+    }
+  }
 
   return (
     <div className="min-h-dvh bg-canvas bg-grid text-ink">
@@ -158,7 +291,7 @@ export default function AssistantControlDesk({
               </button>
               {!today && (
                 <button
-                  onClick={() => navigate(new Date().toISOString().slice(0, 10))}
+                  onClick={() => navigate(todayInTz(timezone))}
                   className="ml-1 rounded-pill border border-line px-3 py-1 text-xs font-semibold text-teal-ink transition hover:bg-tint-1"
                 >
                   Hoy
@@ -171,7 +304,9 @@ export default function AssistantControlDesk({
             {/* Stats */}
             <div className="flex items-center gap-4">
               <div className="flex flex-col leading-tight">
-                <b className="tabular-nums text-base">{initialAppointments.length}</b>
+                <b className="tabular-nums text-base">
+                  {appointments.filter((a) => a.status !== 'cancelled').length}
+                </b>
                 <span className="text-xs text-faint">Citas hoy</span>
               </div>
               <div className="flex flex-col leading-tight">
@@ -209,8 +344,10 @@ export default function AssistantControlDesk({
               <PanoramaTimeline
                 date={date}
                 timezone={timezone}
-                appointments={initialAppointments}
+                appointments={appointments}
                 staff={workingStaff}
+                staffBlocks={initialStaffBlocks}
+                onMove={handleMove}
               />
             </section>
 
@@ -236,6 +373,22 @@ export default function AssistantControlDesk({
           </div>
         </div>
       </div>
+
+      {/* Toast de reagendado (confirmación / error) */}
+      {toast && (
+        <div
+          role="status"
+          className={`fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-pill border px-4 py-2 text-sm font-semibold shadow-card ${
+            toast.kind === 'ok'
+              ? 'border-teal-border bg-tint-1 text-teal-ink'
+              : toast.kind === 'warn'
+                ? 'border-amber-border bg-amber-tint text-amber'
+                : 'border-red-border bg-red-tint text-red-ink'
+          }`}
+        >
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }

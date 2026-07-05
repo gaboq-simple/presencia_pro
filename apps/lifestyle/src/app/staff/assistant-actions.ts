@@ -474,6 +474,9 @@ type RescheduleInput = {
   newDate:       string;   // 'YYYY-MM-DD' en hora local del cliente
   newStartTime:  string;   // 'HH:MM'
   newStaffId?:   string;   // si cambia el barbero; si omitido, mantiene el actual
+  force?:        boolean;  // recepción FUERZA un solape intencional (S6-UI-02 PR-3):
+                           // salta el pre-check de solape y marca allow_overlap=true
+                           // (exenta del constraint). Los flujos automáticos nunca lo usan.
 };
 
 /**
@@ -521,19 +524,23 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
   const newStartsAt  = startDate.toISOString();
   const newEndsAt    = endDate.toISOString();
 
-  // Pre-check de conflictos (el EXCLUDE constraint del DB es la red de seguridad)
-  const { data: conflicts } = await supabase
-    .from('appointments')
-    .select('id')
-    .eq('staff_id', newStaffId)
-    .neq('id', input.appointmentId)
-    .neq('status', 'cancelled')
-    .lt('starts_at', newEndsAt)
-    .gt('ends_at', newStartsAt)
-    .limit(1);
+  // Pre-check de conflictos (el EXCLUDE constraint del DB es la red de seguridad).
+  // Con force=true (la recepción forzó un solape intencional) se salta: el drop
+  // marcará allow_overlap=true y quedará exenta del constraint.
+  if (!input.force) {
+    const { data: conflicts } = await supabase
+      .from('appointments')
+      .select('id')
+      .eq('staff_id', newStaffId)
+      .neq('id', input.appointmentId)
+      .neq('status', 'cancelled')
+      .lt('starts_at', newEndsAt)
+      .gt('ends_at', newStartsAt)
+      .limit(1);
 
-  if (conflicts && conflicts.length > 0) {
-    throw new Error('El nuevo horario tiene conflicto con otra cita');
+    if (conflicts && conflicts.length > 0) {
+      throw new Error('El nuevo horario tiene conflicto con otra cita');
+    }
   }
 
   const { error } = await supabase
@@ -543,6 +550,9 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
       ends_at:              newEndsAt,
       staff_id:             newStaffId,
       status:               'confirmed',
+      // Solo un solape FORZADO por la recepción queda exento del constraint.
+      // Un reacomodo limpio resetea el flag (allow_overlap=false).
+      allow_overlap:        input.force === true,
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
