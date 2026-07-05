@@ -295,9 +295,10 @@ function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: string):
 
 /**
  * Rango `[inicio, fin)` del día `date` en la tz del negocio, como instantes UTC ISO.
- * El día local va de 00:00 a 00:00 del día siguiente.
+ * El día local va de 00:00 a 00:00 del día siguiente. Exportado para que otras
+ * queries del día (bloqueos, etc.) usen los mismos límites tz-correctos.
  */
-function localDayRangeUtc(date: string, timeZone: string): { start: string; end: string } {
+export function localDayRangeUtc(date: string, timeZone: string): { start: string; end: string } {
   const next = new Date(`${date}T00:00:00Z`);
   next.setUTCDate(next.getUTCDate() + 1);
   const nextStr = next.toISOString().slice(0, 10);
