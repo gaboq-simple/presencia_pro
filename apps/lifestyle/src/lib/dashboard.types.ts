@@ -375,7 +375,7 @@ export async function getActiveStaffWithAvailability(
       id,
       name,
       role,
-      availability:staff_availability(day_of_week, start_time, end_time)
+      availability:staff_availability(day_of_week, start_time, end_time, break_start, break_end, is_active)
     `)
     .eq('business_id', businessId)
     .eq('active', true)
@@ -389,9 +389,37 @@ export async function getActiveStaffWithAvailability(
     id: s.id,
     name: s.name,
     role: s.role as StaffRole,
+    // Solo días activos cuentan como "trabaja hoy" (is_active default true).
     availabilityToday:
-      s.availability.find((a) => a.day_of_week === dayOfWeek) ?? null,
+      s.availability.find((a) => a.day_of_week === dayOfWeek && a.is_active !== false) ?? null,
   }));
+}
+
+// ─── Query: excepciones de horario del día (día libre / horario especial) ──────
+
+export type DayException = {
+  staff_id: string;
+  available: boolean;              // false = día libre
+  start_time: string | null;      // 'HH:MM:SS' — horario especial si available
+  end_time: string | null;
+};
+
+/**
+ * Excepciones de fecha específica (staff_schedule_exceptions) para un día del negocio.
+ * Consumido por la mesa de control para acotar la disponibilidad del panorama.
+ */
+export async function getDayExceptions(
+  businessId: string,
+  date: string,
+): Promise<DayException[]> {
+  const supabase = getServiceClient();
+  const { data, error } = await supabase
+    .from('staff_schedule_exceptions')
+    .select('staff_id, available, start_time, end_time')
+    .eq('business_id', businessId)
+    .eq('exception_date', date);
+  if (error) throw new Error(`getDayExceptions failed: ${error.message}`);
+  return (data ?? []) as DayException[];
 }
 
 // ─── Función pura: ingresos del día ──────────────────────────────────────────

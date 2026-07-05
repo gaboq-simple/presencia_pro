@@ -32,14 +32,22 @@ const MIN_GAP = 15;     // min — no dibujar huecos más cortos que esto
 export type PanoramaStaff = {
   id: string;
   name: string;
-  availabilityToday: { start_time: string; end_time: string } | null;
+  availabilityToday: {
+    start_time: string;
+    end_time: string;
+    break_start?: string | null;
+    break_end?: string | null;
+  } | null;
 };
+
+export type PanoramaBlock = { staffId: string; startsAt: string; endsAt: string };
 
 type PanoramaTimelineProps = {
   date: string;            // 'YYYY-MM-DD' del día mostrado
   timezone: string;        // IANA timezone del negocio
   appointments: DashboardAppointment[];
   staff: PanoramaStaff[];  // barberos (carriles), en orden
+  staffBlocks: PanoramaBlock[]; // bloqueos aprobados (vacaciones/emergencias) del día
   // Reagendar (drop del gesto). El desk lo conecta a rescheduleAppointment.
   onMove?: (apptId: string, newStaffId: string, newStartMin: number) => void;
 };
@@ -139,6 +147,7 @@ export default function PanoramaTimeline({
   timezone,
   appointments,
   staff,
+  staffBlocks,
   onMove,
 }: PanoramaTimelineProps) {
   // "Ahora" en vivo (min-desde-medianoche, tz) + el día de hoy en la tz del negocio.
@@ -240,6 +249,21 @@ export default function PanoramaTimeline({
       const av = s.availabilityToday;
       const from = av ? hhmmToMin(av.start_time) : ds;
       const to = av ? hhmmToMin(av.end_time) : de;
+
+      // No-disponible: descanso del día + bloqueos aprobados (vacaciones/emergencias).
+      const unavail: Interval[] = [];
+      if (av?.break_start && av?.break_end) {
+        unavail.push({ start: hhmmToMin(av.break_start), end: hhmmToMin(av.break_end) });
+      }
+      for (const bl of staffBlocks) {
+        if (bl.staffId !== s.id) continue;
+        const bs = minutesOfDay(bl.startsAt, timezone);
+        const be = minutesOfDay(bl.endsAt, timezone);
+        if (be > bs) unavail.push({ start: bs, end: be });
+      }
+      unavail.sort((a, b) => a.start - b.start);
+
+      // Huecos "libre" (visual): entre citas, dentro del turno.
       const gaps: Interval[] = [];
       let cursor = from;
       for (const b of blocks) {
@@ -247,11 +271,11 @@ export default function PanoramaTimeline({
         cursor = Math.max(cursor, b.start + b.dur);
       }
       if (to - cursor >= MIN_GAP) gaps.push({ start: cursor, end: to });
-      return { staff: s, blocks, gaps, hasAvail: av !== null, availFrom: from, availTo: to };
+      return { staff: s, blocks, gaps, unavail, hasAvail: av !== null, availFrom: from, availTo: to };
     });
 
     return { lanes: lanesOut, dayStart: ds, dayEnd: de };
-  }, [appointments, staff, timezone, isToday, nowMin]);
+  }, [appointments, staff, staffBlocks, timezone, isToday, nowMin]);
 
   // ── Ventana navegable ─────────────────────────────────────────────────────
   const maxWinStart = Math.max(dayStart, dayEnd - WIN);
@@ -285,11 +309,11 @@ export default function PanoramaTimeline({
     const dur = move.dur;
     const floor = isToday && nowMin !== null ? nowMin : -Infinity;
     const domainStart = Math.max(lane.availFrom, floor);
-    // Ocupado (excluye la cita levantada).
-    const occ = lane.blocks
-      .filter((b) => b.id !== move.apptId)
-      .map((b) => [b.start, b.start + b.dur] as [number, number])
-      .sort((x, y) => x[0] - y[0]);
+    // Ocupado: otras citas (excluye la levantada) + descanso + bloqueos.
+    const occ = [
+      ...lane.blocks.filter((b) => b.id !== move.apptId).map((b) => [b.start, b.start + b.dur] as [number, number]),
+      ...lane.unavail.map((u) => [u.start, u.end] as [number, number]),
+    ].sort((x, y) => x[0] - y[0]);
     // Complemento libre en [domainStart, availTo].
     const free: Interval[] = [];
     let cur = domainStart;
@@ -431,7 +455,7 @@ export default function PanoramaTimeline({
       ) : (
         <ul>
           {lanes.map((lane) => {
-            const { staff: s, blocks, gaps, hasAvail } = lane;
+            const { staff: s, blocks, gaps, unavail, hasAvail } = lane;
             const drops = laneDrops(lane);
             return (
               <li
@@ -464,6 +488,30 @@ export default function PanoramaTimeline({
                     backgroundSize: `${(15 / WIN) * 100}% 100%`,
                   }}
                 >
+                  {/* Bandas no-disponibles: descanso + bloqueos (siempre visibles) */}
+                  {unavail.map((u, i) => {
+                    const l = pctOf(u.start);
+                    const r = pctOf(u.end);
+                    if (r <= 0.2 || l >= 99.8) return null;
+                    const cl = Math.max(l, 0);
+                    const cr = Math.min(r, 100);
+                    return (
+                      <div
+                        key={`unavail-${i}`}
+                        className="absolute inset-y-0 z-[1] grid place-items-center overflow-hidden rounded-[8px] text-[9px] font-semibold text-faint"
+                        style={{
+                          left: `${cl}%`,
+                          width: `${cr - cl}%`,
+                          backgroundImage:
+                            'repeating-linear-gradient(135deg, transparent 0 5px, var(--color-line-2) 5px 6px)',
+                        }}
+                        title="No disponible (descanso o bloqueo)"
+                      >
+                        no disp.
+                      </div>
+                    );
+                  })}
+
                   {/* Huecos libres (ocultos durante el gesto: los reemplazan los chips) */}
                   {!move &&
                     gaps.map((g, i) => {

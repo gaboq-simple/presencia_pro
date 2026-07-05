@@ -21,7 +21,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import type { DashboardAppointment } from '@/lib/dashboard.types';
+import type { DashboardAppointment, DayException } from '@/lib/dashboard.types';
 import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
 import { rescheduleAppointment } from '@/app/staff/assistant-actions';
 import PanoramaTimeline from './PanoramaTimeline';
@@ -33,10 +33,17 @@ type StaffOption = {
   name: string;
 };
 
+type AvailabilityToday = {
+  start_time: string;
+  end_time: string;
+  break_start?: string | null;
+  break_end?: string | null;
+};
+
 type StaffWithAvailability = {
   id: string;
   name: string;
-  availabilityToday: { start_time: string; end_time: string } | null;
+  availabilityToday: AvailabilityToday | null;
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -52,6 +59,7 @@ export type AssistantControlDeskProps = {
   staffOptions: StaffOption[];                   // barberos activos (para nueva cita)
   staffWithAvailability: StaffWithAvailability[];// barberos con horario (para panorama)
   initialStaffBlocks: StaffBlockForDay[];        // bloques aprobados del día
+  dayExceptions: DayException[];                 // día libre / horario especial por fecha
 };
 
 // ─── Helpers de fecha ─────────────────────────────────────────────────────────
@@ -67,8 +75,14 @@ function formatDateHeader(dateStr: string): string {
   return d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-function isToday(dateStr: string): boolean {
-  return dateStr === new Date().toISOString().slice(0, 10);
+// Hoy en la tz del NEGOCIO (no UTC): entre 18:00 y 24:00 en México, la fecha UTC
+// ya es "mañana" y rompería el "Hoy" del header. 'en-CA' → 'YYYY-MM-DD'.
+function isTodayInTz(dateStr: string, timeZone: string): boolean {
+  return dateStr === new Date().toLocaleDateString('en-CA', { timeZone });
+}
+
+function todayInTz(timeZone: string): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone });
 }
 
 // Instante UTC ISO de una hora-de-pared (min desde medianoche) en la tz del negocio.
@@ -104,6 +118,8 @@ export default function AssistantControlDesk({
   timezone,
   initialAppointments,
   staffWithAvailability,
+  initialStaffBlocks,
+  dayExceptions,
 }: AssistantControlDeskProps) {
   const router = useRouter();
 
@@ -128,7 +144,7 @@ export default function AssistantControlDesk({
     router.push(`/dashboard?date=${targetDate}`);
   }
 
-  const today = isToday(date);
+  const today = isTodayInTz(date, timezone);
 
   // Citas en estado local: sembradas de props (server) para poder mover en optimista
   // y (a futuro, PR-4) refrescar por polling. Se re-siembra cuando cambian las props
@@ -155,7 +171,25 @@ export default function AssistantControlDesk({
     if (a.status === 'cancelled') continue;
     apptCountByStaff.set(a.staff.id, (apptCountByStaff.get(a.staff.id) ?? 0) + 1);
   }
-  const workingStaff = [...staffWithAvailability]
+  // Excepciones de fecha: día libre saca al barbero del panorama; horario especial
+  // reemplaza su ventana del día. Se aplican ANTES del filtro "trabaja hoy".
+  const exceptionByStaff = new Map<string, DayException>();
+  for (const e of dayExceptions) exceptionByStaff.set(e.staff_id, e);
+
+  const workingStaff = staffWithAvailability
+    .map((s) => {
+      const ex = exceptionByStaff.get(s.id);
+      if (!ex) return s;
+      if (!ex.available) return { ...s, availabilityToday: null }; // día libre
+      if (ex.start_time && ex.end_time && s.availabilityToday) {
+        // Horario especial: reemplaza la ventana (y elimina el break del día base).
+        return {
+          ...s,
+          availabilityToday: { start_time: ex.start_time, end_time: ex.end_time, break_start: null, break_end: null },
+        };
+      }
+      return s;
+    })
     .filter((s) => s.availabilityToday !== null)
     .sort(
       (a, b) =>
@@ -240,7 +274,7 @@ export default function AssistantControlDesk({
               </button>
               {!today && (
                 <button
-                  onClick={() => navigate(new Date().toISOString().slice(0, 10))}
+                  onClick={() => navigate(todayInTz(timezone))}
                   className="ml-1 rounded-pill border border-line px-3 py-1 text-xs font-semibold text-teal-ink transition hover:bg-tint-1"
                 >
                   Hoy
@@ -295,6 +329,7 @@ export default function AssistantControlDesk({
                 timezone={timezone}
                 appointments={appointments}
                 staff={workingStaff}
+                staffBlocks={initialStaffBlocks}
                 onMove={handleMove}
               />
             </section>
