@@ -39,7 +39,7 @@ export default function RecurringAvailability({ availability }: Props) {
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs font-medium text-gray-500">Horario semanal</p>
+        <p className="text-xs font-medium text-ink-2">Horario semanal</p>
       </div>
 
       <div className="space-y-1.5">
@@ -49,32 +49,32 @@ export default function RecurringAvailability({ availability }: Props) {
           return (
             <div
               key={index}
-              className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2"
+              className="flex items-center justify-between rounded-lg border border-line px-3 py-2"
               aria-label={label}
             >
-              <span className="w-8 text-xs font-semibold text-gray-500">
+              <span className="w-8 text-xs font-semibold text-ink-2">
                 {short}
               </span>
               {slot ? (
                 <div className="text-right">
-                  <span className="text-xs tabular-nums text-gray-800">
+                  <span className="text-xs tabular-nums text-ink">
                     {trimSeconds(slot.start_time)} – {trimSeconds(slot.end_time)}
                   </span>
                   {slot.break_start && slot.break_end && (
-                    <p className="mt-0.5 text-[10px] tabular-nums text-gray-400">
+                    <p className="mt-0.5 text-[10px] tabular-nums text-faint">
                       Descanso: {trimSeconds(slot.break_start)} – {trimSeconds(slot.break_end)}
                     </p>
                   )}
                 </div>
               ) : (
-                <span className="text-xs text-gray-300">Descanso</span>
+                <span className="text-xs text-faint">Descanso</span>
               )}
             </div>
           );
         })}
       </div>
 
-      <p className="mt-3 text-xs text-gray-400">
+      <p className="mt-3 text-xs text-faint">
         Para modificar tu horario fijo, habla con el administrador.
       </p>
     </div>

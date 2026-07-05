@@ -8,7 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
-import { getDayAppointments } from '@/lib/dashboard.types';
+import { getDayAppointments, localDayRangeUtc } from '@/lib/dashboard.types';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
@@ -50,6 +50,32 @@ async function requireAssistantSession(): Promise<{
   };
 }
 
+/**
+ * Gate 2b — "solo mis citas". Si el actor es barbero, exige que la cita a mutar sea
+ * suya; si no, Forbidden. Recepción/dueño (role !== 'barber') o token sin staff_id →
+ * no-op (sin restricción — protege a la recepcionista). Mismo patrón que
+ * updateAppointmentStatusAsBarber (staff/actions.ts): fetch + compare + rechazo.
+ */
+async function assertBarberOwnsAppointment(
+  supabase: ReturnType<typeof getServiceClient>,
+  session: { role: string; staff_id: string | null; business_id: string },
+  appointmentId: string,
+): Promise<{ error?: string } | void> {
+  if (session.role !== 'barber' || !session.staff_id) return;
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('staff_id')
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+  // Mensajes de cara al usuario → return { error } (no se redactan en prod, a
+  // diferencia de un throw). El gate 2b es informativo, no filtra nada sensible.
+  if (error || !data) return { error: 'Cita no encontrada' };
+  if ((data as { staff_id: string | null }).staff_id !== session.staff_id) {
+    return { error: 'Solo puedes modificar tus propias citas' };
+  }
+}
+
 // ─── Refresh — todas las citas del negocio para un día ───────────────────────
 
 /**
@@ -72,9 +98,11 @@ export async function refreshAssistantAppointments(
 export async function cancelAppointment(
   appointmentId: string,
   reason: string,
-): Promise<void> {
+): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -83,7 +111,7 @@ export async function cancelAppointment(
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'cancelled') return; // idempotente
 
   const { error } = await supabase
@@ -192,9 +220,11 @@ export async function cancelAppointment(
 export async function updateAppointmentNotes(
   appointmentId: string,
   notes: string,
-): Promise<void> {
+): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { error } = await supabase
     .from('appointments')
@@ -211,9 +241,11 @@ export async function updateAppointmentNotes(
 
 // ─── Completar cita ───────────────────────────────────────────────────────────
 
-export async function completeAppointment(appointmentId: string): Promise<void> {
+export async function completeAppointment(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -222,7 +254,7 @@ export async function completeAppointment(appointmentId: string): Promise<void> 
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'completed') return; // idempotente
 
   const { error } = await supabase
@@ -240,9 +272,11 @@ export async function completeAppointment(appointmentId: string): Promise<void> 
 
 // ─── Registrar no-show ────────────────────────────────────────────────────────
 
-export async function noShowAppointment(appointmentId: string): Promise<void> {
+export async function noShowAppointment(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -251,7 +285,7 @@ export async function noShowAppointment(appointmentId: string): Promise<void> {
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'no_show') return; // idempotente
 
   const { error } = await supabase
@@ -278,6 +312,9 @@ type CreateAppointmentInput = {
   notes?:        string;
   customerName:  string;  // requerido — Feature 1
   customerPhone?: string; // opcional — Feature 1
+  force?:        boolean;  // recepción FUERZA un solape intencional (S6-UI-02 PR-4):
+                           // marca allow_overlap=true. Solo el panel del asistente lo pasa
+                           // (requireAssistantSession) → el bot nunca puede forzar.
 };
 
 /**
@@ -291,15 +328,66 @@ type CreateAppointmentInput = {
  */
 export async function createAssistantAppointment(
   input: CreateAppointmentInput,
-): Promise<{ id: string; warning?: string }> {
+): Promise<{ id?: string; warning?: string; error?: string }> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+
+  // ── Gate de staff_id (REGLA DURA, seguridad) ─────────────────────────────
+  // El barbero solo puede crear citas asignadas a SÍ MISMO: ignoramos el
+  // input.staffId del cliente y forzamos su propio staff_id. Recepcionista /
+  // owner / admin (y sesiones por token con staff_id null) conservan la
+  // capacidad de asignar a cualquier barbero. Mismo predicado que el resto del
+  // sistema de control (role==='barber' && staff_id presente).
+  const isBarber = session.role === 'barber' && !!session.staff_id;
+  const effectiveStaffId = isBarber ? session.staff_id! : input.staffId;
+
+  // ── Config del negocio (controles de creación — migración 044) ───────────
+  const { data: bizCfgRaw } = await supabase
+    .from('businesses')
+    .select('require_customer_phone, max_appointments_per_staff_per_day')
+    .eq('id', session.business_id)
+    .maybeSingle();
+  const bizCfg = bizCfgRaw as {
+    require_customer_phone: boolean;
+    max_appointments_per_staff_per_day: number;
+  } | null;
 
   // ── Customer lookup / create ─────────────────────────────────────────────
   let customerId: string | null = null;
   let customerWarning: string | undefined;
   const name  = input.customerName.trim();
   const phone = input.customerPhone?.trim() || null;
+
+  // ── Teléfono obligatorio (política de negocio configurable) ──────────────
+  // Si el negocio activó require_customer_phone, toda alta manual (cualquier
+  // rol — barbero Y recepcionista) exige teléfono del cliente. Default FALSE →
+  // preserva el walk-in con solo-nombre. Chequeo ANTES de crear cliente/cita.
+  if ((bizCfg?.require_customer_phone ?? false) && !phone) {
+    // Validación de cara al usuario → return (los throw se redactan en prod).
+    return { error: 'Este negocio requiere el teléfono del cliente para agendar' };
+  }
+
+  // ── Tope suave de citas/día por barbero (anti-inflado grosero) ───────────
+  // Solo barbero. Cuenta sus citas NO canceladas del día destino; si alcanza el
+  // tope configurable (businesses.max_appointments_per_staff_per_day, default 20),
+  // rechaza ANTES de crear cliente/cita. NOTA: el tope frena el inflado GROSERO
+  // (decenas de citas falsas), NO el fino (ej. tope-1/día) — eso lo cubre el
+  // audit trail visible (fase posterior). Es complemento, no reemplazo.
+  if (isBarber) {
+    const maxPerStaffPerDay = bizCfg?.max_appointments_per_staff_per_day ?? 20;
+    const day = input.startsAt.slice(0, 10); // YYYY-MM-DD (misma convención que getDayAppointments)
+    const { count } = await supabase
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('staff_id', effectiveStaffId)
+      .neq('status', 'cancelled')
+      .gte('starts_at', `${day}T00:00:00`)
+      .lte('starts_at', `${day}T23:59:59`);
+    if ((count ?? 0) >= maxPerStaffPerDay) {
+      // Validación de cara al usuario → return (los throw se redactan en prod).
+      return { error: 'Alcanzaste el máximo de citas para ese día, contacta al admin' };
+    }
+  }
 
   if (name) {
     if (phone) {
@@ -370,7 +458,7 @@ export async function createAssistantAppointment(
     .from('appointments')
     .insert({
       business_id:          session.business_id,
-      staff_id:             input.staffId,
+      staff_id:             effectiveStaffId,
       service_id:           input.serviceId,
       customer_id:          customerId,
       starts_at:            input.startsAt,
@@ -379,11 +467,20 @@ export async function createAssistantAppointment(
       source:               input.source,
       notes:                input.notes?.trim() || null,
       created_by_staff_id:  session.staff_id,
+      // Solo un solape FORZADO conscientemente por la recepción queda exento del
+      // constraint. El bot no llega acá (requireAssistantSession) → nunca fuerza.
+      allow_overlap:        input.force === true,
     })
     .select('id')
     .single();
 
-  if (error) throw new Error(`createAssistantAppointment failed: ${error.message}`);
+  if (error) {
+    // Solape sin forzar (23P01) → mensaje de cara al usuario, no un throw crudo.
+    if ((error as { code?: string }).code === '23P01') {
+      return { error: 'Ese horario se encima con otra cita' };
+    }
+    throw new Error(`createAssistantAppointment failed: ${error.message}`);
+  }
 
   return { id: (data as { id: string }).id, warning: customerWarning };
 }
@@ -395,6 +492,9 @@ type RescheduleInput = {
   newDate:       string;   // 'YYYY-MM-DD' en hora local del cliente
   newStartTime:  string;   // 'HH:MM'
   newStaffId?:   string;   // si cambia el barbero; si omitido, mantiene el actual
+  force?:        boolean;  // recepción FUERZA un solape intencional (S6-UI-02 PR-3):
+                           // salta el pre-check de solape y marca allow_overlap=true
+                           // (exenta del constraint). Los flujos automáticos nunca lo usan.
 };
 
 /**
@@ -403,9 +503,11 @@ type RescheduleInput = {
  * Verifica conflictos de horario antes de actualizar.
  * Registra modified_by_staff_id para trazabilidad.
  */
-export async function rescheduleAppointment(input: RescheduleInput): Promise<void> {
+export async function rescheduleAppointment(input: RescheduleInput): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const gate = await assertBarberOwnsAppointment(supabase, session, input.appointmentId);
+  if (gate?.error) return gate;
 
   // Verificar que la cita pertenece al negocio y obtener datos necesarios
   const { data: raw, error: fetchErr } = await supabase
@@ -415,7 +517,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !raw) throw new Error('Cita no encontrada');
+  if (fetchErr || !raw) return { error: 'Cita no encontrada' };
 
   const appt = raw as unknown as {
     id: string;
@@ -428,7 +530,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
   };
 
   if (!['pending', 'confirmed'].includes(appt.status)) {
-    throw new Error('Solo se pueden reagendar citas pendientes o confirmadas');
+    return { error: 'Solo se pueden reagendar citas pendientes o confirmadas' };
   }
 
   // Calcular nuevo rango — usar hora local que mandó el cliente
@@ -441,19 +543,23 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
   const newStartsAt  = startDate.toISOString();
   const newEndsAt    = endDate.toISOString();
 
-  // Pre-check de conflictos (el EXCLUDE constraint del DB es la red de seguridad)
-  const { data: conflicts } = await supabase
-    .from('appointments')
-    .select('id')
-    .eq('staff_id', newStaffId)
-    .neq('id', input.appointmentId)
-    .neq('status', 'cancelled')
-    .lt('starts_at', newEndsAt)
-    .gt('ends_at', newStartsAt)
-    .limit(1);
+  // Pre-check de conflictos (el EXCLUDE constraint del DB es la red de seguridad).
+  // Con force=true (la recepción forzó un solape intencional) se salta: el drop
+  // marcará allow_overlap=true y quedará exenta del constraint.
+  if (!input.force) {
+    const { data: conflicts } = await supabase
+      .from('appointments')
+      .select('id')
+      .eq('staff_id', newStaffId)
+      .neq('id', input.appointmentId)
+      .neq('status', 'cancelled')
+      .lt('starts_at', newEndsAt)
+      .gt('ends_at', newStartsAt)
+      .limit(1);
 
-  if (conflicts && conflicts.length > 0) {
-    throw new Error('El nuevo horario tiene conflicto con otra cita');
+    if (conflicts && conflicts.length > 0) {
+      return { error: 'El nuevo horario tiene conflicto con otra cita' };
+    }
   }
 
   const { error } = await supabase
@@ -463,6 +569,9 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
       ends_at:              newEndsAt,
       staff_id:             newStaffId,
       status:               'confirmed',
+      // Solo un solape FORZADO por la recepción queda exento del constraint.
+      // Un reacomodo limpio resetea el flag (allow_overlap=false).
+      allow_overlap:        input.force === true,
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
@@ -648,9 +757,15 @@ export async function getStaffBlocksForDay(
   const staffIds = (staffData as { id: string }[]).map((s) => s.id);
   if (staffIds.length === 0) return [];
 
-  // 2. Bloques aprobados que se solapan con el día
-  const dayStart = `${date}T00:00:00`;
-  const dayEnd   = `${date}T23:59:59`;
+  // 2. Bloques aprobados que se solapan con el día — límites en la TZ del negocio
+  //    (no UTC), si no se perdían los bloqueos de la tarde/noche (≥18:00 en UTC-6).
+  const { data: bizRow } = await supabase
+    .from('businesses')
+    .select('timezone')
+    .eq('id', session.business_id)
+    .maybeSingle();
+  const tz = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
+  const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, tz);
 
   const { data, error } = await supabase
     .from('staff_blocks')
