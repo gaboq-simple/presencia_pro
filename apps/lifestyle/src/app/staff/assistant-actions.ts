@@ -306,6 +306,9 @@ type CreateAppointmentInput = {
   notes?:        string;
   customerName:  string;  // requerido — Feature 1
   customerPhone?: string; // opcional — Feature 1
+  force?:        boolean;  // recepción FUERZA un solape intencional (S6-UI-02 PR-4):
+                           // marca allow_overlap=true. Solo el panel del asistente lo pasa
+                           // (requireAssistantSession) → el bot nunca puede forzar.
 };
 
 /**
@@ -458,11 +461,20 @@ export async function createAssistantAppointment(
       source:               input.source,
       notes:                input.notes?.trim() || null,
       created_by_staff_id:  session.staff_id,
+      // Solo un solape FORZADO conscientemente por la recepción queda exento del
+      // constraint. El bot no llega acá (requireAssistantSession) → nunca fuerza.
+      allow_overlap:        input.force === true,
     })
     .select('id')
     .single();
 
-  if (error) throw new Error(`createAssistantAppointment failed: ${error.message}`);
+  if (error) {
+    // Solape sin forzar (23P01) → mensaje de cara al usuario, no un throw crudo.
+    if ((error as { code?: string }).code === '23P01') {
+      return { error: 'Ese horario se encima con otra cita' };
+    }
+    throw new Error(`createAssistantAppointment failed: ${error.message}`);
+  }
 
   return { id: (data as { id: string }).id, warning: customerWarning };
 }

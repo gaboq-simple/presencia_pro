@@ -16,7 +16,7 @@
 
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 
 // ─── Config del motor de ventana ──────────────────────────────────────────────
@@ -48,14 +48,14 @@ type PanoramaTimelineProps = {
   appointments: DashboardAppointment[];
   staff: PanoramaStaff[];  // barberos (carriles), en orden
   staffBlocks: PanoramaBlock[]; // bloqueos aprobados (vacaciones/emergencias) del día
-  // Reagendar (drop del gesto). El desk lo conecta a rescheduleAppointment.
-  // opts presente = solape FORZADO (recepción): fuerza el reagendado + aviso.
-  onMove?: (
-    apptId: string,
-    newStaffId: string,
-    newStartMin: number,
-    opts?: { force: boolean; overlapMin: number; overlapName: string },
-  ) => void;
+  // Drop del gesto. El desk despacha por move.kind (reschedule vs create walk-in).
+  // opts presente = solape FORZADO (recepción): fuerza + aviso.
+  onPlace?: (move: MoveState, newStaffId: string, newStartMin: number, opts?: PlaceOpts) => void;
+  // Walk-in solicitado desde el desk (+ Walk-in): entra en modo-colocar.
+  walkinRequest?: WalkinRequest | null;
+  onWalkinConsumed?: () => void; // el walk-in se colocó o canceló → el desk limpia
+  // El panorama avisa cuando hay un gesto en curso → el desk pausa el polling.
+  onInteractingChange?: (active: boolean) => void;
 };
 
 // Estado visual derivado de una cita.
@@ -74,7 +74,16 @@ type LaneBlock = {
 
 type Interval = { start: number; end: number };
 
-type MoveState = { apptId: string; fromLaneId: string; dur: number; name: string; service: string };
+// El sujeto en modo-colocar: reacomodo de una cita existente, o un walk-in nuevo.
+export type MoveState =
+  | { kind: 'reschedule'; apptId: string; fromLaneId: string; dur: number; name: string; service: string }
+  | { kind: 'walkin'; serviceId: string; dur: number; name: string; service: string; phone?: string };
+
+// Solicitud de walk-in desde el desk (dispara el modo-colocar de un walk-in nuevo).
+export type WalkinRequest = { serviceId: string; dur: number; name: string; service: string; phone?: string };
+
+// Payload del drop → el desk despacha por kind (reschedule vs create).
+export type PlaceOpts = { force: boolean; overlapMin: number; overlapName: string };
 
 // Un destino ofrecido: limpio (soft=false) o solape forzable (soft=true).
 type DropChip = { min: number; soft: boolean; overlapMin: number; overlapName: string };
@@ -158,7 +167,10 @@ export default function PanoramaTimeline({
   appointments,
   staff,
   staffBlocks,
-  onMove,
+  onPlace,
+  walkinRequest,
+  onWalkinConsumed,
+  onInteractingChange,
 }: PanoramaTimelineProps) {
   // "Ahora" en vivo (min-desde-medianoche, tz) + el día de hoy en la tz del negocio.
   const [now, setNow] = useState<{ min: number; ymd: string } | null>(null);
@@ -180,12 +192,33 @@ export default function PanoramaTimeline({
   const [fineMode, setFineMode] = useState(false);
   // Destino ámbar pendiente de confirmación consciente (no se mueve hasta el 2º tap).
   const [pendingOverlap, setPendingOverlap] = useState<{ laneId: string; chip: DropChip } | null>(null);
-  const canMove = typeof onMove === 'function';
+  const canMove = typeof onPlace === 'function';
 
   // Salir del modo mover limpia también la confirmación pendiente.
   useEffect(() => {
     if (!move) setPendingOverlap(null);
   }, [move]);
+
+  // Avisar al desk cuando hay un gesto en curso (para pausar el polling).
+  useEffect(() => {
+    onInteractingChange?.(move !== null);
+  }, [move, onInteractingChange]);
+
+  // Walk-in solicitado desde el desk → entra en modo-colocar (si no hay otro gesto).
+  useEffect(() => {
+    if (walkinRequest && !move) {
+      setMove({ kind: 'walkin', ...walkinRequest });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walkinRequest]);
+
+  // Cuando un walk-in termina (colocado o cancelado) → avisar al desk para que limpie.
+  const prevKind = useRef<MoveState['kind'] | null>(null);
+  useEffect(() => {
+    const prev = prevKind.current;
+    prevKind.current = move?.kind ?? null;
+    if (!move && prev === 'walkin') onWalkinConsumed?.();
+  }, [move, onWalkinConsumed]);
 
   // Esc: si hay confirmación de solape pendiente → vuelve a los chips; si no → cancela.
   useEffect(() => {
@@ -349,8 +382,10 @@ export default function PanoramaTimeline({
     }
     if (cur < domainEnd) available.push({ start: cur, end: domainEnd });
 
-    // Citas (excluye la levantada) para clasificar solape.
-    const appts = lane.blocks.filter((b) => b.id !== move.apptId);
+    // Citas para clasificar solape. En reacomodo se excluye la cita levantada;
+    // en walk-in no hay cita propia que excluir.
+    const excludeId = move.kind === 'reschedule' ? move.apptId : null;
+    const appts = lane.blocks.filter((b) => b.id !== excludeId);
 
     const chips: DropChip[] = [];
     for (const av of available) {
@@ -375,19 +410,19 @@ export default function PanoramaTimeline({
   }
 
   function doDrop(laneId: string, chip: DropChip) {
-    if (!move || !onMove) return;
+    if (!move || !onPlace) return;
     if (chip.soft) {
       setPendingOverlap({ laneId, chip }); // confirmación consciente (2º tap)
       return;
     }
-    onMove(move.apptId, laneId, chip.min);
+    onPlace(move, laneId, chip.min);
     setMove(null);
   }
 
   function confirmOverlap() {
-    if (!move || !onMove || !pendingOverlap) return;
+    if (!move || !onPlace || !pendingOverlap) return;
     const { laneId, chip } = pendingOverlap;
-    onMove(move.apptId, laneId, chip.min, {
+    onPlace(move, laneId, chip.min, {
       force: true,
       overlapMin: chip.overlapMin,
       overlapName: chip.overlapName,
@@ -431,7 +466,8 @@ export default function PanoramaTimeline({
         {move && !pendingOverlap && (
           <div className="flex flex-wrap items-center gap-2 bg-ink px-4 py-2 text-card">
             <span className="text-xs font-semibold">
-              Moviendo <span className="rounded-[6px] bg-white/15 px-2 py-0.5">{move.name}</span>
+              {move.kind === 'walkin' ? 'Colocando walk-in' : 'Moviendo'}{' '}
+              <span className="rounded-[6px] bg-white/15 px-2 py-0.5">{move.name}</span>
             </span>
             <span className="rounded-[6px] border border-tint-2/30 bg-tint-2/10 px-2 py-0.5 text-[10.5px] font-semibold text-tint-2">
               {move.service || 'Cita'} · {move.dur} min
@@ -617,8 +653,10 @@ export default function PanoramaTimeline({
                     const clipL = l < -0.2;
                     const clipR = r > 100.2;
                     const st = STATE_STYLE[b.state];
-                    const lifted = move?.apptId === b.id;
+                    const lifted = move?.kind === 'reschedule' && move.apptId === b.id;
                     const dimmed = move !== null && !lifted;
+                    // Movible solo fuera de un walk-in en curso (no se levanta una cita
+                    // mientras se coloca un walk-in).
                     const interactive = canMove && b.movable && (!move || lifted);
                     return (
                       <div
@@ -629,6 +667,7 @@ export default function PanoramaTimeline({
                                 lifted
                                   ? setMove(null)
                                   : setMove({
+                                      kind: 'reschedule',
                                       apptId: b.id,
                                       fromLaneId: s.id,
                                       dur: b.dur,
