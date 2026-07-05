@@ -105,3 +105,20 @@
 @theme {
   --animate-data-beat: data-beat 1.8s ease-in-out infinite;
 }
+
+/*
+ * Accesibilidad — prefers-reduced-motion (S6-UI-02 PR-6, corrección de spec).
+ * Neutraliza globalmente animaciones/transiciones para quien lo pide. Más robusto
+ * que guardar cada una con motion-reduce: el levantado del gesto (transform + shadow),
+ * los toggles, el hover, la transition de las tarjetas y el pulso quedan SIN animar —
+ * el estado visual (levantada, resaltada) se aplica al instante, no se pierde. El spec
+ * congelado (pulido item 1) pedía matar pulsos/FLIP/transiciones para reduced-motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

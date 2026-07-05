@@ -132,7 +132,7 @@ export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onHov
                 </span>
                 <div className="min-w-0 leading-tight">
                   <b className="block truncate text-[13.5px]">{item.customerName}</b>
-                  <span className="text-[11px] text-faint">
+                  <span className="text-[11px] tabular-nums text-faint">
                     Cita {hora(item.startMin)} · {item.staffName}
                   </span>
                 </div>
@@ -156,7 +156,7 @@ export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onHov
                   <div className="text-[9px] font-bold uppercase tracking-wide text-teal-ink opacity-80">
                     {item.suggestion ? 'Primer hueco compatible' : 'Sin hueco libre'}
                   </div>
-                  <b className="text-[12.5px] font-semibold text-teal-ink">
+                  <b className="text-[12.5px] font-semibold tabular-nums text-teal-ink">
                     {item.suggestion
                       ? `${item.suggestion.staffName} · ${hora(item.suggestion.min)}`
                       : 'Hoy no queda espacio limpio'}
