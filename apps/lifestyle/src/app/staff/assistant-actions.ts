@@ -60,7 +60,7 @@ async function assertBarberOwnsAppointment(
   supabase: ReturnType<typeof getServiceClient>,
   session: { role: string; staff_id: string | null; business_id: string },
   appointmentId: string,
-): Promise<void> {
+): Promise<{ error?: string } | void> {
   if (session.role !== 'barber' || !session.staff_id) return;
   const { data, error } = await supabase
     .from('appointments')
@@ -68,9 +68,11 @@ async function assertBarberOwnsAppointment(
     .eq('id', appointmentId)
     .eq('business_id', session.business_id)
     .maybeSingle();
-  if (error || !data) throw new Error('Cita no encontrada');
+  // Mensajes de cara al usuario → return { error } (no se redactan en prod, a
+  // diferencia de un throw). El gate 2b es informativo, no filtra nada sensible.
+  if (error || !data) return { error: 'Cita no encontrada' };
   if ((data as { staff_id: string | null }).staff_id !== session.staff_id) {
-    throw new Error('Solo puedes modificar tus propias citas');
+    return { error: 'Solo puedes modificar tus propias citas' };
   }
 }
 
@@ -96,10 +98,11 @@ export async function refreshAssistantAppointments(
 export async function cancelAppointment(
   appointmentId: string,
   reason: string,
-): Promise<void> {
+): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
-  await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -108,7 +111,7 @@ export async function cancelAppointment(
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'cancelled') return; // idempotente
 
   const { error } = await supabase
@@ -217,10 +220,11 @@ export async function cancelAppointment(
 export async function updateAppointmentNotes(
   appointmentId: string,
   notes: string,
-): Promise<void> {
+): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
-  await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { error } = await supabase
     .from('appointments')
@@ -237,10 +241,11 @@ export async function updateAppointmentNotes(
 
 // ─── Completar cita ───────────────────────────────────────────────────────────
 
-export async function completeAppointment(appointmentId: string): Promise<void> {
+export async function completeAppointment(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
-  await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -249,7 +254,7 @@ export async function completeAppointment(appointmentId: string): Promise<void> 
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'completed') return; // idempotente
 
   const { error } = await supabase
@@ -267,10 +272,11 @@ export async function completeAppointment(appointmentId: string): Promise<void> 
 
 // ─── Registrar no-show ────────────────────────────────────────────────────────
 
-export async function noShowAppointment(appointmentId: string): Promise<void> {
+export async function noShowAppointment(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
-  await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
 
   const { data: existing, error: fetchErr } = await supabase
     .from('appointments')
@@ -279,7 +285,7 @@ export async function noShowAppointment(appointmentId: string): Promise<void> {
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !existing) throw new Error('Cita no encontrada');
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'no_show') return; // idempotente
 
   const { error } = await supabase
@@ -497,10 +503,11 @@ type RescheduleInput = {
  * Verifica conflictos de horario antes de actualizar.
  * Registra modified_by_staff_id para trazabilidad.
  */
-export async function rescheduleAppointment(input: RescheduleInput): Promise<void> {
+export async function rescheduleAppointment(input: RescheduleInput): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
-  await assertBarberOwnsAppointment(supabase, session, input.appointmentId);
+  const gate = await assertBarberOwnsAppointment(supabase, session, input.appointmentId);
+  if (gate?.error) return gate;
 
   // Verificar que la cita pertenece al negocio y obtener datos necesarios
   const { data: raw, error: fetchErr } = await supabase
@@ -510,7 +517,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
     .eq('business_id', session.business_id)
     .maybeSingle();
 
-  if (fetchErr || !raw) throw new Error('Cita no encontrada');
+  if (fetchErr || !raw) return { error: 'Cita no encontrada' };
 
   const appt = raw as unknown as {
     id: string;
@@ -523,7 +530,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
   };
 
   if (!['pending', 'confirmed'].includes(appt.status)) {
-    throw new Error('Solo se pueden reagendar citas pendientes o confirmadas');
+    return { error: 'Solo se pueden reagendar citas pendientes o confirmadas' };
   }
 
   // Calcular nuevo rango — usar hora local que mandó el cliente
@@ -551,7 +558,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<voi
       .limit(1);
 
     if (conflicts && conflicts.length > 0) {
-      throw new Error('El nuevo horario tiene conflicto con otra cita');
+      return { error: 'El nuevo horario tiene conflicto con otra cita' };
     }
   }
 
