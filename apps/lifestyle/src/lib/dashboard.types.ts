@@ -115,6 +115,8 @@ export type DashboardAppointment = {
   modified_by: StaffRef | null;  // quien hizo la última modificación (Feature 5)
   modified_at: string | null;    // timestamp de la última modificación (Feature 5)
   allow_overlap: boolean;        // TRUE = solape intencional aprobado por la recepción (S6-UI-02 PR-3)
+  adjusted_starts_at: string | null;   // nueva hora acordada si el cliente reportó retraso (S6-UI-02 PR-5)
+  late_arrival_acknowledged: boolean;  // TRUE si el bot ya procesó un retraso reportado (S6-UI-02 PR-5)
 };
 
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
@@ -242,6 +244,8 @@ type RawAppointmentRow = {
   created_by: StaffRef | null;
   modified_by: StaffRef | null;
   modified_at: string | null;
+  adjusted_starts_at: string | null;
+  late_arrival_acknowledged: boolean;
 };
 
 // Shape interno del select de staff con availability (one-to-many → array)
@@ -342,6 +346,8 @@ export async function getDayAppointments(
       notes,
       modified_at,
       allow_overlap,
+      adjusted_starts_at,
+      late_arrival_acknowledged,
       staff:staff_id(id, name),
       service:service_id(id, name, duration_minutes, price, currency),
       customer:customer_id(id, name, phone),
@@ -419,6 +425,21 @@ export async function getRequireCustomerPhone(businessId: string): Promise<boole
     .eq('id', businessId)
     .maybeSingle();
   return (data as { require_customer_phone: boolean } | null)?.require_customer_phone ?? false;
+}
+
+/**
+ * businesses.max_late_minutes — tolerancia de retraso del negocio (default 15).
+ * Piso de la señal "atrasado" de la cola de acción: una cita solo escala a la cola
+ * cuando su hora efectiva pasó por MÁS de estos minutos (S6-UI-02 PR-5).
+ */
+export async function getMaxLateMinutes(businessId: string): Promise<number> {
+  const supabase = getServiceClient();
+  const { data } = await supabase
+    .from('businesses')
+    .select('max_late_minutes')
+    .eq('id', businessId)
+    .maybeSingle();
+  return (data as { max_late_minutes: number | null } | null)?.max_late_minutes ?? 15;
 }
 
 export async function getDayExceptions(

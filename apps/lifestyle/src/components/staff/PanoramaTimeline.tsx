@@ -18,6 +18,17 @@
 
 import { useMemo, useState, useEffect, useRef } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
+import {
+  type Interval,
+  partsInTz,
+  minutesOfDay,
+  hhmmToMin,
+  fmtMin,
+  suggestedStarts,
+  fineStarts,
+  availableIntervals,
+  overlapAt,
+} from './panoramaEngine';
 
 // ─── Config del motor de ventana ──────────────────────────────────────────────
 
@@ -54,6 +65,11 @@ type PanoramaTimelineProps = {
   // Walk-in solicitado desde el desk (+ Walk-in): entra en modo-colocar.
   walkinRequest?: WalkinRequest | null;
   onWalkinConsumed?: () => void; // el walk-in se colocó o canceló → el desk limpia
+  // Reacomodo solicitado desde la cola (tarjeta de atrasado): levanta esa cita.
+  rescheduleRequest?: RescheduleRequest | null;
+  onRescheduleConsumed?: () => void; // se colocó o canceló → el desk limpia
+  // Conexión viva: cita a resaltar (hover en una tarjeta de la cola). Sin gesto.
+  highlightApptId?: string | null;
   // El panorama avisa cuando hay un gesto en curso → el desk pausa el polling.
   onInteractingChange?: (active: boolean) => void;
 };
@@ -72,8 +88,6 @@ type LaneBlock = {
   approvedOverlap: boolean; // solape intencional aprobado por la recepción (visible)
 };
 
-type Interval = { start: number; end: number };
-
 // El sujeto en modo-colocar: reacomodo de una cita existente, o un walk-in nuevo.
 export type MoveState =
   | { kind: 'reschedule'; apptId: string; fromLaneId: string; dur: number; name: string; service: string }
@@ -82,67 +96,19 @@ export type MoveState =
 // Solicitud de walk-in desde el desk (dispara el modo-colocar de un walk-in nuevo).
 export type WalkinRequest = { serviceId: string; dur: number; name: string; service: string; phone?: string };
 
+// Solicitud de reacomodo desde la COLA de acción: levanta esta cita en el panorama
+// (entra al MISMO gesto click-to-place; no hay segunda lógica de mover). Espejo de
+// WalkinRequest — el desk la setea al tocar "Mover" en la tarjeta de un atrasado.
+export type RescheduleRequest = { apptId: string; dur: number; name: string; service: string; fromLaneId: string };
+
 // Payload del drop → el desk despacha por kind (reschedule vs create).
 export type PlaceOpts = { force: boolean; overlapMin: number; overlapName: string };
 
 // Un destino ofrecido: limpio (soft=false) o solape forzable (soft=true).
 type DropChip = { min: number; soft: boolean; overlapMin: number; overlapName: string };
 
-// ─── Helpers de tiempo (todo en minutos-desde-medianoche, tz del negocio) ──────
-
-function partsInTz(iso: string, timeZone: string) {
-  const p = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).formatToParts(new Date(iso));
-  const get = (t: string) => p.find((x) => x.type === t)?.value ?? '0';
-  return {
-    ymd: `${get('year')}-${get('month')}-${get('day')}`,
-    min: (Number(get('hour')) % 24) * 60 + Number(get('minute')),
-  };
-}
-
-function minutesOfDay(iso: string, timeZone: string): number {
-  return partsInTz(iso, timeZone).min;
-}
-
-// 'HH:MM:SS' → minutos desde medianoche.
-function hhmmToMin(t: string): number {
-  const [h, m] = t.split(':');
-  return Number(h) * 60 + Number(m ?? 0);
-}
-
-function fmtMin(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = ((min % 60) + 60) % 60;
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  const ampm = h < 12 || h >= 24 ? 'AM' : 'PM';
-  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
-}
-
-// Horas SUGERIDAS de un hueco: lo antes posible + :00/:30 reales, ≥30 min entre sí.
-function suggestedStarts(a: number, b: number, dur: number): number[] {
-  const last = b - dur; // último inicio donde el servicio cabe
-  const out = [a];
-  for (let g = Math.ceil((a + 1) / 30) * 30; g <= last + 0.5; g += 30) {
-    if (g - out[out.length - 1]! >= 30) out.push(g);
-  }
-  return out;
-}
-
-// Ajuste fino: cada 15 min dentro del hueco donde cabe.
-function fineStarts(a: number, b: number, dur: number): number[] {
-  const last = b - dur;
-  const out: number[] = [];
-  for (let m = Math.ceil(a / 15) * 15; m <= last + 0.5; m += 15) out.push(m);
-  if ((out.length === 0 || out[0]! > a) && a <= last) out.unshift(a);
-  return out;
-}
+// Helpers de tiempo + aritmética de huecos: fuente ÚNICA en ./panoramaEngine
+// (compartida con la cola de acción). Ver imports arriba.
 
 // Estilo (barra izquierda + fondo + tinta) por estado — solo tokens Zentriq.
 const STATE_STYLE: Record<BlockState, { bar: string; bg: string; ink: string }> = {
@@ -170,6 +136,9 @@ export default function PanoramaTimeline({
   onPlace,
   walkinRequest,
   onWalkinConsumed,
+  rescheduleRequest,
+  onRescheduleConsumed,
+  highlightApptId,
   onInteractingChange,
 }: PanoramaTimelineProps) {
   // "Ahora" en vivo (min-desde-medianoche, tz) + el día de hoy en la tz del negocio.
@@ -211,6 +180,24 @@ export default function PanoramaTimeline({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walkinRequest]);
+
+  // Reacomodo desde la COLA (tarjeta de atrasado) → levanta la cita en el panorama:
+  // entra al MISMO gesto click-to-place, no hay segunda lógica de mover. One-shot: se
+  // consume apenas entra en modo-mover (el MoveState ya lleva apptId/dur/nombre).
+  useEffect(() => {
+    if (rescheduleRequest && !move) {
+      setMove({
+        kind: 'reschedule',
+        apptId: rescheduleRequest.apptId,
+        fromLaneId: rescheduleRequest.fromLaneId,
+        dur: rescheduleRequest.dur,
+        name: rescheduleRequest.name,
+        service: rescheduleRequest.service,
+      });
+      onRescheduleConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rescheduleRequest]);
 
   // Cuando un walk-in termina (colocado o cancelado) → avisar al desk para que limpie.
   const prevKind = useRef<MoveState['kind'] | null>(null);
@@ -371,16 +358,7 @@ export default function PanoramaTimeline({
     const domainEnd = lane.availTo;
 
     // Tiempo físicamente disponible = turno − descanso − bloqueos (frontera DURA).
-    const blocked = lane.unavail.map((u) => [u.start, u.end] as [number, number]).sort((a, b) => a[0] - b[0]);
-    const available: Interval[] = [];
-    let cur = domainStart;
-    for (const [bs, be] of blocked) {
-      if (be <= cur) continue;
-      if (bs > cur) available.push({ start: cur, end: Math.min(bs, domainEnd) });
-      cur = Math.max(cur, be);
-      if (cur >= domainEnd) break;
-    }
-    if (cur < domainEnd) available.push({ start: cur, end: domainEnd });
+    const available = availableIntervals(lane.unavail, domainStart, domainEnd);
 
     // Citas para clasificar solape. En reacomodo se excluye la cita levantada;
     // en walk-in no hay cita propia que excluir.
@@ -397,12 +375,7 @@ export default function PanoramaTimeline({
         const p = pctOf(s);
         if (p < 0 || p > 100) continue;
         // ¿solaparía alguna cita? (toma el solape mayor para el aviso)
-        let overlapMin = 0;
-        let overlapName = '';
-        for (const b of appts) {
-          const ov = Math.min(s + dur, b.start + b.dur) - Math.max(s, b.start);
-          if (ov > 0 && ov > overlapMin) { overlapMin = Math.round(ov); overlapName = b.name; }
-        }
+        const { min: overlapMin, name: overlapName } = overlapAt(s, dur, appts);
         chips.push({ min: s, soft: overlapMin > 0, overlapMin, overlapName });
       }
     }
@@ -655,6 +628,9 @@ export default function PanoramaTimeline({
                     const st = STATE_STYLE[b.state];
                     const lifted = move?.kind === 'reschedule' && move.apptId === b.id;
                     const dimmed = move !== null && !lifted;
+                    // Conexión viva: resalte al hacer hover en su tarjeta de la cola
+                    // (solo fuera del gesto, para no encimar dos señales visuales).
+                    const highlighted = !move && highlightApptId === b.id;
                     // Movible solo fuera de un walk-in en curso (no se levanta una cita
                     // mientras se coloca un walk-in).
                     const interactive = canMove && b.movable && (!move || lifted);
@@ -682,7 +658,9 @@ export default function PanoramaTimeline({
                           b.state === 'late' && !move ? 'animate-data-beat motion-reduce:animate-none' : ''
                         } ${interactive ? 'cursor-pointer' : ''} ${
                           lifted ? 'z-20 -translate-y-1 shadow-hero ring-2 ring-ink' : ''
-                        } ${b.approvedOverlap && !lifted ? 'ring-2 ring-amber-border' : ''} ${dimmed ? 'opacity-40' : ''}`}
+                        } ${highlighted ? 'z-20 ring-2 ring-teal-border shadow-hero' : ''} ${
+                          b.approvedOverlap && !lifted ? 'ring-2 ring-amber-border' : ''
+                        } ${dimmed ? 'opacity-40' : ''}`}
                         style={{
                           left: `${cl}%`,
                           width: `${cr - cl}%`,
