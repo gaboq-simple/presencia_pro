@@ -571,10 +571,13 @@ async function handleModificationOrCancellation(
     const timeStr   = formatTimeHumanFromDate(startsAt, business.timezone);
 
     // ── Cancelar la cita (UPDATE — no DELETE) ─────────────────────────────
-    const { error: cancelError } = await supabase
-      .from('appointments')
-      .update({ status: 'cancelled' })
-      .eq('id', appt.id);
+    // Vía RPC (2c-ii): set_config('app.actor_type','bot',true) + UPDATE atómicos
+    // → el audit atribuye 'bot'. Shape { error } idéntico al .update() → el throw
+    // en error se preserva exacto.
+    const { error: cancelError } = await supabase.rpc('bot_set_appointment_status', {
+      p_appointment_id: appt.id,
+      p_status:         'cancelled',
+    });
 
     if (cancelError) throw cancelError;
 
