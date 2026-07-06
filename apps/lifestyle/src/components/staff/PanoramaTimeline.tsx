@@ -16,7 +16,7 @@
 
 'use client';
 
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import {
   type Interval,
@@ -37,6 +37,8 @@ const NAV_STEP = 60;    // navegar de a 1h
 const LANE_MIN_H = 62;  // px — carril compacto de altura fija (densidad 8 sin colapsar)
 const HEAD_W = 132;     // px — ancho de la columna de nombre del barbero
 const MIN_GAP = 15;     // min — no dibujar huecos más cortos que esto
+const DRAG_THRESH = 5;  // px — mover más que esto con el botón abajo = drag (no tap)
+const EDGE_ZONE = 34;   // px — zona de borde que dispara auto-pan durante el drag
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -163,10 +165,46 @@ export default function PanoramaTimeline({
   const [pendingOverlap, setPendingOverlap] = useState<{ laneId: string; chip: DropChip } | null>(null);
   const canMove = typeof onPlace === 'function';
 
-  // Salir del modo mover limpia también la confirmación pendiente.
+  // ── Drag: el arrastre es OTRO input al MISMO gesto (no una lógica paralela).
+  // Un mousedown sobre una cita movible "arma"; si el cursor cruza el umbral →
+  // levanta la cita (mismo `move`) y el bloque sigue al cursor como ghost. Al
+  // soltar, cae en el chip válido más cercano del carril bajo el cursor → doDrop
+  // (limpio → onPlace · solape → confirmación consciente). Un click sin cruzar el
+  // umbral queda como tap-tap (el onClick del bloque lo maneja). Mouse-first.
+  const [drag, setDrag] = useState<{ x: number; y: number; laneId: string | null; chip: DropChip | null; name: string } | null>(null);
+  const armRef = useRef<{ startX: number; startY: number; block: LaneBlock; laneId: string } | null>(null);
+  const draggingRef = useRef(false); // ya cruzó el umbral → es drag, no tap
+  const draggedRef = useRef(false);  // un drag acaba de terminar → traga el click siguiente
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const panRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const trackRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const scrollParentRef = useRef<HTMLElement | null>(null);
+  const winRef = useRef(0);
+  const dropsRef = useRef<Map<string, DropChip[]>>(new Map());
+  const moveRef = useRef<MoveState | null>(null);
+  useEffect(() => { moveRef.current = move; }, [move]);
+
+  // Salir del modo mover limpia también la confirmación pendiente y el ghost.
   useEffect(() => {
-    if (!move) setPendingOverlap(null);
+    if (!move) {
+      setPendingOverlap(null);
+      setDrag(null);
+      draggingRef.current = false;
+      if (panRef.current) { clearInterval(panRef.current); panRef.current = null; }
+    }
   }, [move]);
+
+  // Localizar el ancestro scrollable (para el auto-scroll vertical durante el drag).
+  useEffect(() => {
+    let n: HTMLElement | null = rootRef.current?.parentElement ?? null;
+    while (n) {
+      const oy = getComputedStyle(n).overflowY;
+      if (oy === 'auto' || oy === 'scroll') { scrollParentRef.current = n; break; }
+      n = n.parentElement;
+    }
+    return () => { if (panRef.current) { clearInterval(panRef.current); panRef.current = null; } };
+  }, []);
 
   // Avisar al desk cuando hay un gesto en curso (para pausar el polling).
   useEffect(() => {
@@ -335,6 +373,7 @@ export default function PanoramaTimeline({
   const win = winStart ?? defaultStart;
   const pctOf = (min: number) => ((min - win) / WIN) * 100;
   const setWin = (v: number) => setWinStart(Math.max(dayStart, Math.min(maxWinStart, v)));
+  useEffect(() => { winRef.current = win; }, [win]);
 
   const nowPct = nowMin !== null ? pctOf(nowMin) : -1;
   const nowInWin = isToday && nowPct >= 0 && nowPct <= 100;
@@ -382,6 +421,17 @@ export default function PanoramaTimeline({
     return chips;
   }
 
+  // Mapa laneId → chips: MISMA fuente que el render (los botones de destino) y el
+  // hit-test del drag, para no divergir. Solo se calcula durante un gesto.
+  const dropsByLane = useMemo(() => {
+    const m = new Map<string, DropChip[]>();
+    if (move) for (const lane of lanes) m.set(lane.staff.id, laneDrops(lane));
+    return m;
+    // laneDrops depende de move/fineMode/win/lanes/nowMin/isToday (recreada cada render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [move, fineMode, win, lanes, nowMin, isToday]);
+  useEffect(() => { dropsRef.current = dropsByLane; }, [dropsByLane]);
+
   function doDrop(laneId: string, chip: DropChip) {
     if (!move || !onPlace) return;
     if (chip.soft) {
@@ -403,8 +453,119 @@ export default function PanoramaTimeline({
     setMove(null);
   }
 
+  // ── Drag: hit-test + movimiento + soltar + auto-pan de borde ────────────────
+  // Carril bajo el cursor (por Y) → chip válido más cercano (por X). Sin cap de
+  // distancia: soltar en un carril cae en su hueco válido más cercano (perdonador
+  // y honesto). Carril sin chips (el servicio no cabe) → sin destino → cancela.
+  function hitTest(x: number, y: number): { laneId: string; chip: DropChip | null } | null {
+    for (const [laneId, el] of trackRefs.current) {
+      const r = el.getBoundingClientRect();
+      if (y < r.top || y > r.bottom) continue;
+      const chips = dropsRef.current.get(laneId) ?? [];
+      if (chips.length === 0) return { laneId, chip: null };
+      const clampedX = Math.max(r.left, Math.min(r.right, x));
+      const cursorMin = winRef.current + ((clampedX - r.left) / r.width) * WIN;
+      let best = chips[0]!;
+      let bd = Infinity;
+      for (const c of chips) {
+        const d = Math.abs(c.min - cursorMin);
+        if (d < bd) { bd = d; best = c; }
+      }
+      return { laneId, chip: best };
+    }
+    return null;
+  }
+
+  function panBy(delta: number) {
+    setWinStart((prev) => {
+      const base = prev ?? defaultStart;
+      return Math.max(dayStart, Math.min(maxWinStart, base + delta));
+    });
+  }
+
+  // Cada tick lee la última posición del cursor: cerca del borde izq/der → navega
+  // la ventana 3h; cerca del borde sup/inf del scroll → desplaza los carriles.
+  function panTick() {
+    const p = lastPointerRef.current;
+    if (!p) return;
+    const anyTrack = trackRefs.current.values().next().value as HTMLDivElement | undefined;
+    if (anyTrack) {
+      const r = anyTrack.getBoundingClientRect();
+      if (p.x < r.left + EDGE_ZONE) panBy(-NAV_STEP);
+      else if (p.x > r.right - EDGE_ZONE) panBy(NAV_STEP);
+    }
+    const sc = scrollParentRef.current;
+    if (sc && sc.scrollHeight > sc.clientHeight) {
+      const r = sc.getBoundingClientRect();
+      if (p.y < r.top + EDGE_ZONE) sc.scrollBy({ top: -64 });
+      else if (p.y > r.bottom - EDGE_ZONE) sc.scrollBy({ top: 64 });
+    }
+  }
+
+  function onDragMove(ev: PointerEvent) {
+    const arm = armRef.current;
+    if (!arm) return;
+    lastPointerRef.current = { x: ev.clientX, y: ev.clientY };
+    if (!draggingRef.current) {
+      const dx = ev.clientX - arm.startX;
+      const dy = ev.clientY - arm.startY;
+      if (dx * dx + dy * dy < DRAG_THRESH * DRAG_THRESH) return; // aún es un click potencial
+      // Cruzó el umbral → levanta la cita (mismo `move` del gesto) y arranca el pan.
+      draggingRef.current = true;
+      draggedRef.current = true;
+      setMove({
+        kind: 'reschedule',
+        apptId: arm.block.id,
+        fromLaneId: arm.laneId,
+        dur: arm.block.dur,
+        name: arm.block.name,
+        service: arm.block.service,
+      });
+      if (!panRef.current) panRef.current = setInterval(panTick, 450);
+    }
+    const target = hitTest(ev.clientX, ev.clientY);
+    setDrag({ x: ev.clientX, y: ev.clientY, laneId: target?.laneId ?? null, chip: target?.chip ?? null, name: arm.block.name });
+  }
+
+  function onDragUp(ev: PointerEvent) {
+    const wasDragging = draggingRef.current;
+    armRef.current = null;
+    draggingRef.current = false;
+    if (panRef.current) { clearInterval(panRef.current); panRef.current = null; }
+    window.removeEventListener('pointermove', onDragMove);
+    window.removeEventListener('pointerup', onDragUp);
+    if (!wasDragging) return; // fue un tap → el onClick del bloque lo maneja
+    const target = hitTest(ev.clientX, ev.clientY);
+    setDrag(null);
+    // `move`/`onPlace` en vivo vía refs: el closure de doDrop cerró sobre el `move`
+    // del render que armó el drag (null) → replicamos su lógica con el estado actual.
+    const m = moveRef.current;
+    if (target?.chip && m && onPlace) {
+      if (target.chip.soft) {
+        setPendingOverlap({ laneId: target.laneId, chip: target.chip }); // solape → confirmación consciente
+      } else {
+        onPlace(m, target.laneId, target.chip.min);
+        setMove(null);
+      }
+    } else {
+      setMove(null); // soltó en un lugar sin destino válido → cancela
+    }
+  }
+
+  // mousedown sobre una cita movible: arma el gesto (aún no pasa nada) y engancha
+  // los listeners de ventana. draggedRef se limpia acá → cada interacción parte fresca.
+  function armDrag(ev: ReactPointerEvent, block: LaneBlock, laneId: string) {
+    if (ev.button !== 0) return; // solo botón primario
+    draggedRef.current = false;
+    draggingRef.current = false;
+    armRef.current = { startX: ev.clientX, startY: ev.clientY, block, laneId };
+    lastPointerRef.current = { x: ev.clientX, y: ev.clientY };
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', onDragUp);
+  }
+
   return (
-    <div className="min-w-0">
+    <div ref={rootRef} className="min-w-0">
       {/* ── Cabecera sticky: barra de modo-mover (si aplica) + nav + eje ── */}
       <div className="sticky top-0 z-20 border-b border-line bg-canvas">
         {/* Barra de modo mover */}
@@ -541,7 +702,7 @@ export default function PanoramaTimeline({
         <ul>
           {lanes.map((lane) => {
             const { staff: s, blocks, gaps, unavail, hasAvail } = lane;
-            const drops = laneDrops(lane);
+            const drops = dropsByLane.get(s.id) ?? [];
             return (
               <li
                 key={s.id}
@@ -566,6 +727,10 @@ export default function PanoramaTimeline({
 
                 {/* Pista de tiempo (sub-rejilla 15 min de fondo) */}
                 <div
+                  ref={(el) => {
+                    if (el) trackRefs.current.set(s.id, el);
+                    else trackRefs.current.delete(s.id);
+                  }}
                   className="relative min-w-0 flex-1"
                   style={{
                     margin: '8px 12px',
@@ -637,19 +802,23 @@ export default function PanoramaTimeline({
                     return (
                       <div
                         key={b.id}
+                        onPointerDown={interactive ? (e) => armDrag(e, b, s.id) : undefined}
                         onClick={
                           interactive
-                            ? () =>
-                                lifted
-                                  ? setMove(null)
-                                  : setMove({
-                                      kind: 'reschedule',
-                                      apptId: b.id,
-                                      fromLaneId: s.id,
-                                      dur: b.dur,
-                                      name: b.name,
-                                      service: b.service,
-                                    })
+                            ? () => {
+                                // Un drag acaba de terminar → traga este click sintético.
+                                if (draggedRef.current) { draggedRef.current = false; return; }
+                                if (lifted) setMove(null);
+                                else
+                                  setMove({
+                                    kind: 'reschedule',
+                                    apptId: b.id,
+                                    fromLaneId: s.id,
+                                    dur: b.dur,
+                                    name: b.name,
+                                    service: b.service,
+                                  });
+                              }
                             : undefined
                         }
                         role={interactive ? 'button' : undefined}
@@ -692,28 +861,32 @@ export default function PanoramaTimeline({
                     );
                   })}
 
-                  {/* Chips de destino (gesto): teal = limpio · ámbar = solaparía (forzable) */}
+                  {/* Chips de destino (gesto): teal = limpio · ámbar = solaparía (forzable).
+                      Durante el drag, el chip bajo el cursor se resalta ("va a caer acá"). */}
                   {move &&
-                    drops.map((chip) => (
-                      <button
-                        key={`chip-${chip.min}`}
-                        onClick={() => doDrop(s.id, chip)}
-                        title={
-                          chip.soft
-                            ? `Se solaparía ${chip.overlapMin} min con ${chip.overlapName} — la recepción puede forzarlo`
-                            : undefined
-                        }
-                        className={`absolute top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-[9px] border-[1.5px] px-2 py-1 tabular-nums text-[11px] font-bold shadow-card transition hover:shadow-hero ${
-                          chip.soft
-                            ? 'border-amber-border bg-amber-tint text-amber hover:bg-amber-tint'
-                            : 'border-teal-border bg-card text-teal-ink hover:bg-tint-1'
-                        }`}
-                        style={{ left: `${pctOf(chip.min)}%` }}
-                      >
-                        {chip.soft && <span aria-hidden>⚠ </span>}
-                        {fmtMin(chip.min).replace(' AM', '').replace(' PM', '')}
-                      </button>
-                    ))}
+                    drops.map((chip) => {
+                      const isTarget = drag?.laneId === s.id && drag?.chip?.min === chip.min;
+                      return (
+                        <button
+                          key={`chip-${chip.min}`}
+                          onClick={() => doDrop(s.id, chip)}
+                          title={
+                            chip.soft
+                              ? `Se solaparía ${chip.overlapMin} min con ${chip.overlapName} — la recepción puede forzarlo`
+                              : undefined
+                          }
+                          className={`absolute top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-[9px] border-[1.5px] px-2 py-1 tabular-nums text-[11px] font-bold shadow-card transition hover:shadow-hero ${
+                            chip.soft
+                              ? 'border-amber-border bg-amber-tint text-amber hover:bg-amber-tint'
+                              : 'border-teal-border bg-card text-teal-ink hover:bg-tint-1'
+                          } ${isTarget ? 'z-40 scale-110 shadow-hero ring-2 ring-ink' : ''}`}
+                          style={{ left: `${pctOf(chip.min)}%` }}
+                        >
+                          {chip.soft && <span aria-hidden>⚠ </span>}
+                          {fmtMin(chip.min).replace(' AM', '').replace(' PM', '')}
+                        </button>
+                      );
+                    })}
 
                   {/* Línea "ahora" (roja) */}
                   {nowInWin && (
@@ -728,6 +901,27 @@ export default function PanoramaTimeline({
             );
           })}
         </ul>
+      )}
+
+      {/* Ghost del drag: sigue al cursor con la hora/barbero destino y el aviso de solape. */}
+      {drag && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-[8px] border border-ink bg-card px-2.5 py-1.5 text-[11px] font-semibold shadow-hero"
+          style={{ left: drag.x + 14, top: drag.y + 14 }}
+        >
+          <span className="text-ink">{drag.name}</span>
+          {drag.chip ? (
+            <span className={drag.chip.soft ? 'text-amber' : 'text-teal-ink'}>
+              {' → '}
+              <span className="tabular-nums">
+                {fmtMin(drag.chip.min).replace(' AM', '').replace(' PM', '')}
+              </span>
+              {drag.chip.soft && ` · ⚠ se encima ${drag.chip.overlapMin}m`}
+            </span>
+          ) : (
+            <span className="text-faint"> · suelta en un carril</span>
+          )}
+        </div>
       )}
     </div>
   );
