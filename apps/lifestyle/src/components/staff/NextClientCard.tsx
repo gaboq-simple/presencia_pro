@@ -1,5 +1,6 @@
 // ─── NextClientCard ───────────────────────────────────────────────────────────
-// Client Component — tarjeta del próximo cliente del barbero.
+// Client Component — tarjeta del «Próximo cliente» del barbero (el momento firma).
+// Diseño: maqueta v5 (zlot-barber-dashboard-v5) — sistema Zentriq claro.
 //
 // Recibe el array de citas del día desde StaffLayout (que gestiona Realtime).
 // Deriva el "próximo cliente" en cada render — no tiene estado propio.
@@ -44,6 +45,15 @@ function isOngoing(appointment: DayAppointmentForStaff): boolean {
   );
 }
 
+/** Iniciales del cliente para el avatar (máx. 2, primera + última palabra). */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '–';
+  const first = parts[0]!.charAt(0);
+  const last = parts.length > 1 ? parts[parts.length - 1]!.charAt(0) : '';
+  return (first + last).toUpperCase();
+}
+
 // ─── Derivación: próximo appointment ─────────────────────────────────────────
 
 function getNextAppointment(
@@ -58,15 +68,13 @@ function getNextAppointment(
 
   if (!isToday(date)) {
     // Fecha futura: primer appointment del día
-    return { appointment: sorted[0], ongoing: false };
+    return { appointment: sorted[0]!, ongoing: false };
   }
 
   const now = Date.now();
 
   // Busca el primer appointment que no haya terminado
-  const next = sorted.find(
-    (a) => new Date(a.ends_at).getTime() > now,
-  );
+  const next = sorted.find((a) => new Date(a.ends_at).getTime() > now);
 
   if (!next) return null;
 
@@ -74,12 +82,13 @@ function getNextAppointment(
 }
 
 // ─── Subcomponente: estado vacío ──────────────────────────────────────────────
+// Gesto B atenuado (border-left neutro) para diferenciar del momento firma.
 
 function EmptyCard({ message, sub }: { message: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center">
-      <p className="text-sm font-medium text-gray-500">{message}</p>
-      {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
+    <div className="rounded-r-card border border-l-[3px] border-line border-l-line-2 bg-card px-4 py-6 text-center">
+      <p className="text-sm font-medium text-ink-2">{message}</p>
+      {sub && <p className="mt-0.5 text-xs text-faint">{sub}</p>}
     </div>
   );
 }
@@ -94,56 +103,58 @@ export default function NextClientCard({ appointments, date }: Props) {
     return <EmptyCard message="Sin citas para este día" />;
   }
 
-  // Todas las citas terminaron
+  // Todas las citas terminaron (el tratamiento de fin de jornada rico es PR3)
   if (!result) {
-    return (
-      <EmptyCard
-        message="Jornada terminada"
-        sub="No hay más citas para hoy"
-      />
-    );
+    return <EmptyCard message="Jornada terminada" sub="No hay más citas para hoy" />;
   }
 
   const { appointment: appt, ongoing } = result;
+  const hasCustomer = Boolean(appt.customer?.name);
   const customerName = appt.customer?.name ?? 'Sin cliente registrado';
 
   return (
-    <div className="rounded-xl border-2 border-gray-900 bg-white px-4 py-4">
-      {/* Etiqueta superior */}
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-        {ongoing ? 'En curso' : 'Próximo cliente'}
-      </p>
+    // Gesto B: border-left teal + esquina izquierda plana (rounded-r-card = 0 16px 16px 0)
+    <div className="relative overflow-hidden rounded-r-card border border-l-[3px] border-line border-l-teal bg-tint-1 pt-[17px] pr-4 pb-[15px] pl-4 shadow-hero">
+      <div className="flex items-center gap-[11px]">
+        {/* Avatar con iniciales (tinta oscura sobre gradiente teal) */}
+        <div className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-avatar bg-hero-grad text-[15px] font-bold text-avatar-ink">
+          {hasCustomer ? initials(customerName) : '–'}
+        </div>
 
-      {/* Nombre del cliente */}
-      <p className="mt-1 text-2xl font-bold leading-tight text-gray-900 truncate">
-        {customerName}
-      </p>
+        <div className="min-w-0">
+          {/* Eyebrow con dot; pulso data-beat solo en curso */}
+          <div className="flex items-center gap-[7px] text-[12px] font-semibold text-teal-ink">
+            <span
+              className={`h-[7px] w-[7px] rounded-full bg-teal${
+                ongoing ? ' animate-data-beat motion-reduce:animate-none' : ''
+              }`}
+              aria-hidden="true"
+            />
+            {ongoing ? 'En curso' : 'Próximo cliente'}
+          </div>
+
+          {/* Nombre del cliente — momento firma (clamp a 2 líneas para nombres largos) */}
+          <p className="mt-0.5 line-clamp-2 text-[27px] font-semibold leading-[1.02] tracking-[-0.02em] text-ink [overflow-wrap:anywhere]">
+            {customerName}
+          </p>
+        </div>
+      </div>
 
       {/* Servicio */}
-      <p className="mt-0.5 text-sm text-gray-600 truncate">
-        {appt.service.name}
-      </p>
+      <p className="mt-2 text-[13.5px] text-ink-2">{appt.service.name}</p>
 
-      {/* Hora + duración */}
-      <div className="mt-3 flex items-center gap-3">
-        <span className="text-lg font-semibold tabular-nums text-gray-900">
+      {/* Hora — tabular-nums, separada por línea sutil */}
+      <div className="mt-[13px] flex items-baseline gap-2.5 border-t border-line pt-3">
+        <span className="text-[19px] font-semibold tabular-nums tracking-[-0.01em] text-teal-ink">
           {formatTime(appt.starts_at)}
         </span>
-        <span className="text-sm text-gray-400">
+        <span className="text-[13px] tabular-nums text-faint">
           – {formatTime(appt.ends_at)}
         </span>
-        <span className="ml-auto text-xs text-gray-400">
+        <span className="ml-auto text-[11px] tabular-nums text-faint">
           {appt.service.duration_minutes} min
         </span>
       </div>
-
-      {/* Indicador visual de en curso */}
-      {ongoing && (
-        <div className="mt-3 flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-green-500" aria-hidden="true" />
-          <span className="text-xs text-green-700 font-medium">Atendiendo ahora</span>
-        </div>
-      )}
     </div>
   );
 }

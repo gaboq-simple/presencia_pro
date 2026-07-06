@@ -116,6 +116,12 @@ function AssistantAppointmentCard({ appointment, onMutated, date, staffOptions }
   const [reschedError, setReschedError]     = useState<string | null>(null);
   const [reschedPending, setReschedPending] = useState(false);
 
+  // Error de acción (completar/no-asistió/cancelar/notas) — se muestra inline en
+  // la tarjeta SIN tumbar el error boundary de la agenda. El gate 2b ("solo tus
+  // citas") y demás mensajes esperados llegan como { error }; los throw de sistema
+  // caen al catch con un aviso local genérico. Nunca escala a la página.
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const {
     id, starts_at, ends_at, status, service, customer, staff, notes,
     created_by, modified_by,
@@ -124,34 +130,56 @@ function AssistantAppointmentCard({ appointment, onMutated, date, staffOptions }
   const borderClass = STATUS_BORDER[status] ?? 'border-gray-200';
 
   function handleComplete() {
+    setActionError(null);
     startTransition(async () => {
-      await completeAppointment(id);
-      onMutated();
+      try {
+        const res = await completeAppointment(id);
+        if (res?.error) { setActionError(res.error); return; }
+        onMutated();
+      } catch {
+        setActionError('No se pudo completar la cita. Intenta de nuevo.');
+      }
     });
   }
 
   function handleNoShow() {
+    setActionError(null);
     startTransition(async () => {
-      await noShowAppointment(id);
-      onMutated();
+      try {
+        const res = await noShowAppointment(id);
+        if (res?.error) { setActionError(res.error); return; }
+        onMutated();
+      } catch {
+        setActionError('No se pudo marcar como no asistió. Intenta de nuevo.');
+      }
     });
   }
 
   function handleCancel() {
+    setActionError(null);
     startTransition(async () => {
-      await cancelAppointment(id, cancelReason);
-      setShowCancelForm(false);
-      setCancelReason('');
-      onMutated();
+      try {
+        const res = await cancelAppointment(id, cancelReason);
+        if (res?.error) { setActionError(res.error); return; }
+        setShowCancelForm(false);
+        setCancelReason('');
+        onMutated();
+      } catch {
+        setActionError('No se pudo cancelar la cita. Intenta de nuevo.');
+      }
     });
   }
 
   async function handleSaveNotes() {
+    setActionError(null);
     setNotesSaving(true);
     try {
-      await updateAppointmentNotes(id, notesValue);
+      const res = await updateAppointmentNotes(id, notesValue);
+      if (res?.error) { setActionError(res.error); return; }
       setShowNotes(false);
       onMutated();
+    } catch {
+      setActionError('No se pudieron guardar las notas. Intenta de nuevo.');
     } finally {
       setNotesSaving(false);
     }
@@ -165,16 +193,17 @@ function AssistantAppointmentCard({ appointment, onMutated, date, staffOptions }
     setReschedPending(true);
     setReschedError(null);
     try {
-      await rescheduleAppointment({
+      const res = await rescheduleAppointment({
         appointmentId: id,
         newDate:       reschedDate,
         newStartTime:  reschedTime,
         newStaffId:    reschedStaffId !== appointment.staff.id ? reschedStaffId : undefined,
       });
+      if (res?.error) { setReschedError(res.error); return; }
       setShowReschedule(false);
       onMutated();
-    } catch (err) {
-      setReschedError(err instanceof Error ? err.message : 'Error al reagendar');
+    } catch {
+      setReschedError('No se pudo reagendar. Intenta de nuevo.');
     } finally {
       setReschedPending(false);
     }
@@ -418,6 +447,21 @@ function AssistantAppointmentCard({ appointment, onMutated, date, staffOptions }
               Cancelar
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Aviso de acción rechazada — inline, NO tumba la agenda. Ej: gate 2b
+          "solo tus citas". El barbero sigue en la vista, no recarga. */}
+      {actionError && (
+        <div className="mt-2 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5">
+          <p className="flex-1 text-xs text-amber-800">{actionError}</p>
+          <button
+            onClick={() => setActionError(null)}
+            className="shrink-0 text-xs text-amber-500 hover:text-amber-700"
+            aria-label="Descartar aviso"
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>

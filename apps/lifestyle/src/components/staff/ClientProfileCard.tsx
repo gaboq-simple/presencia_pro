@@ -111,20 +111,20 @@ function NotesField({
 
   return (
     <div className="mt-3">
-      <p className="text-xs font-medium text-gray-500">Notas del staff</p>
+      <p className="text-xs font-medium text-ink-2">Notas del staff</p>
       <textarea
         value={value}
         onChange={handleChange}
         maxLength={500}
         rows={3}
         placeholder="Agrega una nota sobre este cliente..."
-        className="mt-1 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-gray-400 focus:bg-white focus:outline-none"
+        className="mt-1 w-full resize-none rounded-lg border border-line bg-tint-1 px-3 py-2 text-sm text-ink placeholder-faint focus:border-line-2 focus:bg-card focus:outline-none"
       />
       <div className="mt-0.5 flex items-center justify-between">
-        <span className="text-xs text-gray-400">{value.length}/500</span>
-        {saving && <span className="text-xs text-gray-400">Guardando...</span>}
-        {saved && !saving && <span className="text-xs text-green-600">Guardado</span>}
-        {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+        <span className="text-xs text-faint">{value.length}/500</span>
+        {saving && <span className="text-xs text-faint">Guardando...</span>}
+        {saved && !saving && <span className="text-xs text-teal-ink">Guardado</span>}
+        {saveError && <span className="text-xs text-red-ink">{saveError}</span>}
       </div>
     </div>
   );
@@ -173,16 +173,16 @@ export default function ClientProfileCard({ customerId }: Props) {
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-        <p className="text-xs text-gray-400">Cargando perfil...</p>
+      <div className="rounded-xl border border-line bg-tint-1 px-4 py-3">
+        <p className="text-xs text-faint">Cargando perfil...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3">
-        <p className="text-xs text-red-500">{error}</p>
+      <div className="rounded-xl border border-red-border bg-red-tint px-4 py-3">
+        <p className="text-xs text-red-ink">{error}</p>
       </div>
     );
   }
@@ -192,12 +192,12 @@ export default function ClientProfileCard({ customerId }: Props) {
   const isNewClient = profile.visit_count <= 1;
 
   return (
-    <div className="rounded-xl border-2 border-gray-100 bg-gray-50 px-4 py-4">
+    <div className="rounded-xl border-2 border-line bg-tint-1 px-4 py-4">
       {/* Nombre + visita # + badge nuevo */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-xl font-bold text-gray-900">{profile.name}</p>
-          <p className="mt-0.5 text-xs text-gray-500">
+          <p className="truncate text-xl font-bold text-ink">{profile.name}</p>
+          <p className="mt-0.5 text-xs text-ink-2">
             Visita #{profile.visit_count > 0 ? profile.visit_count : 1}
           </p>
         </div>
@@ -205,12 +205,12 @@ export default function ClientProfileCard({ customerId }: Props) {
       </div>
 
       {/* Servicio de hoy + hora */}
-      <div className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
-        <p className="text-xs text-gray-400">Hoy</p>
-        <p className="text-sm font-semibold text-gray-900">
+      <div className="mt-3 rounded-lg border border-line bg-card px-3 py-2">
+        <p className="text-xs text-faint">Hoy</p>
+        <p className="text-sm font-semibold text-ink">
           {profile.upcoming_appointment.service_name}
         </p>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-ink-2">
           {formatTime(profile.upcoming_appointment.starts_at)}
           {' – '}
           {formatTime(profile.upcoming_appointment.ends_at)}
@@ -220,24 +220,24 @@ export default function ClientProfileCard({ customerId }: Props) {
       {/* Datos contextuales */}
       <div className="mt-3 space-y-1.5">
         {/* Última visita */}
-        <p className="text-xs text-gray-500">
-          <span className="font-medium text-gray-700">Última visita:</span>{' '}
+        <p className="text-xs text-ink-2">
+          <span className="font-medium text-ink">Última visita:</span>{' '}
           {relativeLastVisit(profile.last_visit)}
         </p>
 
         {/* Servicio frecuente */}
         {profile.favorite_service && (
-          <p className="text-xs text-gray-500">
-            <span className="font-medium text-gray-700">Usualmente pide:</span>{' '}
+          <p className="text-xs text-ink-2">
+            <span className="font-medium text-ink">Usualmente pide:</span>{' '}
             {profile.favorite_service}
           </p>
         )}
 
         {/* Barbero favorito — solo si es diferente al staff autenticado */}
         {profile.favorite_staff && (
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-ink-2">
             Suele venir con{' '}
-            <span className="font-medium text-gray-700">{profile.favorite_staff}</span>
+            <span className="font-medium text-ink">{profile.favorite_staff}</span>
           </p>
         )}
       </div>

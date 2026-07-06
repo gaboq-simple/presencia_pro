@@ -21,6 +21,9 @@ import { redirect } from 'next/navigation';
 import {
   getDayAppointments,
   getActiveStaffWithAvailability,
+  getDayExceptions,
+  getRequireCustomerPhone,
+  getMaxLateMinutes,
   computeDayRevenue,
   getPendingBlockRequests,
   getActiveStaffWithPhoto,
@@ -30,7 +33,7 @@ import {
 import { getCurrentSession, getBusinessName, getBusinessTimezone, getOrganizationBranches } from '@/lib/auth';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import ConsolidatedView from '@/components/admin/ConsolidatedView';
-import AssistantLayout from '@/components/staff/AssistantLayout';
+import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
 import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,29 +111,41 @@ export default async function DashboardPage({
   const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
   const dayOfWeek = new Date(`${date}T12:00:00`).getDay(); // 0=dom … 6=sáb
 
-  // ── Vista asistente — early return con datos propios ─────────────────────
+  // ── Vista asistente — mesa de control propia (S6-UI-02) ──────────────────
+  // Diverge de owner/admin: monta AssistantControlDesk (diseño congelado).
+  // /staff/gestion del barbero sigue usando AssistantLayout intacto.
   if (session.role === 'assistant') {
-    const [businessName, timezone, appointments, allStaff, staffBlocks] = await Promise.all([
-      getBusinessName(businessId),
-      getBusinessTimezone(businessId),
-      getDayAppointments(businessId, date),
-      getActiveStaffWithAvailability(businessId, dayOfWeek),
-      getStaffBlocksForDay(date),
-    ]);
+    const [businessName, timezone, appointments, allStaff, staffBlocks, dayExceptions, requireCustomerPhone, maxLateMinutes] =
+      await Promise.all([
+        getBusinessName(businessId),
+        getBusinessTimezone(businessId),
+        getDayAppointments(businessId, date),
+        getActiveStaffWithAvailability(businessId, dayOfWeek),
+        getStaffBlocksForDay(date),
+        getDayExceptions(businessId, date),
+        getRequireCustomerPhone(businessId),
+        getMaxLateMinutes(businessId),
+      ]);
     const staffOptions = allStaff
       .filter((s) => s.role === 'barber')
       .map((s) => ({ id: s.id, name: s.name }));
+    // Disponibilidad del panorama: incluye breaks (para validar dónde cabe un reacomodo).
     const staffWithAvailability = allStaff
       .filter((s) => s.role === 'barber')
       .map((s) => ({
         id: s.id,
         name: s.name,
         availabilityToday: s.availabilityToday
-          ? { start_time: s.availabilityToday.start_time, end_time: s.availabilityToday.end_time }
+          ? {
+              start_time: s.availabilityToday.start_time,
+              end_time: s.availabilityToday.end_time,
+              break_start: s.availabilityToday.break_start ?? null,
+              break_end: s.availabilityToday.break_end ?? null,
+            }
           : null,
       }));
     return (
-      <AssistantLayout
+      <AssistantControlDesk
         businessId={businessId}
         businessName={businessName}
         date={date}
@@ -139,6 +154,9 @@ export default async function DashboardPage({
         staffOptions={staffOptions}
         staffWithAvailability={staffWithAvailability}
         initialStaffBlocks={staffBlocks}
+        dayExceptions={dayExceptions}
+        requireCustomerPhone={requireCustomerPhone}
+        maxLateMinutes={maxLateMinutes}
       />
     );
   }

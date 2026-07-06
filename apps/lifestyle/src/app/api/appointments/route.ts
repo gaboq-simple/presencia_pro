@@ -280,10 +280,44 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   const admin = getAdminClient();
 
+  // ── Gate: barbero solo puede mutar SUS citas ────────────────────────────────
+  // Mismo predicado que el GET (route.ts ~139): role 'barber' + staff_id presente.
+  // Recepcionista/dueño/admin y sesiones por token (staff_id null) → SIN
+  // restricción, comportamiento intacto. El RLS "solo mis citas" existe pero es
+  // INERTE bajo service_role: el enforcement vive aquí, no en la DB.
+  if (session.role === 'barber' && session.staff_id) {
+    const { data: target, error: targetError } = await admin
+      .from('appointments')
+      .select('staff_id')
+      .eq('id', id)
+      .eq('business_id', businessId)
+      .maybeSingle();
+
+    if (targetError) {
+      return NextResponse.json({ error: 'Error al actualizar cita' }, { status: 500 });
+    }
+    if (!target) {
+      return NextResponse.json({ error: 'Cita no encontrada' }, { status: 404 });
+    }
+    if ((target as { staff_id: string | null }).staff_id !== session.staff_id) {
+      return NextResponse.json(
+        { error: 'Solo puedes modificar tus propias citas' },
+        { status: 403 },
+      );
+    }
+  }
+
   // ── Update — solo si pertenece a este negocio ───────────────────────────────
+  // Atribución: registramos quién tocó la cita (mismo patrón que el panel del
+  // asistente — migración 023). staff_id puede ser null en sesiones por token
+  // (owner/admin): se guarda null, no rompe el FK (columna nullable).
   const { data: updatedAppt, error: updateError } = await admin
     .from('appointments')
-    .update({ status })
+    .update({
+      status,
+      modified_by_staff_id: session.staff_id ?? null,
+      modified_at:          new Date().toISOString(),
+    })
     .eq('id', id)
     .eq('business_id', businessId)
     .select('id, customer_id, business_id, starts_at, staff_id')
