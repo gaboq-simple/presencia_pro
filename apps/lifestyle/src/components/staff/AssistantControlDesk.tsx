@@ -89,6 +89,21 @@ export type AssistantControlDeskProps = {
 // Servicio del catálogo (para el picker del walk-in).
 type CatalogService = { id: string; name: string; duration_minutes: number };
 
+// Estado previo EXACTO de una cita antes de un reacomodo — lo que necesita el
+// deshacer para restaurar ESA cita (no un reverse ciego). `date`/`hhmm` son la
+// hora-de-pared previa en la tz del negocio (para el reschedule inverso).
+type ReschedulePrev = {
+  apptId: string;
+  date: string;         // 'YYYY-MM-DD' previo (tz negocio)
+  hhmm: string;         // 'HH:MM' previo 24h (tz negocio)
+  startsAtIso: string;  // para el restore optimista
+  endsAtIso: string;
+  staffId: string;
+  staffName: string;
+  status: DashboardAppointment['status'];
+  allowOverlap: boolean;
+};
+
 // ─── Helpers de fecha ─────────────────────────────────────────────────────────
 
 function addDays(dateStr: string, days: number): string {
@@ -212,11 +227,14 @@ export default function AssistantControlDesk({
     return () => clearInterval(id);
   }, []);
 
-  // Toast breve para confirmar/errar el reagendado.
-  const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' | 'warn' } | null>(null);
+  // Toast breve para confirmar/errar el reagendado. Un reschedule exitoso lleva
+  // `undo` (botón Deshacer) y una ventana más larga; el resto usa el default.
+  const [toast, setToast] = useState<
+    { msg: string; kind: 'ok' | 'err' | 'warn'; undo?: () => void; duration?: number } | null
+  >(null);
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(() => setToast(null), 3500);
+    const id = setTimeout(() => setToast(null), toast.duration ?? 3500);
     return () => clearTimeout(id);
   }, [toast]);
 
@@ -319,6 +337,22 @@ export default function AssistantControlDesk({
     const snapshot = appointments;
     const appt = snapshot.find((a) => a.id === apptId);
     if (!appt) return;
+
+    // Estado previo EXACTO de ESTA cita (autónomo, para un deshacer robusto al
+    // tiempo real): no es un "reverse" ciego, es restaurar estos campos a este id.
+    const prevParts = partsInTz(appt.starts_at, timezone);
+    const prev: ReschedulePrev = {
+      apptId,
+      date: prevParts.ymd,
+      hhmm: `${String(Math.floor(prevParts.min / 60)).padStart(2, '0')}:${String(prevParts.min % 60).padStart(2, '0')}`,
+      startsAtIso: appt.starts_at,
+      endsAtIso: appt.ends_at,
+      staffId: appt.staff.id,
+      staffName: appt.staff.name,
+      status: appt.status,
+      allowOverlap: appt.allow_overlap === true,
+    };
+
     const dur = Math.max(
       1,
       Math.round((Date.parse(appt.ends_at) - Date.parse(appt.starts_at)) / 60_000),
@@ -358,15 +392,72 @@ export default function AssistantControlDesk({
         setToast({ msg: res.error, kind: 'err' });
         return;
       }
-      // Aviso sutil de solape forzado (no frena el flujo).
+      // Toast con Deshacer (6s). El solape forzado además avisa en ámbar.
+      const label = appt.customer?.name ?? 'Cita';
       const msg = opts?.force
-        ? `Movida a ${newStaffName} · ${fmtHora(newStartMin)} · se solapa ${opts.overlapMin} min con ${opts.overlapName}`
-        : `Movida a ${newStaffName} · ${fmtHora(newStartMin)}`;
-      setToast({ msg, kind: opts?.force ? 'warn' : 'ok' });
+        ? `${label} movida · ${newStaffName} ${fmtHora(newStartMin)} · ⚠ se solapa ${opts.overlapMin}m con ${opts.overlapName}`
+        : `${label} movida · ${newStaffName} ${fmtHora(newStartMin)}`;
+      setToast({
+        msg,
+        kind: opts?.force ? 'warn' : 'ok',
+        duration: 6000,
+        undo: () => void undoReschedule(prev),
+      });
       router.refresh(); // reconciliar con la verdad del servidor
     } catch {
       setAppointments(snapshot); // revert — fallo de sistema, no tumba la mesa
       setToast({ msg: 'No se pudo reagendar', kind: 'err' });
+    } finally {
+      mutatingRef.current = false;
+    }
+  }
+
+  // Deshacer un reacomodo: un SEGUNDO reschedule que restaura el estado previo
+  // EXACTO de esa cita (hora/barbero/solape anteriores). Robusto al tiempo real:
+  // toca solo ese id, no asume que el resto sigue igual. Si el hueco previo ya se
+  // ocupó (otro flujo lo tomó mientras el toast estaba arriba) → avisa con gracia,
+  // NO fuerza un solape en silencio. El audit captura este reschedule también (045).
+  async function undoReschedule(prev: ReschedulePrev) {
+    // Optimista: restaurar localmente los campos previos de esa cita. Capturo el
+    // snapshot vigente dentro del updater (el estado actual, no el del render viejo).
+    let snapshot: DashboardAppointment[] = [];
+    setAppointments((cur) => {
+      snapshot = cur;
+      return cur.map((a) =>
+        a.id === prev.apptId
+          ? {
+              ...a,
+              staff: { id: prev.staffId, name: prev.staffName },
+              starts_at: prev.startsAtIso,
+              ends_at: prev.endsAtIso,
+              status: prev.status,
+              allow_overlap: prev.allowOverlap,
+            }
+          : a,
+      );
+    });
+
+    mutatingRef.current = true;
+    try {
+      const res = await rescheduleAppointment({
+        appointmentId: prev.apptId,
+        newDate: prev.date,
+        newStartTime: prev.hhmm,
+        newStaffId: prev.staffId,
+        force: prev.allowOverlap, // reproduce el estado de solape que tenía; si era limpio, NO fuerza
+      });
+      if (res?.error) {
+        // El hueco previo ya no está libre (u otro rechazo) → revertir el optimista
+        // del undo (la cita se queda donde el reacomodo la dejó) y avisar honesto.
+        setAppointments(snapshot);
+        setToast({ msg: 'No se pudo deshacer: el horario anterior ya está ocupado', kind: 'err' });
+        return;
+      }
+      setToast({ msg: `${prev.staffName} ${prev.hhmm} · movimiento deshecho`, kind: 'ok' });
+      router.refresh();
+    } catch {
+      setAppointments(snapshot);
+      setToast({ msg: 'No se pudo deshacer', kind: 'err' });
     } finally {
       mutatingRef.current = false;
     }
@@ -752,11 +843,11 @@ export default function AssistantControlDesk({
         </div>
       )}
 
-      {/* Toast de reagendado (confirmación / error) */}
+      {/* Toast de reagendado (confirmación / error) + Deshacer en reschedule */}
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-pill border px-4 py-2 text-sm font-semibold shadow-card ${
+          className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-pill border px-4 py-2 text-sm font-semibold shadow-card ${
             toast.kind === 'ok'
               ? 'border-teal-border bg-tint-1 text-teal-ink'
               : toast.kind === 'warn'
@@ -764,7 +855,19 @@ export default function AssistantControlDesk({
                 : 'border-red-border bg-red-tint text-red-ink'
           }`}
         >
-          {toast.msg}
+          <span>{toast.msg}</span>
+          {toast.undo && (
+            <button
+              onClick={() => {
+                const fn = toast.undo;
+                setToast(null); // cierra el toast al tocar Deshacer
+                fn?.();
+              }}
+              className="-my-0.5 rounded-pill border border-current px-2.5 py-0.5 text-xs font-bold transition hover:bg-card/40"
+            >
+              Deshacer
+            </button>
+          )}
         </div>
       )}
     </div>
