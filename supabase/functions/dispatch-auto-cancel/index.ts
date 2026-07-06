@@ -287,15 +287,15 @@ async function processAppointment(
   appt:     OverdueAppointment,
 ): Promise<boolean> {
   // ── 1. Atomic guard — solo marcar si sigue 'confirmed' ───────────────────
+  // Vía RPC (2c-ii): set_config('app.actor_type','system',true) + UPDATE con el
+  // guard status='confirmed', atómicos en la misma txn → el audit atribuye 'system'
+  // en vez de 'unknown'. El guard vive dentro del RPC (idéntico al .eq anterior).
 
-  const { data: updated } = await supabase
-    .from('appointments')
-    .update({ status: 'no_show' })
-    .eq('id', appt.id)
-    .eq('status', 'confirmed')
-    .select('id');
+  const { data: marked, error: markErr } = await supabase
+    .rpc('mark_appointment_no_show', { p_appointment_id: appt.id });
 
-  if (!updated || updated.length === 0) return false; // ya procesada
+  if (markErr) throw markErr;          // el loop lo cuenta en summary.failed (falla visible)
+  if (marked !== true) return false;   // ya procesada por otra instancia (RPC devolvió false)
 
   // ── 2. Cancelar scheduled_notifications pendientes ────────────────────────
   // Marca failed_at para que el dispatcher no las envíe.
