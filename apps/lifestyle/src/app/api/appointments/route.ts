@@ -72,6 +72,7 @@ type AppointmentRow = {
   status: string;
   source: string;
   notes: string | null;
+  price_charged: number | null;  // sellado desde services.price al completarse (migración 049)
   created_at: string;
 };
 
