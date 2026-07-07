@@ -20,7 +20,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
 import type { LifestyleBotContext, LifestyleBotState } from '../../../types/lifestyle.types';
 import { buildSystemPrompt } from '../prompt';
-import { logBot } from '../../../utils/logger';
+import { logBot, maskPhone } from '../../../utils/logger';
 import type { MultiIntentClassification } from '../types';
 import {
   logClassifierOutput,
@@ -109,8 +109,42 @@ export async function handleGreeting(
       .select('id')
       .single();
 
-    customerId   = (error || !inserted) ? '' : (inserted as { id: string }).id;
-    customerName = nameToSave;
+    if (!error && inserted) {
+      customerId   = (inserted as { id: string }).id;
+      customerName = nameToSave;
+    } else {
+      // El fallo más común de este INSERT es una carrera en UNIQUE(business_id,
+      // phone): un mensaje concurrente ya creó al cliente y el SELECT inicial no
+      // lo vio. Re-consultar recupera la liga sin cambiar el flujo. Antes se
+      // tragaba el fallo (customerId = '') → una cita agendada después en esta
+      // conversación quedaba SIN liga al cliente, en silencio.
+      const { data: recovered } = await supabase
+        .from('customers')
+        .select('id, name')
+        .eq('business_id', business.id)
+        .eq('phone', msg.customerPhone)
+        .maybeSingle();
+
+      if (recovered) {
+        const rec    = recovered as { id: string; name: string };
+        customerId   = rec.id;
+        customerName = rec.name ?? nameToSave;
+      } else {
+        // Fallo genuino (no carrera): no se pudo crear ni recuperar el cliente.
+        // customerId queda vacío, pero el fallo se registra RUIDOSO (no mudo) para
+        // que sea observable — nunca una liga perdida en silencio.
+        customerId   = '';
+        customerName = nameToSave;
+        console.error(JSON.stringify({
+          ts:             new Date().toISOString(),
+          service:        'bot',
+          event:          'customer_create_failed',
+          business_id:    business.id,
+          customer_phone: maskPhone(msg.customerPhone),
+          error:          error?.message ?? 'unknown',
+        }));
+      }
+    }
   }
 
   // ── Cargar catálogo + staff en paralelo ────────────────────────────────────

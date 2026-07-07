@@ -168,6 +168,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 // ─── POST ─────────────────────────────────────────────────────────────────────
+// NOTA: este endpoint NO es el camino de reserva de la UI. La creación manual del
+// asistente va por la server action `createAssistantAppointment` (resuelve/crea el
+// cliente y liga `customer_id`); el bot reserva en el FSM (`confirmed.ts`). Ningún
+// componente hace POST aquí (verificado). `customer_id` es OPCIONAL a propósito para
+// usos programáticos/de integración; si a futuro un flujo de reserva de UI usara este
+// endpoint, debe resolver y pasar `customer_id` (o exigirlo) para no crear citas
+// agendadas sin liga al cliente.
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Auth check — ls_session o Supabase Auth ─────────────────────────────────
