@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
   computeClientelaStats,
   computeRetention,
+  computeSegmentMovement,
   type CustomerCadenceInput,
   type RfmSegment,
 } from '../apps/lifestyle/src/lib/cadence';
@@ -224,4 +225,61 @@ test('computeClientelaStats incluye retention (integración PR-A + PR-B)', () =>
   const s = computeClientelaStats(inputs, NOW_MS);
   assert.ok(s.retention, 'la foto de clientela ahora trae retención');
   assert.ok('newReturn' in s.retention && 'baseRepeat' in s.retention);
+});
+
+// ─── Movimiento entre grupos (PR-C) — FIDELIDAD TEMPORAL ──────────────────────
+// NOW = 2026-07-07T12:00Z → cierre del mes anterior (monthStart) = 2026-07-01T00:00Z,
+// que cae en daysAgo(6.5). Visita daysAgo>6.5 = antes del cierre; <6.5 = julio.
+
+function txn(m: ReturnType<typeof computeSegmentMovement>, from: RfmSegment, to: RfmSegment): number {
+  return m.transitions.find((t) => t.from === from && t.to === to)?.count ?? 0;
+}
+
+test('movimiento: el ANTES se reconstruye a la fecha pasada (no el de hoy)', () => {
+  const inputs: CustomerCadenceInput[] = [
+    // A) Nuevo→Regular: 2 visitas antes del cierre (Nuevo) + 3ª en julio, sin atraso (Regular hoy).
+    mk({ customerId: 'A', completedVisits: [daysAgo(40), daysAgo(26), daysAgo(3)] }),
+    // B) Regular→Se-están-yendo: 3 visitas antes del cierre; a la fecha del cierre NO atrasado
+    //    (Regular), hoy sí (Se-están-yendo). El ANTES difiere del HOY → prueba la reconstrucción.
+    mk({ customerId: 'B', completedVisits: [daysAgo(54), daysAgo(40), daysAgo(26)] }),
+    // C) Sin cambio: 4 visitas, Regular al cierre y hoy → NO transición (pero sí elegible).
+    mk({ customerId: 'C', completedVisits: [daysAgo(50), daysAgo(36), daysAgo(22), daysAgo(8)] }),
+    // D) Recién llegado: todas sus visitas son de julio (después del cierre) → EXCLUIDO del "antes".
+    mk({ customerId: 'D', completedVisits: [daysAgo(4), daysAgo(2)] }),
+  ];
+
+  const m = computeSegmentMovement(inputs, NOW_MS);
+
+  // Las dos transiciones reconstruidas correctamente (el ANTES ≠ HOY):
+  assert.equal(txn(m, 'nuevos', 'regulares'), 1, 'A: Nuevo (2 visitas al cierre) → Regular (3ª en julio)');
+  assert.equal(txn(m, 'regulares', 'se_estan_yendo'), 1, 'B: Regular al cierre → Se-están-yendo hoy (NO se-están-yendo en ambos)');
+  assert.equal(m.movedCount, 2, 'solo A y B cambiaron; C se mantuvo');
+  assert.equal(m.eligibleCount, 3, 'A, B, C tenían presencia al cierre; D (recién llegado) NO');
+});
+
+test('movimiento: recién llegado NO genera flecha de transición', () => {
+  const inputs: CustomerCadenceInput[] = [
+    mk({ customerId: 'nuevoDeJulio', completedVisits: [daysAgo(4), daysAgo(1)] }), // todo post-cierre
+  ];
+  const m = computeSegmentMovement(inputs, NOW_MS);
+  assert.equal(m.eligibleCount, 0);
+  assert.equal(m.movedCount, 0);
+  assert.equal(m.transitions.length, 0, 'sin presencia al cierre → nada de movimiento (es incorporación)');
+});
+
+test('movimiento: sin historia → banda (eligibleCount 0), sin transición fabricada', () => {
+  const inputs: CustomerCadenceInput[] = [
+    mk({ customerId: 'a', completedVisits: [] }),
+    mk({ customerId: 'b', completedVisits: [daysAgo(2)] }), // solo julio
+  ];
+  const m = computeSegmentMovement(inputs, NOW_MS);
+  assert.equal(m.eligibleCount, 0);
+  assert.equal(m.movedCount, 0);
+});
+
+test('computeClientelaStats incluye movement (Clientela COMPLETA: 4 bloques)', () => {
+  const s = computeClientelaStats([mk({ customerId: 'x', completedVisits: [daysAgo(54), daysAgo(40), daysAgo(26)] })], NOW_MS);
+  assert.ok(s.movement, 'la foto ahora trae movimiento');
+  assert.ok(Array.isArray(s.movement.transitions));
+  assert.equal(typeof s.movement.eligibleCount, 'number');
 });
