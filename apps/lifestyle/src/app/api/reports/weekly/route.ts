@@ -63,6 +63,7 @@ type RawApptRow = {
   staff_id: string;
   status: string;
   customer_id: string | null;
+  price_charged: number | null;
   service: { price: number } | null;
   staff: { name: string } | null;
 };
@@ -115,7 +116,7 @@ async function computeWeeklyReport(
   // Appointments del período
   const { data: apptData, error: apptError } = await supabase
     .from('appointments')
-    .select('staff_id, status, customer_id, service:service_id(price), staff:staff_id(name)')
+    .select('staff_id, status, customer_id, price_charged, service:service_id(price), staff:staff_id(name)')
     .eq('business_id', businessId)
     .gte('starts_at', start)
     .lte('starts_at', end)
@@ -139,7 +140,8 @@ async function computeWeeklyReport(
   for (const row of rows) {
     if (row.status === 'completed') {
       appointments_completed++;
-      const price = row.service?.price ?? 0;
+      // Precio SELLADO al completar (049); fallback al vivo solo si falta el sello.
+      const price = row.price_charged ?? row.service?.price ?? 0;
       total_revenue += price;
 
       if (row.customer_id) completedCustomerIds.add(row.customer_id);

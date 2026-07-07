@@ -60,6 +60,7 @@ type RawAppointmentMetricsRow = {
   staff_id: string;
   status: string;
   customer_id: string | null;
+  price_charged: number | null;
   service: { price: number } | null;
 };
 
@@ -145,7 +146,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     // 6. Appointments del período para todos los staff activos
     const { data: apptData, error: apptError } = await supabase
       .from('appointments')
-      .select('staff_id, status, customer_id, service:service_id(price)')
+      .select('staff_id, status, customer_id, price_charged, service:service_id(price)')
       .eq('business_id', businessId)
       .in('staff_id', staffIds)
       .gte('starts_at', start)
@@ -182,7 +183,8 @@ export async function GET(request: Request): Promise<NextResponse> {
 
       if (row.status === 'completed') {
         acc.completed++;
-        if (row.service) acc.revenue += row.service.price;
+        // Precio SELLADO al completar (049); fallback al vivo solo si falta el sello.
+        if (row.service) acc.revenue += row.price_charged ?? row.service.price;
       } else if (row.status === 'no_show') {
         acc.no_show++;
       } else if (row.status === 'cancelled') {
