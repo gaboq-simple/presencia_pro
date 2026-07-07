@@ -59,6 +59,7 @@ export async function handleConfirmed(
   const { data: slotConflict } = await supabase
     .from('appointments')
     .select('id')
+    .eq('business_id', business.id)
     .eq('staff_id', context.staffId)
     .not('status', 'in', '("cancelled")')
     .lt('starts_at', endsAt.toISOString())
@@ -165,6 +166,7 @@ export async function handleConfirmed(
         favorite_staff_id:   context.staffId,
         favorite_service_id: context.serviceId,
       })
+      .eq('business_id', business.id)
       .eq('id', context.customerId);
   }
 
