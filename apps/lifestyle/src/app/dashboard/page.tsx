@@ -37,9 +37,11 @@ import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
 import OwnerTabs from '@/components/admin/OwnerTabs';
 import HoyFeed from '@/components/admin/HoyFeed';
 import ClientelaView from '@/components/admin/ClientelaView';
+import NegocioView from '@/components/admin/NegocioView';
 import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
 import { getRetentionFeed, getContactadosCount } from '@/lib/retentionFeed';
 import { getClientelaStats } from '@/lib/clientelaStats';
+import { getNegocioRevenue } from '@/lib/negocioMetrics';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -183,10 +185,11 @@ export default async function DashboardPage({
 
   // 6. Feed de retención (pestaña "Hoy") + pulso + agregados de Clientela (pestaña 3)
   //    — todo scopeado por el businessId de la sesión.
-  const [retentionFeed, contactados, clientelaStats] = await Promise.all([
+  const [retentionFeed, contactados, clientelaStats, negocioRevenue] = await Promise.all([
     getRetentionFeed(businessId),
     getContactadosCount(businessId),
     getClientelaStats(businessId),
+    getNegocioRevenue(businessId),
   ]);
 
   const dashboardPanel = (
@@ -208,6 +211,7 @@ export default async function DashboardPage({
   return (
     <OwnerTabs
       hoy={<HoyFeed feed={retentionFeed} contactados={contactados} />}
+      negocio={<NegocioView revenue={negocioRevenue} />}
       clientela={<ClientelaView stats={clientelaStats} />}
       panel={dashboardPanel}
     />
