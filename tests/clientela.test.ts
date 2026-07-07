@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 
 import {
   computeClientelaStats,
+  computeRetention,
   type CustomerCadenceInput,
   type RfmSegment,
 } from '../apps/lifestyle/src/lib/cadence';
@@ -147,4 +148,80 @@ test('createdAt inválido: cuenta en total pero NO como llegado del mes', () => 
   assert.equal(s.totalCustomers, 1);
   assert.equal(s.newThisMonth, 0);
   assert.equal(s.segmentCounts.nuevos, 1);
+});
+
+// ─── Retención por cohortes (PR-B) ────────────────────────────────────────────
+
+test('nuevos que vuelven: cohorte madura [30–90]d, 2ª visita ≤30d = retenido', () => {
+  const inputs: CustomerCadenceInput[] = [
+    // Cohorte (1ª visita 30–90d atrás) — retenidos (2ª visita ≤30d de la 1ª):
+    mk({ customerId: 'n1', completedVisits: [daysAgo(40), daysAgo(20)] }), // gap 20 → retenido
+    mk({ customerId: 'n2', completedVisits: [daysAgo(50), daysAgo(25)] }), // gap 25 → retenido
+    mk({ customerId: 'n3', completedVisits: [daysAgo(45), daysAgo(30)] }), // gap 15 → retenido
+    // Cohorte — NO retenidos:
+    mk({ customerId: 'n4', completedVisits: [daysAgo(60)] }),              // 1 sola visita → no volvió
+    mk({ customerId: 'n5', completedVisits: [daysAgo(35), daysAgo(2)] }),  // gap 33 > 30 → no cuenta como retorno
+    // EXCLUIDOS de la cohorte (no deben mover el tamaño):
+    mk({ customerId: 'reciente', completedVisits: [daysAgo(10)] }),        // <30d: aún en tiempo, NO desinfla
+    mk({ customerId: 'viejo',    completedVisits: [daysAgo(120)] }),       // >90d: ya no es "nuevo"
+  ];
+
+  const { newReturn } = computeRetention(inputs, NOW_MS);
+  assert.equal(newReturn.status, 'ok');
+  if (newReturn.status !== 'ok') return;
+  assert.equal(newReturn.cohortSize, 5, 'los <30d y >90d quedan FUERA de la cohorte');
+  assert.equal(newReturn.retained, 3);
+  assert.equal(newReturn.rate, 0.6);
+});
+
+test('recompra de base: establecidos ≥3 visitas, visita en últimos 60d = recompra', () => {
+  const inputs: CustomerCadenceInput[] = [
+    mk({ customerId: 'b1', completedVisits: visits(3, 20, 10) }), // última 10d → recompra
+    mk({ customerId: 'b2', completedVisits: visits(4, 15, 5) }),  // última 5d  → recompra
+    mk({ customerId: 'b3', completedVisits: visits(3, 30, 20) }), // última 20d → recompra
+    mk({ customerId: 'b4', completedVisits: visits(5, 10, 30) }), // última 30d → recompra
+    mk({ customerId: 'b5', completedVisits: visits(3, 20, 90) }), // última 90d > 60 → NO recompra
+    mk({ customerId: 'noBase', completedVisits: visits(2, 14, 5) }), // <3 visitas → fuera de base
+  ];
+
+  const { baseRepeat } = computeRetention(inputs, NOW_MS);
+  assert.equal(baseRepeat.status, 'ok');
+  if (baseRepeat.status !== 'ok') return;
+  assert.equal(baseRepeat.cohortSize, 5, 'solo los de ≥3 visitas; el de 2 visitas queda fuera');
+  assert.equal(baseRepeat.retained, 4);
+  assert.equal(baseRepeat.rate, 0.8);
+});
+
+test('piso de datos: cohorte < 5 → banda "sin datos", NUNCA un %', () => {
+  const inputs: CustomerCadenceInput[] = [
+    mk({ customerId: 'n1', completedVisits: [daysAgo(40), daysAgo(20)] }),
+    mk({ customerId: 'n2', completedVisits: [daysAgo(50), daysAgo(25)] }),
+    mk({ customerId: 'n3', completedVisits: [daysAgo(45)] }),
+    mk({ customerId: 'n4', completedVisits: [daysAgo(60)] }), // 4 en cohorte, base 0
+  ];
+
+  const { newReturn, baseRepeat } = computeRetention(inputs, NOW_MS);
+  assert.equal(newReturn.status, 'insufficient');
+  assert.equal(newReturn.cohortSize, 4);
+  assert.equal(baseRepeat.status, 'insufficient');
+  assert.equal(baseRepeat.cohortSize, 0);
+});
+
+test('degradado: sin visitas completadas → ambas cohortes insuficientes (0), sin crash', () => {
+  const inputs: CustomerCadenceInput[] = [
+    mk({ customerId: 'a', completedVisits: [] }),
+    mk({ customerId: 'b', completedVisits: [] }),
+  ];
+  const s = computeClientelaStats(inputs, NOW_MS);
+  assert.equal(s.retention.newReturn.status, 'insufficient');
+  assert.equal(s.retention.newReturn.cohortSize, 0);
+  assert.equal(s.retention.baseRepeat.status, 'insufficient');
+  assert.equal(s.retention.baseRepeat.cohortSize, 0);
+});
+
+test('computeClientelaStats incluye retention (integración PR-A + PR-B)', () => {
+  const inputs: CustomerCadenceInput[] = [mk({ customerId: 'x', completedVisits: visits(4, 14, 10) })];
+  const s = computeClientelaStats(inputs, NOW_MS);
+  assert.ok(s.retention, 'la foto de clientela ahora trae retención');
+  assert.ok('newReturn' in s.retention && 'baseRepeat' in s.retention);
 });

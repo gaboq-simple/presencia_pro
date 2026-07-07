@@ -2,10 +2,10 @@
 // Server Component presentacional. Recibe los agregados ya computados (lib/cadence
 // via lib/clientelaStats). NO es un rolodex: sin buscador, sin nombres/teléfonos —
 // solo la base como colectivo (crecimiento + grupos por segmento).
-// PR-A: Crecimiento + Grupos por conteo. Retención (PR-B) y Movimiento (PR-C) aparte.
+// PR-A: Crecimiento + Grupos por conteo. PR-B: Retención por cohortes. Movimiento (PR-C) aparte.
 // Tokens Zentriq-claro (globals.css @theme): teal=bueno, ámbar=atención, gris=perdido.
 
-import type { ClientelaStats, RfmSegment, SegmentCounts } from '@/lib/cadence';
+import type { ClientelaStats, RfmSegment, SegmentCounts, RetentionRate } from '@/lib/cadence';
 
 type SegmentStyle = { key: RfmSegment; label: string; hint: string; card: string; count: string; pill: string };
 
@@ -46,8 +46,41 @@ function SegmentRow({ s, count, delta }: { s: SegmentStyle; count: number; delta
   );
 }
 
+// Una tasa de retención con su ventana etiquetada, o la banda honesta "sin datos"
+// cuando la cohorte no llega al piso. `accent`: ámbar = señal a vigilar (balde que
+// gotea), teal = señal de salud (recompra de base).
+function RateCard({
+  title, window: windowLabel, rate, accent,
+}: {
+  title: string; window: string; rate: RetentionRate; accent: 'amber' | 'teal';
+}): React.ReactElement {
+  const border = accent === 'amber' ? 'border-l-amber-border' : 'border-l-teal-border';
+  const num = accent === 'amber' ? 'text-amber' : 'text-teal-ink';
+  return (
+    <div className={`rounded-xl bg-card p-3 shadow-card border-l-4 ${border}`}>
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      {rate.status === 'ok' ? (
+        <>
+          <p className={`mt-1 text-3xl font-bold tabular-nums ${num}`}>{Math.round(rate.rate * 100)}%</p>
+          <p className="mt-0.5 text-xs text-faint tabular-nums">
+            {rate.retained} de {rate.cohortSize} {rate.cohortSize === 1 ? 'cliente' : 'clientes'}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-sm font-medium text-faint">Sin datos suficientes</p>
+          <p className="mt-0.5 text-xs text-faint tabular-nums">
+            {rate.cohortSize} {rate.cohortSize === 1 ? 'cliente' : 'clientes'} · faltan para medir
+          </p>
+        </>
+      )}
+      <p className="mt-1.5 text-[11px] text-faint">{windowLabel}</p>
+    </div>
+  );
+}
+
 export default function ClientelaView({ stats }: { stats: ClientelaStats }): React.ReactElement {
-  const { totalCustomers, newThisMonth, segmentCounts, newThisMonthBySegment } = stats;
+  const { totalCustomers, newThisMonth, segmentCounts, newThisMonthBySegment, retention } = stats;
   const hasCustomers = totalCustomers > 0;
   const segmented = hasSegmentedHistory(segmentCounts);
 
@@ -70,6 +103,25 @@ export default function ClientelaView({ stats }: { stats: ClientelaStats }): Rea
           )}
         </div>
       </section>
+
+      {/* ── Retención por cohortes (el balde que gotea) ── */}
+      {/* Dos tasas separadas a propósito: mezcladas mienten (los de siempre ahogan la
+          señal de los nuevos). Cada una declara su ventana. */}
+      <h2 className="mt-6 mb-2 px-1 text-sm font-semibold text-ink">Quién vuelve</h2>
+      <div className="grid grid-cols-2 gap-3">
+        <RateCard
+          title="Nuevos que vuelven"
+          window="1ª visita hace 1–3 meses · volvieron ≤30 días"
+          rate={retention.newReturn}
+          accent="amber"
+        />
+        <RateCard
+          title="Recompra de base"
+          window="clientes de ≥3 visitas · últimos 60 días"
+          rate={retention.baseRepeat}
+          accent="teal"
+        />
+      </div>
 
       {/* ── Grupos por conteo ── */}
       <h2 className="mt-6 mb-2 px-1 text-sm font-semibold text-ink">Cómo se agrupan</h2>
