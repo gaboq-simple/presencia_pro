@@ -117,6 +117,7 @@ export type DashboardAppointment = {
   allow_overlap: boolean;        // TRUE = solape intencional aprobado por la recepción (S6-UI-02 PR-3)
   adjusted_starts_at: string | null;   // nueva hora acordada si el cliente reportó retraso (S6-UI-02 PR-5)
   late_arrival_acknowledged: boolean;  // TRUE si el bot ya procesó un retraso reportado (S6-UI-02 PR-5)
+  price_charged: number | null;        // precio SELLADO al completar (migración 049); null si aún no se completó
 };
 
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
@@ -246,6 +247,7 @@ type RawAppointmentRow = {
   modified_at: string | null;
   adjusted_starts_at: string | null;
   late_arrival_acknowledged: boolean;
+  price_charged: number | null;
 };
 
 // Shape interno del select de staff con availability (one-to-many → array)
@@ -261,6 +263,7 @@ type RawMetricsRow = {
   status: string;
   source: string;
   starts_at: string;
+  price_charged: number | null;
   customer_id: string | null;
   service: { price: number; currency: string } | null;
 };
@@ -348,6 +351,7 @@ export async function getDayAppointments(
       allow_overlap,
       adjusted_starts_at,
       late_arrival_acknowledged,
+      price_charged,
       staff:staff_id(id, name),
       service:service_id(id, name, duration_minutes, price, currency),
       customer:customer_id(id, name, phone),
@@ -462,7 +466,9 @@ export async function getDayExceptions(
 
 export function computeDayRevenue(appointments: DashboardAppointment[]): DayRevenue {
   const completed = appointments.filter((a) => a.status === 'completed');
-  const total = completed.reduce((sum, a) => sum + a.service.price, 0);
+  // Precio SELLADO al completar (049) — editar el precio del servicio NO reescribe la
+  // historia. Fallback al precio vivo solo para completadas legacy sin sello.
+  const total = completed.reduce((sum, a) => sum + (a.price_charged ?? a.service.price), 0);
   const currency = completed[0]?.service.currency ?? 'MXN';
   return { total, currency, completedCount: completed.length };
 }
@@ -485,7 +491,7 @@ export async function getPeriodMetrics(
 
   const { data, error } = await supabase
     .from('appointments')
-    .select('status, source, starts_at, customer_id, service:service_id(price, currency)')
+    .select('status, source, starts_at, customer_id, price_charged, service:service_id(price, currency)')
     .eq('business_id', businessId)
     .gte('starts_at', start)
     .lte('starts_at', end);
@@ -514,7 +520,8 @@ export async function getPeriodMetrics(
       case 'completed':
         completed++;
         if (row.service) {
-          revenue += row.service.price;
+          // Precio SELLADO al completar (049); fallback al vivo solo si falta el sello.
+          revenue += row.price_charged ?? row.service.price;
           currency = row.service.currency;
         }
         break;
