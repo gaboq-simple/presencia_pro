@@ -253,3 +253,72 @@ export function computeRetentionFeed(
   const rows = typeof opts?.topN === 'number' ? feed.slice(0, opts.topN) : feed;
   return { rows, porRecuperar };
 }
+
+// ─── Clientela: agregados de la base (crecimiento + grupos por segmento) ──────
+// La pestaña Clientela NO es un rolodex de individuos: trabaja con AGREGADOS.
+// Reusa `computeCadence` (fuente ÚNICA de clasificación) para contar por segmento;
+// el crecimiento sale de `createdAt`. Puro: `now` inyectable, sin DB ni React.
+
+/** Conteo por segmento RFM (TODOS los segmentos, incluidos los que no entran al feed). */
+export type SegmentCounts = Record<RfmSegment, number>;
+
+export type ClientelaStats = {
+  /** Total histórico de clientes del negocio (todos, cualquier antigüedad). */
+  totalCustomers: number;
+  /** Clientes cuyo `createdAt` cae en el mes calendario en curso (reconcilia el "+N"). */
+  newThisMonth: number;
+  /** Conteo REAL por segmento, on-the-fly (no materializado). */
+  segmentCounts: SegmentCounts;
+  /**
+   * Delta del mes por segmento: de los `newThisMonth`, cuántos caen en cada segmento
+   * SEGÚN SU SEGMENTO ACTUAL. La suma = `newThisMonth` (reconcilia con el crecimiento).
+   * NO es "movimiento entre grupos" (eso exige recomputar el segmento a dos `now` sobre
+   * la historia — PR-C); es "los recién llegados, por su segmento de hoy" (con <3 visitas
+   * casi todos caen a Nuevos, honesto).
+   */
+  newThisMonthBySegment: SegmentCounts;
+};
+
+function emptySegmentCounts(): SegmentCounts {
+  return { nuevos: 0, campeones: 0, regulares: 0, se_estan_yendo: 0, perdidos: 0 };
+}
+
+/** Inicio del mes calendario en curso (UTC) desde un instante en ms. */
+function monthStartMs(nowMs: number): number {
+  const d = new Date(nowMs);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+
+/**
+ * Agregados de la clientela: crecimiento (total + llegados este mes) y conteo por
+ * segmento. Corre `computeCadence` sobre TODOS los inputs (los de <3 visitas caen a
+ * Nuevos → degradado con gracia, no ruido). `flagged`/no-show no se excluyen del
+ * conteo por segmento (son parte de la base; el feed sí los excluye, esto es la foto).
+ */
+export function computeClientelaStats(
+  inputs: CustomerCadenceInput[],
+  nowMs: number,
+): ClientelaStats {
+  const monthStart = monthStartMs(nowMs);
+  const segmentCounts = emptySegmentCounts();
+  const newThisMonthBySegment = emptySegmentCounts();
+  let newThisMonth = 0;
+
+  for (const input of inputs) {
+    const { segment } = computeCadence(input, nowMs);
+    segmentCounts[segment] += 1;
+
+    const createdMs = new Date(input.createdAt).getTime();
+    if (!Number.isNaN(createdMs) && createdMs >= monthStart) {
+      newThisMonth += 1;
+      newThisMonthBySegment[segment] += 1;
+    }
+  }
+
+  return {
+    totalCustomers: inputs.length,
+    newThisMonth,
+    segmentCounts,
+    newThisMonthBySegment,
+  };
+}
