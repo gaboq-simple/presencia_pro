@@ -1,9 +1,10 @@
 // ─── Staff — Vista del Barbero ────────────────────────────────────────────────
 // Server Component — sin protección de middleware.
-// Muestra PinForm si no hay sesión activa (acceso por PIN para barberos).
+// Sin sesión muestra BarbershopPrompt → el login por PIN queda scopeado por
+// negocio en /[slug]/staff (MT-02, sin login sin scope).
 //
 // Flujos (Opción C — S6-UI-01):
-//   · Sin sesión                  → PinForm
+//   · Sin sesión                  → BarbershopPrompt (→ /[slug]/staff)
 //   · role 'owner'|'admin'|'assistant' → redirect('/dashboard')
 //   · role 'barber'               → StaffLayout con sus propias citas
 //
@@ -21,7 +22,7 @@ import {
 } from '@/lib/dashboard.types';
 import { getCurrentSession } from '@/lib/auth';
 import StaffLayout from '@/components/staff/StaffLayout';
-import PinForm from '@/components/staff/PinForm';
+import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,9 +64,10 @@ export default async function StaffPage({
   // 1. Sesión activa — ls_session (PIN/token) o Supabase Auth
   const session = await getCurrentSession();
 
-  // Sin sesión → formulario de PIN (barberos vienen directamente a /staff)
+  // Sin sesión → fallback: pedir el negocio y rutear a /[slug]/staff, donde el
+  // login por PIN queda scopeado al negocio (MT-02). No hay login sin scope.
   if (!session) {
-    return <PinForm />;
+    return <BarbershopPrompt />;
   }
 
   // Cualquier rol que no sea barbero (owner / admin / assistant) → su vista vive
@@ -79,8 +81,8 @@ export default async function StaffPage({
   // ── Barbero: solo sus propias citas ──────────────────────────────────────
   // role === 'barber' — staffId requerido (viene de la sesión PIN)
   if (!session.staff_id) {
-    // Sin staffId no hay barbero identificado → volver al PIN
-    return <PinForm />;
+    // Sin staffId no hay barbero identificado → re-login scopeado por negocio
+    return <BarbershopPrompt />;
   }
 
   const staffId = session.staff_id;

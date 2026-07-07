@@ -185,6 +185,7 @@ function generateSlotsForStaff(
  * En empate entre N barberos: Math.random() elige entre ellos.
  */
 async function selectStaffRoundRobin(
+  businessId: string,
   staffIds: string[],
   requestedDate: Date,
   requestedDateStr: string,
@@ -198,9 +199,12 @@ async function selectStaffRoundRobin(
   const dayEnd   = localTimeToUTC(requestedDateStr, '23:59', tz);
 
   // COUNT de citas por barbero en la fecha solicitada (excluye canceladas)
+  // business_id: defensa en profundidad (MT-03) — los staffIds ya vienen
+  // pre-filtrados por negocio; el filtro es no-op para datos correctos.
   const { data } = await supabase
     .from('appointments')
     .select('staff_id')
+    .eq('business_id', businessId)
     .in('staff_id', staffIds)
     .gte('starts_at', dayStart.toISOString())
     .lt('starts_at',  dayEnd.toISOString())
@@ -442,6 +446,7 @@ export async function getDayAvailability(
   } else {
     // Round-robin: ordenar por carga antes de iterar
     const orderedIds = await selectStaffRoundRobin(
+      businessId,
       staffToQuery.map((s) => s.id),
       requestedDate,
       dateStr,
@@ -486,6 +491,7 @@ export async function getDayAvailability(
     supabase
       .from('staff_schedule_exceptions')
       .select('staff_id, exception_date, available, start_time, end_time')
+      .eq('business_id', businessId)
       .in('staff_id', staffIds)
       .eq('exception_date', dateStr),
   ]);

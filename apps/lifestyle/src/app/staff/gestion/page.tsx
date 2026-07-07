@@ -6,7 +6,8 @@
 // PROPIA ruta para poder divergir de la vista de recepción sin otra cirugía.
 //
 // Flujos:
-//   · Sin sesión              → PinForm (mismo patrón que /staff, sin auth nueva)
+//   · Sin sesión              → BarbershopPrompt (mismo patrón que /staff: login por
+//                               PIN scopeado por negocio en /[slug]/staff — MT-02)
 //   · role 'owner' | 'admin'  → redirect('/dashboard')
 //   · role 'assistant'        → redirect('/dashboard')  (su vista canónica vive ahí)
 //   · role 'barber'           → AssistantLayout con TODAS las citas del negocio
@@ -22,7 +23,7 @@ import {
 import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
 import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
 import AssistantLayout from '@/components/staff/AssistantLayout';
-import PinForm from '@/components/staff/PinForm';
+import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,9 +42,10 @@ export default async function StaffGestionPage({
   // 1. Sesión activa — ls_session (PIN/token) o Supabase Auth
   const session = await getCurrentSession();
 
-  // Sin sesión → formulario de PIN (mismo patrón que /staff)
+  // Sin sesión → fallback: pedir el negocio y rutear a /[slug]/staff, donde el
+  // login por PIN queda scopeado al negocio (MT-02). No hay login sin scope.
   if (!session) {
-    return <PinForm />;
+    return <BarbershopPrompt />;
   }
 
   // Owner / admin / assistant → su vista canónica vive en el dashboard
@@ -51,9 +53,9 @@ export default async function StaffGestionPage({
     redirect('/dashboard');
   }
 
-  // Barbero sin staff_id → no hay barbero identificado, volver al PIN
+  // Barbero sin staff_id → no hay barbero identificado, re-login scopeado por negocio
   if (!session.staff_id) {
-    return <PinForm />;
+    return <BarbershopPrompt />;
   }
 
   const businessId = session.business_id;

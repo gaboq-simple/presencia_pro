@@ -1666,6 +1666,43 @@ Ya no es backlog. Gabriel pidió investigar el constraint antes de tocarlo; se e
 
 ---
 
+## Olas de fundación multi-tenant (post-auditoría 2026-07-06)
+
+> **Marco:** la auditoría read-only de fundación multi-tenant encontró que el aislamiento entre negocios descansa en **disciplina de código, no en garantías de DB** (RLS está bypasseado en runtime: bot + dashboard + proxy corren como `service_role`). Decisión de Gabriel: **enfoque híbrido pragmático** — garantías estructurales baratas ahora, migración a RLS-autenticado diferida. **La Ola 1 (aislamiento) BLOQUEA el cableado del dashboard del dueño y va ANTES que él.** La Ola 2 (fiabilidad) va antes del primer cliente real. Estas tareas están **registradas, NO ejecutadas** (salvo MT-01, cuya propuesta está en revisión). Cada una es su propio PR chico.
+
+### Ola 1 — Aislamiento multi-tenant (bloquea el dashboard del dueño)
+
+- **MT-01 · Llaves de routing UNIQUE (`whatsapp_phone_number_id` + `whatsapp_number`)** 🟢 done (2026-07-06)
+  Llaves de routing del bot: eran `NOT NULL` pero **ni UNIQUE ni indexadas** → dos negocios con el mismo id/número → el `.maybeSingle()` del router falla y **descarta mensajes en silencio**. Fix: **dos partial UNIQUE indexes `WHERE <> ''`** (migración `044_routing_keys_unique.sql`, aplicada al demo vía MCP) → colisión ahora es fail-loud (23505); tolera los `''` de onboarding Fase 1. Verificado por ruta real: rechazo de duplicado en ambas llaves, tolerancia de borradores `''`, no-regresión del router (EXPLAIN usa el índice parcial). **Contracara: MT-06** debe presentar error claro cuando el UPDATE de Fase 2 choque con estos índices.
+- **MT-02 · Login por PIN acotado al negocio correcto** 🟢 done (2026-07-07)
+  `api/auth/pin/route.ts` hacía `SELECT … FROM staff WHERE pin=$1 AND active=true LIMIT 1` sin `business_id`. El PIN es único **por negocio** (`UNIQUE(business_id,pin)`), no global → con N clientes, dos barberos pueden compartir PIN y `.limit(1)` metía al barbero **al dashboard del negocio equivocado**. Fix (B1, sin migración): ruta nueva `/[slug]/staff` resuelve el negocio desde el slug y scopea el query con `.eq('business_id', …)`; `/staff` pelado ahora muestra un prompt "¿cuál es tu barbería?" (sin listar negocios) que rutea a `/[slug]/staff`; slug desconocido → 401/`notFound()`, nunca fallback que adivine. Verificado end-to-end por HTTP real (seed de 2º negocio + barbero PIN colisionante 1234, dev server del worktree): `POST /api/auth/pin` con la misma PIN 1234 devuelve `business_id` A con slug demo y `business_id` B con slug B; slug inválido → 401; `GET /[slug]/staff` renderiza el PinForm con el nombre del negocio; slug inexistente → 404; `/staff` pelado → prompt "¿cuál es tu barbería?" (sin listar negocios). El round-trip HTTP fue posible tras hacer el dev server worktree-aware (ver commit chore de tooling; antes corría el checkout `main`). tsc + lint + build verdes (`ƒ /[slug]/staff`).
+- **MT-03 · `.eq('business_id')` defensivo en las queries del bot** 🟢 done (2026-07-07)
+  El bot es `service_role` → RLS NO lo cubre; el único guard de las queries que filtran solo por `staff_id`/`customer_id` es el pre-filtrado de `staffIds` aguas-arriba. Defensa en profundidad (NO fix de fuga activa: cada `.eq('business_id')` es no-op para el flujo correcto). Mapa real (más chico que la lista de auditoría): **4 sitios cableados** — `scheduling.ts` round-robin (`selectStaffRoundRobin`, `businessId` pasado por firma) + `staff_schedule_exceptions`; `confirmed.ts` pre-check de solape + UPDATE de favoritos. Ya-scopeadas de antes (auditoría contó de más): appointments de `getDayAvailability`, `confirmationResponse.ts`, `router.ts`, waitlist. **3 tablas quedaron fuera → MT-07**: `staff_availability`, `staff_blocks`, `staff_services` NO tienen columna `business_id` (scopean por `staff_id` transitivo); endurecerlas es cambio estructural, no MT-03.
+- **MT-04 · Trigger de coherencia de tenant en `appointments`** 🟢 done (2026-07-07)
+  Nada a nivel DB impedía una cita "Frankenstein": `appointments.business_id` podía no coincidir con el `business_id` del staff/servicio/cliente referenciado (las FK solo validan existencia, no pertenencia). Fix: trigger `trg_appointment_tenant_coherence` BEFORE INSERT OR UPDATE (`check_appointment_tenant_coherence`, `search_path=''`, sin SECURITY DEFINER) que valida las 3 FK (salta NULLs; bloquea solo cross-tenant, la no-existencia la maneja la FK). Migración `046`, aplicada vía MCP. **Trigger, NO FK compuesta**: `customer_id` es `ON DELETE SET NULL` + `business_id` NOT NULL → la compuesta rompería el borrado. Verificado ruta real: INSERT/UPDATE legítimos entran; INSERT con staff/service/customer de otro negocio → 23514; UPDATE mudando `staff_id` a otro negocio → 23514 (puerta de atrás cerrada); NULLs no bloquean. Suite del bot 447/447.
+- **MT-05 · Cerrar listing cross-tenant del bucket `staff-photos`** 🟢 done (2026-07-07)
+  Advisor de seguridad Supabase: el bucket público permitía *listing* anon → un negocio podía enumerar las fotos de staff de todos los demás. Fix: `DROP POLICY "staff-photos: public read"` (SELECT sin scope) — migración `045`, aplicada vía MCP. En bucket público el serving es por URL pública (`getPublicUrl`, RLS-bypassed) y upload/remove por service_role → la policy solo habilitaba la enumeración. Bucket sigue público; se conservan las 3 policies admin (insert/update/delete scopeadas por `business_id`). Verificado ruta real: anon LIST → `[]` tras el drop (antes enumeraba); URL pública de un objeto real sigue 200 (no-regresión).
+- **MT-07 · Defensa en profundidad de las 3 tablas hijas-de-staff** ⚪ todo · prioridad a definir
+  `staff_availability`, `staff_blocks`, `staff_services` no tienen columna `business_id` → hoy se scopean por `staff_id` transitivo (barrera = pre-filtrado de `staffIds`, que ya existe). Descubierto al implementar MT-03 (esas 3 no eran cableables con `.eq('business_id')`). Endurecer vía FK compuesta `(staff_id, business_id)` o columna desnormalizada. **NOTA: evaluar junto con MT-04** (misma familia — coherencia de tenant a nivel DB); posible solución compartida, no diseñar dos mecanismos distintos.
+
+### Ola 2 — Fiabilidad de datos (antes del primer cliente real, no antes de "Hoy")
+
+- **REL-01 · Backup R2 verificado end-to-end** ⚪ todo
+  Correr el workflow y **confirmar un restore drill real** (no un Action en verde). Hoy no hay backup verificado.
+- **REL-02 · Reconciliar el ledger de migraciones + documentar recreación** ⚪ todo
+  Remoto tiene **7 filas** en `supabase_migrations.schema_migrations` (versiones timestamp) vs repo `001–043` (numeradas); migraciones aplicadas fuera de banda (SQL editor / MCP). Hoy **no se puede recrear la DB replayando el repo**. Documentar el procedimiento de recreación incluyendo los crons (que solo viven en el Dashboard).
+- **REL-03 · Confirmar los 2 crons/schedules activos en el Dashboard** ⚪ todo
+  `dispatch-lifestyle-notifications` y `dispatch-auto-cancel` son schedules de edge functions en el Dashboard (no versionados, `pg_cron` no instalado). Verificar que estén activos antes del go-live.
+
+### Diferido
+
+- **MT-06 · Onboarding que no nazca inservible** ⚪ todo
+  Que el onboarding **falle** (no advierta) si `whatsapp_phone_number_id` queda vacío; separar estado "borrador" de "activo". (Es la raíz de los `''` que MT-01 debe tolerar.)
+- **ARCH-01 · Evaluar migración a RLS-autenticado (no service_role)** ⚪ todo
+  Decisión de arquitectura diferida del enfoque híbrido: mover la app de `service_role` a sesiones autenticadas donde RLS sea la red real de aislamiento, cuando el volumen lo justifique.
+
+---
+
 ## Visión del motor de agendamiento (modelo objetivo)
 
 > **Qué es esto:** NO es un bug ni una tarea. Es el modelo objetivo del motor de agendamiento — la foto de cómo debe comportarse cuando esté completo. Guía los próximos sprints de scheduling y sirve de norte para decidir fixes y features. Las piezas concretas se irán cortando en tareas `S{n}-BOT-*` a medida que se aborden.

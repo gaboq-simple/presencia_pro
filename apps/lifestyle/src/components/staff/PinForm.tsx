@@ -9,6 +9,10 @@
 //   - Al completar los 4 dígitos → submit automático.
 //   - Estado de carga + error visual.
 //   - Al éxito: router.push('/staff') con refresh.
+//
+// Scopeado por negocio (MT-02): recibe el business_slug resuelto por la ruta
+// /[slug]/staff y lo envía en el body, para que el PIN se valide dentro del
+// negocio correcto (el PIN es único POR negocio, no global).
 
 'use client';
 
@@ -17,7 +21,19 @@ import { useRouter } from 'next/navigation';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function PinForm() {
+// 🔴 businessSlug/businessName son REQUERIDAS por diseño (MT-02): el PIN es único
+// POR negocio, así que el login SIEMPRE debe estar scopeado a un negocio resuelto
+// desde el slug (ruta /[slug]/staff). NO las hagas opcionales "para compilar" — un
+// PinForm sin negocio reabre el login sin scope (barbero al negocio equivocado).
+// Si un consumidor no tiene el negocio en scope, usar <BarbershopPrompt /> (pide el
+// slug y rutea acá), NO relajar este tipo. El error de tipo es la barrera funcionando.
+export default function PinForm({
+  businessSlug,
+  businessName,
+}: {
+  businessSlug: string;
+  businessName: string;
+}) {
   const router = useRouter();
   const [digits, setDigits] = useState<string[]>(['', '', '', '']);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +51,7 @@ export default function PinForm() {
       const res = await fetch('/api/auth/pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
+        body: JSON.stringify({ pin, business_slug: businessSlug }),
         credentials: 'same-origin',
       });
 
@@ -55,7 +71,7 @@ export default function PinForm() {
     } finally {
       setLoading(false);
     }
-  }, [loading, router]);
+  }, [loading, router, businessSlug]);
 
   // ── Manejo de inputs ────────────────────────────────────────────────────────
 
@@ -135,7 +151,8 @@ export default function PinForm() {
             </svg>
           </div>
           <h1 className="text-lg font-semibold text-gray-900">Acceso barbero</h1>
-          <p className="mt-1 text-sm text-gray-500">Ingresa tu PIN de 4 digitos</p>
+          <p className="mt-1 text-sm font-medium text-gray-700">{businessName}</p>
+          <p className="mt-0.5 text-sm text-gray-500">Ingresa tu PIN de 4 digitos</p>
         </div>
 
         {/* PIN inputs */}

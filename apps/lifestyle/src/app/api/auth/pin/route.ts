@@ -1,20 +1,20 @@
 // ─── POST /api/auth/pin ────────────────────────────────────────────────────────
 // Valida un PIN de 4 dígitos y crea una sesión para el barbero.
 //
-// Body:  { pin: string }            — PIN de 4 dígitos
+// Body:  { pin: string, business_slug: string }   — PIN de 4 dígitos + negocio
 //
 // Flujo:
 //   1. Rate limiting por IP — máx. 5 intentos/60s (distribuido via Upstash Redis).
-//   2. Validar formato del PIN (4 dígitos numéricos).
-//   3. Buscar en staff: pin = $1, active = true.
-//      Si hay múltiples coincidencias entre negocios (demo), tomar la primera.
-//   4. Crear sesión firmada con HMAC-SHA256.
-//   5. Setear cookie httpOnly ls_session en la respuesta.
-//   6. Retornar { role, business_id, staff_name } para el redirect del cliente.
-//
-// Security note: el PIN no es un mecanismo de seguridad de producción.
-// Es adecuado para el flujo de demo con un negocio. Para multi-tenant real
-// se requeriría identificador de negocio adicional.
+//   2. Validar formato del PIN (4 dígitos numéricos) + business_slug presente.
+//   3. Resolver el negocio desde business_slug (active = true). Desconocido → 401.
+//   4. Buscar en staff: business_id = <resuelto>, pin = $1, active = true.
+//      El scope por business_id es el fix de MT-02: el PIN es UNIQUE(business_id,
+//      pin) — único POR negocio, no global. Sin el scope, dos barberos de
+//      negocios distintos con el mismo PIN colisionaban y el login caía en el
+//      negocio equivocado. La ruta /[slug]/staff provee el business_slug.
+//   5. Crear sesión firmada con HMAC-SHA256.
+//   6. Setear cookie httpOnly ls_session en la respuesta.
+//   7. Retornar { role, business_id, staff_name } para el redirect del cliente.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -41,6 +41,7 @@ function getClientIp(request: NextRequest): string {
 
 const PinSchema = z.object({
   pin: z.string().regex(/^\d{4}$/, 'El PIN debe ser de 4 dígitos numéricos'),
+  business_slug: z.string().min(1, 'Falta el negocio'),
 });
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -95,13 +96,33 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { pin } = parsed.data;
+  const { pin, business_slug } = parsed.data;
 
-  // 2. Buscar el staff con ese PIN
   const admin = getAdminClient();
+
+  // 2. Resolver el negocio desde el slug (scope de MT-02). Desconocido/inactivo
+  //    → 401 genérico, nunca un fallback que adivine el negocio.
+  const { data: bizRow, error: bizError } = await admin
+    .from('businesses')
+    .select('id')
+    .eq('slug', business_slug)
+    .eq('active', true)
+    .maybeSingle();
+
+  if (bizError) {
+    return NextResponse.json({ error: 'Error interno' }, { status: 500 });
+  }
+
+  const business = bizRow as { id: string } | null;
+  if (!business) {
+    return NextResponse.json({ error: 'PIN incorrecto' }, { status: 401 });
+  }
+
+  // 3. Buscar el staff con ese PIN DENTRO del negocio resuelto
   const { data: rows, error } = await admin
     .from('staff')
     .select('id, business_id, name, role')
+    .eq('business_id', business.id)
     .eq('pin', pin)
     .eq('active', true)
     .limit(1);
