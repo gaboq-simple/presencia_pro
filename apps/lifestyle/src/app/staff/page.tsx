@@ -24,7 +24,7 @@ import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
 import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
 import StaffLayout from '@/components/staff/StaffLayout';
 import AssistantLayout from '@/components/staff/AssistantLayout';
-import PinForm from '@/components/staff/PinForm';
+import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,9 +56,10 @@ export default async function StaffPage({
   // 1. Sesión activa — ls_session (PIN/token) o Supabase Auth
   const session = await getCurrentSession();
 
-  // Sin sesión → formulario de PIN (barberos vienen directamente a /staff)
+  // Sin sesión → fallback: pedir el negocio y rutear a /[slug]/staff, donde el
+  // login por PIN queda scopeado al negocio (MT-02). No hay login sin scope.
   if (!session) {
-    return <PinForm />;
+    return <BarbershopPrompt />;
   }
 
   // Owner / admin → dashboard
@@ -154,8 +155,8 @@ export default async function StaffPage({
   // ── Barbero: solo sus propias citas ──────────────────────────────────────
   // role === 'barber' — staffId requerido (viene de la sesión PIN)
   if (!session.staff_id) {
-    // Sin staffId no hay barbero identificado → volver al PIN
-    return <PinForm />;
+    // Sin staffId no hay barbero identificado → re-login scopeado por negocio
+    return <BarbershopPrompt />;
   }
 
   const staffId = session.staff_id;
