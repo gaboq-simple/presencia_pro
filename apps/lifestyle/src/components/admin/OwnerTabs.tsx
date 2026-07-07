@@ -44,10 +44,12 @@ const TABS: Array<{ key: TabKey; label: string; icon: React.ReactElement }> = [
 
 export default function OwnerTabs({
   hoy,
+  negocio,
   clientela,
   panel,
 }: {
   hoy: React.ReactNode;
+  negocio: React.ReactNode;
   clientela: React.ReactNode;
   panel: React.ReactNode;
 }): React.ReactElement {
@@ -55,9 +57,14 @@ export default function OwnerTabs({
 
   return (
     <div className="min-h-screen bg-canvas pb-20">
-      {/* Contenido de la pestaña activa. Hoy y Clientela tienen superficie propia;
-          Negocio y Gestión aún muestran el dashboard existente (migración por adición). */}
-      <div>{active === 'hoy' ? hoy : active === 'clientela' ? clientela : panel}</div>
+      {/* Contenido de la pestaña activa. Hoy/Negocio/Clientela tienen superficie propia;
+          Gestión aún muestra el dashboard existente (migración por adición). */}
+      <div>
+        {active === 'hoy' ? hoy
+          : active === 'negocio' ? negocio
+          : active === 'clientela' ? clientela
+          : panel}
+      </div>
 
       {/* Barra inferior */}
       <nav
