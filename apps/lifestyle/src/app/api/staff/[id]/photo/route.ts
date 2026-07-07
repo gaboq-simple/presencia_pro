@@ -1,7 +1,7 @@
 // ─── API: Staff Photo Upload ───────────────────────────────────────────────────
 // POST /api/staff/[id]/photo
 //   Recibe multipart/form-data con campo 'file'.
-//   - Verifica auth — solo admin del mismo business_id.
+//   - Verifica auth — owner o admin del mismo business_id.
 //   - Verifica que staff.[id] pertenece al business_id del admin.
 //   - Valida: solo image/jpeg|png|webp, máx 2MB.
 //   - Nombre: {business_id}/{staff_id}.{ext} — sobreescribe si ya existe.
@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -46,32 +46,10 @@ const StaffIdSchema = z.string().uuid('ID de staff inválido');
 
 // ─── Tipos internos ───────────────────────────────────────────────────────────
 
-type AuthenticatedAdmin = {
-  id: string;
-  name: string;
-  business_id: string;
-  role: string;
-};
-
 type TargetStaffRow = {
   id: string;
   business_id: string;
 };
-
-// ─── Helper: leer admin autenticado ──────────────────────────────────────────
-
-async function getAuthenticatedAdmin(userId: string): Promise<AuthenticatedAdmin | null> {
-  const supabase = getAdminClient();
-  const { data, error } = await supabase
-    .from('staff')
-    .select('id, name, business_id, role')
-    .eq('auth_id', userId)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return data as AuthenticatedAdmin;
-}
 
 // ─── Helper: verificar que el staff target pertenece al negocio ───────────────
 
@@ -97,10 +75,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  // 1. Auth
-  const authClient = await createClient();
-  const { data: { user } } = await authClient.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  // 1. Auth: owner o admin del negocio (token o Supabase Auth)
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   // 2. Validar params
   const { id: rawId } = await params;
@@ -110,13 +87,8 @@ export async function POST(
   }
   const staffId = parsedId.data;
 
-  // 3. Verificar que el usuario es admin activo
-  const admin = await getAuthenticatedAdmin(user.id);
-  if (!admin) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-  if (admin.role !== 'admin') return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
-
-  // 4. Verificar que el staff target pertenece al mismo negocio
-  const target = await getTargetStaff(staffId, admin.business_id);
+  // 3. Verificar que el staff target pertenece al mismo negocio
+  const target = await getTargetStaff(staffId, auth.businessId);
   if (!target) return NextResponse.json({ error: 'Staff no encontrado' }, { status: 404 });
 
   // 5. Parsear multipart/form-data
@@ -153,7 +125,7 @@ export async function POST(
   if (!ext) {
     return NextResponse.json({ error: 'Tipo no soportado' }, { status: 422 });
   }
-  const storagePath = `${admin.business_id}/${staffId}.${ext}`;
+  const storagePath = `${auth.businessId}/${staffId}.${ext}`;
 
   // 9. Subir a Storage (upsert sobreescribe el archivo anterior)
   const supabase = getAdminClient();
@@ -196,10 +168,9 @@ export async function DELETE(
 ): Promise<NextResponse> {
   void request;
 
-  // 1. Auth
-  const authClient = await createClient();
-  const { data: { user } } = await authClient.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  // 1. Auth: owner o admin del negocio (token o Supabase Auth)
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   // 2. Validar params
   const { id: rawId } = await params;
@@ -209,13 +180,8 @@ export async function DELETE(
   }
   const staffId = parsedId.data;
 
-  // 3. Verificar que el usuario es admin activo
-  const admin = await getAuthenticatedAdmin(user.id);
-  if (!admin) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-  if (admin.role !== 'admin') return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
-
-  // 4. Verificar que el staff target pertenece al mismo negocio
-  const target = await getTargetStaff(staffId, admin.business_id);
+  // 3. Verificar que el staff target pertenece al mismo negocio
+  const target = await getTargetStaff(staffId, auth.businessId);
   if (!target) return NextResponse.json({ error: 'Staff no encontrado' }, { status: 404 });
 
   // 5. Eliminar de Storage — todos los ext posibles, best-effort
@@ -223,7 +189,7 @@ export async function DELETE(
   // un archivo con ext anterior en Storage.
   const supabase = getAdminClient();
   const paths = Object.values(MIME_TO_EXT).map(
-    (ext) => `${admin.business_id}/${staffId}.${ext}`,
+    (ext) => `${auth.businessId}/${staffId}.${ext}`,
   );
   await supabase.storage.from('staff-photos').remove(paths);
 

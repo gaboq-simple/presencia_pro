@@ -20,7 +20,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 import { getPeriodRange, toDateStr } from '@/lib/dashboard.types';
 import type { WeeklyReportData } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
@@ -93,27 +93,10 @@ async function resolveAuth(
     return { ok: true, businessId: explicitBusinessId };
   }
 
-  // Modo admin: sesión activa
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-
-  if (!user) return { ok: false, status: 401, error: 'Unauthorized' };
-
-  const supabase = getServiceClient();
-  const { data: staffRecord, error } = await supabase
-    .from('staff')
-    .select('role, business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (error || !staffRecord || staffRecord.role !== 'admin') {
-    return { ok: false, status: 403, error: 'Forbidden' };
-  }
-
-  return { ok: true, businessId: staffRecord.business_id as string };
+  // Modo admin: sesión de owner o admin del negocio (token o Supabase Auth)
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) return { ok: false, status: auth.status, error: auth.error };
+  return { ok: true, businessId: auth.businessId };
 }
 
 // ─── Cálculo de WeeklyReportData ─────────────────────────────────────────────

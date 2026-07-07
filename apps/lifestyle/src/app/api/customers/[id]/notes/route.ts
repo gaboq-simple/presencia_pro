@@ -1,9 +1,9 @@
 // ─── PATCH /api/customers/[id]/notes ─────────────────────────────────────────
 // Actualiza customers.notes para un cliente del negocio.
 //
-// Auth: requiere sesión activa — staff del mismo business_id.
+// Auth: requiere una sesión de negocio (cualquier rol — token o Supabase Auth).
 // customer_id del path — nunca del body.
-// Valida que el customer pertenece al business_id del staff autenticado.
+// Valida que el customer pertenece al business_id de la sesión.
 //
 // Body: { notes: string }  — máximo 500 caracteres (Zod).
 // Retorna: { notes: string }
@@ -11,7 +11,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { requireBusinessSession } from '@/lib/auth';
 
 // ─── Validación ───────────────────────────────────────────────────────────────
 
@@ -38,15 +38,13 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  // 1. Verificar sesión
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // 1. Auth: cualquier rol de negocio (pertenencia, no autoridad admin)
+  const auth = await requireBusinessSession();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
+  const businessId = auth.businessId;
+  const supabase = getServiceClient();
 
   // 2. Validar path param
   const resolvedParams = await params;
@@ -78,23 +76,8 @@ export async function PATCH(
 
   const { notes } = bodyParsed.data;
 
-  // 4. Obtener staff autenticado + business_id
-  const supabase = getServiceClient();
-  const { data: staffRecord, error: staffError } = await supabase
-    .from('staff')
-    .select('business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (staffError || !staffRecord) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
-  const businessId = staffRecord.business_id as string;
-
   try {
-    // 5. Actualizar notes — WHERE id AND business_id garantiza aislamiento
+    // 4. Actualizar notes — WHERE id AND business_id garantiza aislamiento
     const { data: updated, error: updateError } = await supabase
       .from('customers')
       .update({ notes })

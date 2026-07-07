@@ -10,13 +10,13 @@
 //   review_url?:              string (URL válida) | null
 //   → Si review_requests_enabled=true y no hay review_url → 422
 //
-// Auth: requiere sesión activa con role='admin'.
+// Auth: requiere sesión de owner o admin del negocio (token o Supabase Auth).
 // business_id siempre del servidor — nunca del cliente.
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -53,41 +53,10 @@ function getServiceClient() {
   return createClient(url, key);
 }
 
-// ─── Auth helper ──────────────────────────────────────────────────────────────
-// TODO (A-2 — solo Supabase Auth): este helper usa createAuthClient().auth.getUser()
-// directamente. Usuarios autenticados vía ls_session (token de acceso, PIN)
-// recibirán 401. Migrar a getCurrentSession() de @/lib/auth para soportar
-// ambos mecanismos de autenticación.
-
-async function requireAdmin(): Promise<
-  { ok: true; businessId: string } | { ok: false; status: 401 | 403; error: string }
-> {
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-
-  if (!user) return { ok: false, status: 401, error: 'Unauthorized' };
-
-  const supabase = getServiceClient();
-  const { data: staffRecord, error } = await supabase
-    .from('staff')
-    .select('role, business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (error || !staffRecord || staffRecord.role !== 'admin') {
-    return { ok: false, status: 403, error: 'Forbidden' };
-  }
-
-  return { ok: true, businessId: staffRecord.business_id as string };
-}
-
 // ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function GET(): Promise<NextResponse> {
-  const auth = await requireAdmin();
+  const auth = await requireOwnerOrAdmin();
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
@@ -114,7 +83,7 @@ export async function GET(): Promise<NextResponse> {
 // ─── PATCH ────────────────────────────────────────────────────────────────────
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const auth = await requireAdmin();
+  const auth = await requireOwnerOrAdmin();
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
