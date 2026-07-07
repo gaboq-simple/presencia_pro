@@ -2,8 +2,8 @@
 // Envía un mensaje de reactivación por WhatsApp al cliente y registra
 // el envío en scheduled_notifications para tener historial.
 //
-// Auth: requiere sesión activa con role='admin'.
-// Verifica que customer.business_id === admin.business_id.
+// Auth: requiere sesión de owner o admin del negocio (token o Supabase Auth).
+// Verifica que customer.business_id === session.business_id.
 //
 // Body: { message: string }  — máximo 300 caracteres (Zod).
 //
@@ -16,7 +16,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -56,30 +56,13 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  // 1. Verificar sesión
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // 1. Auth: owner o admin del negocio (token o Supabase Auth)
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
-
-  // 2. Verificar rol admin + obtener business_id del servidor
+  const businessId = auth.businessId;
   const supabase = getServiceClient();
-  const { data: staffRecord, error: staffError } = await supabase
-    .from('staff')
-    .select('role, business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (staffError || !staffRecord || staffRecord.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
-  const businessId = staffRecord.business_id as string;
 
   // 3. Validar body con Zod
   let rawBody: unknown;

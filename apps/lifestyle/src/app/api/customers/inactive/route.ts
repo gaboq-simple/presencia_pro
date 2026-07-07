@@ -4,7 +4,7 @@
 // Query params:
 //   threshold  — override de días (default: inactive_threshold_days del negocio)
 //
-// Auth: requiere sesión activa con role='admin'.
+// Auth: requiere sesión de owner o admin del negocio (token o Supabase Auth).
 // business_id siempre del servidor — nunca del cliente.
 //
 // Tiers:
@@ -17,7 +17,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 import type { InactiveClient, InactiveClientTier } from '@/lib/dashboard.types';
 
 // ─── Validación de input ──────────────────────────────────────────────────────
@@ -71,34 +71,13 @@ function computeTier(days: number): InactiveClientTier {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function GET(request: Request): Promise<NextResponse> {
-  // TODO (A-2 — solo Supabase Auth): este handler usa createAuthClient().auth.getUser()
-  // directamente. Usuarios autenticados vía ls_session (token de acceso) recibirán
-  // 401. Migrar a getCurrentSession() de @/lib/auth para soportar ambos mecanismos.
-
-  // 1. Verificar sesión
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // 1. Auth: owner o admin del negocio (token o Supabase Auth)
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
-
-  // 2. Verificar rol admin + obtener business_id
+  const businessId = auth.businessId;
   const supabase = getServiceClient();
-  const { data: staffRecord, error: staffError } = await supabase
-    .from('staff')
-    .select('role, business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (staffError || !staffRecord || staffRecord.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
-  const businessId = staffRecord.business_id as string;
 
   // 3. Validar query params
   const { searchParams } = new URL(request.url);

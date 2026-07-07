@@ -140,6 +140,92 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
 }
 
 /**
+ * Resultado del guard `requireOwnerOrAdmin` para rutas API de administración.
+ * Misma forma discriminada que los `requireAdmin` inline que reemplaza.
+ */
+export type OwnerAdminAuth =
+  | { ok: true; businessId: string; role: 'owner' | 'admin'; staffId: string | null }
+  | { ok: false; status: 401 | 403; error: string };
+
+/**
+ * Guard para las rutas API de administración del negocio (dashboard del dueño).
+ * Reemplaza el patrón viejo (auth.getUser() + staff.role==='admin'), que rechazaba
+ * al dueño-por-token (sin usuario de Supabase Auth) con 401.
+ *
+ * Acepta owner y admin vía getCurrentSession (token o Supabase Auth). Rechaza
+ * fail-loud y legible: sin sesión (401), sesión de organización (403 — requiere
+ * una sucursal específica), y cualquier otro rol como barber/assistant (403).
+ *
+ * El business_id sale de la sesión (server-derivado, nunca del cliente); cada
+ * ruta sigue filtrando sus queries por ese business_id (scope Ola 1 preservado).
+ */
+export async function requireOwnerOrAdmin(): Promise<OwnerAdminAuth> {
+  const session = await getCurrentSession();
+  if (!session) {
+    return { ok: false, status: 401, error: 'No autorizado' };
+  }
+  if (session.type === 'organization') {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Esta acción requiere una sucursal específica, no una sesión de organización.',
+    };
+  }
+  if (session.role !== 'owner' && session.role !== 'admin') {
+    return { ok: false, status: 403, error: 'Requiere permisos de administrador del negocio.' };
+  }
+  return {
+    ok: true,
+    businessId: session.business_id,
+    role: session.role,
+    staffId: session.staff_id,
+  };
+}
+
+/**
+ * Resultado del guard `requireBusinessSession`. El rol puede ser cualquiera de la
+ * sesión de negocio (owner/admin/barber/assistant).
+ */
+export type BusinessSessionAuth =
+  | { ok: true; businessId: string; role: AuthRole; staffId: string | null }
+  | { ok: false; status: 401 | 403; error: string };
+
+/**
+ * Guard de PERTENENCIA al negocio (no de autoridad administrativa): acepta a
+ * cualquier miembro del negocio — owner, admin, barber o assistant — vía
+ * getCurrentSession (token o Supabase Auth). Para acciones que cualquier staff del
+ * negocio puede hacer (ej. editar la nota de un cliente), a diferencia de
+ * `requireOwnerOrAdmin` que exige autoridad admin (config, reportes).
+ *
+ * Allowlist AFIRMATIVA de roles (un rol futuro no entra por default). Rechaza
+ * fail-loud: sin sesión (401), sesión de organización (403), rol fuera de la lista
+ * (403). El business_id sale de la sesión; el llamador sigue filtrando por él.
+ */
+export async function requireBusinessSession(): Promise<BusinessSessionAuth> {
+  const session = await getCurrentSession();
+  if (!session) {
+    return { ok: false, status: 401, error: 'No autorizado' };
+  }
+  if (session.type === 'organization') {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Esta acción requiere una sucursal específica, no una sesión de organización.',
+    };
+  }
+  const ALLOWED: readonly AuthRole[] = ['owner', 'admin', 'barber', 'assistant'];
+  if (!ALLOWED.includes(session.role)) {
+    return { ok: false, status: 403, error: 'Requiere una sesión de negocio válida.' };
+  }
+  return {
+    ok: true,
+    businessId: session.business_id,
+    role: session.role,
+    staffId: session.staff_id,
+  };
+}
+
+/**
  * Obtiene el nombre del negocio a partir del business_id.
  * Para sesiones de token donde el nombre no está en la cookie.
  */

@@ -1701,6 +1701,13 @@ Ya no es backlog. Gabriel pidió investigar el constraint antes de tocarlo; se e
 - **ARCH-01 · Evaluar migración a RLS-autenticado (no service_role)** ⚪ todo
   Decisión de arquitectura diferida del enfoque híbrido: mover la app de `service_role` a sesiones autenticadas donde RLS sea la red real de aislamiento, cuando el volumen lo justifique.
 
+### Dashboard del dueño (desbloqueado por la Ola 1)
+
+- **PR0 · Rutas API al dueño-por-token (`getCurrentSession`)** 🟢 done (2026-07-07)
+  8 rutas del dashboard usaban el patrón viejo (`auth.getUser()` + `staff.role==='admin'`) → 401 para el dueño que entra por `access_token` (sin usuario de Supabase Auth). Migradas a dos helpers en `lib/auth.ts`: **`requireOwnerOrAdmin`** (AUTORIDAD admin — allowlist owner/admin) para 7 rutas (waitlist, business/config, customers/inactive, customers/[id]/reactivation, reports/weekly rama admin, staff/[id]/photo, staff/block-request/[id]); **`requireBusinessSession`** (PERTENENCIA al negocio — allowlist owner/admin/barber/assistant) para `customers/[id]/notes` (cualquier staff edita notas — se preserva ese comportamiento). Ambos: allowlist afirmativa de roles, rechazo fail-loud de `organization` (403) y null (401). El `business_id` sale de la sesión; cada query sigue scopeada (Ola 1 preservada). Verificado ruta real HTTP (owner-token entra 200 en las 3 admin; notes owner+barber 200; barber→403 en admin; sin auth→401; owner-A no ve waitlist de B). tsc+lint+build+suite 461/461.
+- **PR0b · Rutas con filo (owner ≠ staff)** ⚪ todo · decisiones de producto
+  `customers/[id]/profile` (filtra citas próximas por el `staff_id` del usuario — un owner no tiene; ¿mostrar todas las del cliente en el negocio?) y `staff/block-request` POST/GET (auto-servicio del barbero: inserta `staff_id: staff.id`; el owner no es fila de `staff` → rediseño para separar "barbero pide su bloqueo" de "owner gestiona"). No entraron a PR0 por requerir cambio de comportamiento, no swap.
+
 ---
 
 ## Visión del motor de agendamiento (modelo objetivo)

@@ -2,7 +2,7 @@
 // Retorna entradas activas (status = 'waiting' | 'notified') de la lista
 // de espera del negocio autenticado.
 //
-// Auth: requiere sesión activa con role='admin'.
+// Auth: requiere sesión de owner o admin del negocio (token o Supabase Auth).
 // business_id siempre del servidor — nunca del cliente.
 //
 // Response: { waitlist: WaitlistEntry[] }
@@ -11,7 +11,7 @@
 import { NextResponse } from 'next/server';
 import { z }           from 'zod';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient }    from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 import type { WaitlistEntry } from '@/lib/dashboard.types';
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -23,34 +23,10 @@ function getServiceClient() {
   return createServiceClient(url, key);
 }
 
-// ─── Auth helper ──────────────────────────────────────────────────────────────
-
-async function requireAdmin(): Promise<
-  { ok: true; businessId: string } | { ok: false; status: 401 | 403; error: string }
-> {
-  const authClient = await createAuthClient();
-  const { data: { user } } = await authClient.auth.getUser();
-  if (!user) return { ok: false, status: 401, error: 'Unauthorized' };
-
-  const supabase = getServiceClient();
-  const { data: staffRecord, error } = await supabase
-    .from('staff')
-    .select('role, business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (error || !staffRecord || staffRecord.role !== 'admin') {
-    return { ok: false, status: 403, error: 'Forbidden' };
-  }
-
-  return { ok: true, businessId: (staffRecord as { business_id: string; role: string }).business_id };
-}
-
 // ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function GET(): Promise<NextResponse> {
-  const auth = await requireAdmin();
+  const auth = await requireOwnerOrAdmin();
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
@@ -140,7 +116,7 @@ const NotifyBodySchema = z.object({
 });
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const auth = await requireAdmin();
+  const auth = await requireOwnerOrAdmin();
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }

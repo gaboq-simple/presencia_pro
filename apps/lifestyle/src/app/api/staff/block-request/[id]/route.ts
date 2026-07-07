@@ -1,12 +1,12 @@
 // ─── API: Staff Block Request — PATCH ─────────────────────────────────────────
 // PATCH /api/staff/block-request/[id]
-//   Solo admin puede cambiar status → 'approved' | 'rejected'.
-//   Verifica que el staff_block.staff_id pertenece al mismo business_id del admin.
+//   Solo owner o admin puede cambiar status → 'approved' | 'rejected'.
+//   Verifica que el staff_block.staff_id pertenece al mismo business_id de la sesión.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 
 // ─── Service client ────────────────────────────────────────────────────────────
 
@@ -35,40 +35,16 @@ type BlockRequestRow = {
   created_at: string;
 };
 
-type StaffRow = {
-  id: string;
-  business_id: string;
-  role: string;
-};
-
 // ─── PATCH ─────────────────────────────────────────────────────────────────────
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  // 1. Auth
-  const authClient = await createClient();
-  const { data: { user } } = await authClient.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-
-  // 2. Verificar que el usuario autenticado es admin
+  // 1. Auth: owner o admin del negocio (token o Supabase Auth)
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const supabase = getAdminClient();
-  const { data: adminStaff, error: adminError } = await supabase
-    .from('staff')
-    .select('id, business_id, role')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (adminError || !adminStaff) {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-  }
-
-  const admin = adminStaff as StaffRow;
-  if (admin.role !== 'admin') {
-    return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
-  }
 
   // 3. Validar body
   let rawBody: unknown;
@@ -113,7 +89,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'Solicitud no encontrada' }, { status: 404 });
   }
 
-  if ((targetStaff as { business_id: string }).business_id !== admin.business_id) {
+  if ((targetStaff as { business_id: string }).business_id !== auth.businessId) {
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
   }
 
