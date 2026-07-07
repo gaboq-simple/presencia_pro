@@ -277,6 +277,8 @@ export type ClientelaStats = {
    * casi todos caen a Nuevos, honesto).
    */
   newThisMonthBySegment: SegmentCounts;
+  /** Retención partida en dos cohortes (nuevos que vuelven / recompra de base). */
+  retention: RetentionCohorts;
 };
 
 function emptySegmentCounts(): SegmentCounts {
@@ -320,5 +322,96 @@ export function computeClientelaStats(
     newThisMonth,
     segmentCounts,
     newThisMonthBySegment,
+    retention: computeRetention(inputs, nowMs),
+  };
+}
+
+// ─── Retención por cohortes (el "balde que gotea") ────────────────────────────
+// Dos tasas separadas — mezcladas MIENTEN (los viejos pegajosos ahogan la señal de
+// los nuevos). Puro: reusa la MISMA serie de visitas completadas (CustomerCadenceInput),
+// `now` inyectable. Cada cohorte declara su ventana (el reloj etiquetado del doc).
+
+/** Piso de datos: por debajo de esto no se muestra un %, sino una banda honesta. */
+export const RETENTION_MIN_COHORT = 5;
+
+// ── Cohorte "nuevos que vuelven" ──
+/** Antigüedad MÍNIMA de la 1ª visita para entrar a la cohorte (días). */
+export const NEW_COHORT_MATURE_DAYS = 30;
+/** Antigüedad MÁXIMA de la 1ª visita para seguir siendo "nuevo reciente" (días). */
+export const NEW_COHORT_WINDOW_DAYS = 90;
+/** Un "vuelve" = 2ª visita dentro de este margen desde la 1ª (días). */
+export const NEW_RETURN_WINDOW_DAYS = 30;
+
+// ── Cohorte "recompra de base" ──
+/** Establecido = al menos esta cantidad de visitas completadas. */
+export const BASE_MIN_VISITS = MIN_VISITS_FOR_CADENCE; // 3
+/** Recompró = alguna visita en los últimos N días. */
+export const BASE_RECENT_DAYS = 60;
+
+/** Una tasa de retención con su tamaño de cohorte, o banda "sin datos" si no llega al piso. */
+export type RetentionRate =
+  | { status: 'ok'; rate: number; cohortSize: number; retained: number }
+  | { status: 'insufficient'; cohortSize: number };
+
+export type RetentionCohorts = {
+  /** Nuevos que vuelven: de los primerizos maduros (1ª visita [30–90]d atrás), cuántos
+   *  tuvieron 2ª visita ≤30d de la 1ª. Ventana declarada en la UI. */
+  newReturn: RetentionRate;
+  /** Recompra de base: de los establecidos (≥3 visitas), cuántos vinieron en los últimos 60d. */
+  baseRepeat: RetentionRate;
+};
+
+/** ms ascendentes y válidos de las visitas completadas de un input. */
+function sortedVisitMs(input: CustomerCadenceInput): number[] {
+  return input.completedVisits
+    .map((iso) => new Date(iso).getTime())
+    .filter((t) => !Number.isNaN(t))
+    .sort((a, b) => a - b);
+}
+
+function rateOf(cohortSize: number, retained: number): RetentionRate {
+  if (cohortSize < RETENTION_MIN_COHORT) return { status: 'insufficient', cohortSize };
+  return { status: 'ok', rate: retained / cohortSize, cohortSize, retained };
+}
+
+export function computeRetention(inputs: CustomerCadenceInput[], nowMs: number): RetentionCohorts {
+  // ── Nuevos que vuelven ──
+  // La cohorte EXCLUYE a los primerizos recientes (<30d desde su 1ª visita) A PROPÓSITO:
+  // todavía no "fallaron en volver" — no han tenido los 30d de margen. Contarlos como
+  // "no volvieron" desinflaría la tasa con gente que aún está en tiempo. Por eso el rango
+  // es [30, 90]d de antigüedad de la 1ª visita (maduro pero aún "nuevo"). NO simplificar
+  // a "todos los nuevos".
+  let newCohort = 0;
+  let newRetained = 0;
+  // ── Recompra de base ──
+  let baseCohort = 0;
+  let baseRepeat = 0;
+
+  for (const input of inputs) {
+    const visits = sortedVisitMs(input);
+    if (visits.length === 0) continue;
+
+    // Cohorte nueva: por antigüedad de la PRIMERA visita.
+    const firstAgeDays = (nowMs - visits[0]!) / MS_PER_DAY;
+    if (firstAgeDays >= NEW_COHORT_MATURE_DAYS && firstAgeDays <= NEW_COHORT_WINDOW_DAYS) {
+      newCohort += 1;
+      // Volvió si hubo una 2ª visita dentro de NEW_RETURN_WINDOW_DAYS de la 1ª.
+      // visits[1] es la más temprana después de la 1ª (serie ordenada).
+      if (visits.length >= 2 && (visits[1]! - visits[0]!) / MS_PER_DAY <= NEW_RETURN_WINDOW_DAYS) {
+        newRetained += 1;
+      }
+    }
+
+    // Cohorte de base: establecidos (≥ BASE_MIN_VISITS visitas).
+    if (visits.length >= BASE_MIN_VISITS) {
+      baseCohort += 1;
+      const lastAgeDays = (nowMs - visits[visits.length - 1]!) / MS_PER_DAY;
+      if (lastAgeDays <= BASE_RECENT_DAYS) baseRepeat += 1;
+    }
+  }
+
+  return {
+    newReturn: rateOf(newCohort, newRetained),
+    baseRepeat: rateOf(baseCohort, baseRepeat),
   };
 }
