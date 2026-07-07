@@ -3,13 +3,21 @@
 // 🔴 SCOPE: el businessId viene de la sesión del owner (nunca del cliente) — igual
 // que Ola 1 / PR0. Cada query filtra por él; nunca lee cross-tenant.
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import {
   computeRetentionFeed,
   MIN_VISITS_FOR_CADENCE,
   type CustomerCadenceInput,
   type RetentionFeed,
 } from './cadence';
+
+// Server-only: mismo patrón que lib/dashboard.types (service_role, nunca al cliente).
+function getServiceClient() {
+  const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
+  const key = process.env['SUPABASE_SERVICE_ROLE_KEY'];
+  if (!url || !key) throw new Error('Supabase env vars not set');
+  return createClient(url, key);
+}
 
 type ApptRow = { customer_id: string; starts_at: string; price_charged: number | null };
 type CustomerRow = {
@@ -27,10 +35,10 @@ type CustomerRow = {
  */
 export async function getRetentionFeed(
   businessId: string,
-  supabase: SupabaseClient,
   now: Date = new Date(),
   opts?: { topN?: number },
 ): Promise<RetentionFeed> {
+  const supabase = getServiceClient();
   // 1. Serie de citas completadas del negocio, ligadas a cliente.
   const { data: apptData } = await supabase
     .from('appointments')
@@ -86,8 +94,8 @@ export async function getRetentionFeed(
  */
 export async function getContactadosCount(
   businessId: string,
-  supabase: SupabaseClient,
 ): Promise<number> {
+  const supabase = getServiceClient();
   const { count } = await supabase
     .from('scheduled_notifications')
     .select('id', { count: 'exact', head: true })

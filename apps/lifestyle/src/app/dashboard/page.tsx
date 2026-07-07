@@ -34,7 +34,10 @@ import { getCurrentSession, getBusinessName, getBusinessTimezone, getOrganizatio
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import ConsolidatedView from '@/components/admin/ConsolidatedView';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
+import OwnerTabs from '@/components/admin/OwnerTabs';
+import HoyFeed from '@/components/admin/HoyFeed';
 import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
+import { getRetentionFeed, getContactadosCount } from '@/lib/retentionFeed';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -176,7 +179,13 @@ export default async function DashboardPage({
   // 5. Ingresos del día — función pura sobre datos ya cargados
   const dayRevenue = computeDayRevenue(appointments);
 
-  return (
+  // 6. Feed de retención (pestaña "Hoy") + pulso — scopeado por businessId de la sesión.
+  const [retentionFeed, contactados] = await Promise.all([
+    getRetentionFeed(businessId),
+    getContactadosCount(businessId),
+  ]);
+
+  const dashboardPanel = (
     <DashboardLayout
       businessId={businessId}
       businessName={businessName}
@@ -189,6 +198,13 @@ export default async function DashboardPage({
       staffForManagement={staffForManagement}
       branches={branches.length > 1 ? branches : undefined}
       organizationId={organizationId}
+    />
+  );
+
+  return (
+    <OwnerTabs
+      hoy={<HoyFeed feed={retentionFeed} contactados={contactados} />}
+      panel={dashboardPanel}
     />
   );
 }
