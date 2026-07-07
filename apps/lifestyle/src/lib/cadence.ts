@@ -279,6 +279,8 @@ export type ClientelaStats = {
   newThisMonthBySegment: SegmentCounts;
   /** Retención partida en dos cohortes (nuevos que vuelven / recompra de base). */
   retention: RetentionCohorts;
+  /** Movimiento entre grupos vs el cierre del mes calendario anterior. */
+  movement: SegmentMovement;
 };
 
 function emptySegmentCounts(): SegmentCounts {
@@ -323,7 +325,71 @@ export function computeClientelaStats(
     segmentCounts,
     newThisMonthBySegment,
     retention: computeRetention(inputs, nowMs),
+    movement: computeSegmentMovement(inputs, nowMs),
   };
+}
+
+// ─── Movimiento entre grupos (transiciones de segmento, mes calendario cerrado) ──
+// Reconstruye el segmento de cada cliente a DOS instantes — el cierre del mes
+// calendario anterior y hoy — y cuenta las transiciones. Sin schema nuevo: el
+// segmento es función pura de (serie de visitas, now); se trunca la serie a la
+// fecha pasada. Puro, `now` inyectable.
+//
+// FIDELIDAD (ver diseño): el único ingrediente no-truncable de `computeCadence` es
+// `visitCount` (denormalizado). Al reconstruir el pasado se pasa el conteo REAL de
+// visitas ≤ T (no el denormalizado) → `isChampionFreq` queda `nVisits≥6` puro.
+// El "hoy" reusa `computeCadence(input, nowMs)` TAL CUAL → idéntico a la grilla de
+// grupos (cero contradicción en pantalla).
+
+export type SegmentTransition = { from: RfmSegment; to: RfmSegment; count: number };
+
+export type SegmentMovement = {
+  /** Transiciones observadas (from ≠ to), conteo > 0. */
+  transitions: SegmentTransition[];
+  /** Total de clientes que cambiaron de grupo. */
+  movedCount: number;
+  /** Clientes con presencia (≥1 visita) al cierre del mes anterior — universo del "antes". */
+  eligibleCount: number;
+};
+
+export function computeSegmentMovement(inputs: CustomerCadenceInput[], nowMs: number): SegmentMovement {
+  const monthStart = monthStartMs(nowMs); // cierre del mes anterior = inicio del mes en curso
+  const counts = new Map<string, number>();
+  let movedCount = 0;
+  let eligibleCount = 0;
+
+  for (const input of inputs) {
+    // Visitas ocurridas ANTES del cierre (por starts_at; no existe completed_at).
+    const visitsBefore = input.completedVisits.filter((iso) => {
+      const t = new Date(iso).getTime();
+      return !Number.isNaN(t) && t < monthStart;
+    });
+    // Sin presencia al cierre → NO transicionó (nació después). Es incorporación
+    // (ya contada en Crecimiento), nunca una flecha de movimiento.
+    if (visitsBefore.length === 0) continue;
+    eligibleCount += 1;
+
+    // "Antes": segmento al cierre del mes anterior (visitas truncadas + conteo REAL de esa fecha).
+    const before = computeCadence(
+      { ...input, completedVisits: visitsBefore, visitCount: visitsBefore.length },
+      monthStart,
+    ).segment;
+    // "Hoy": idéntico a la grilla de grupos (mismo input, mismo now).
+    const now = computeCadence(input, nowMs).segment;
+
+    if (before !== now) {
+      const key = `${before}>${now}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      movedCount += 1;
+    }
+  }
+
+  const transitions: SegmentTransition[] = [...counts.entries()].map(([k, count]) => {
+    const [from, to] = k.split('>') as [RfmSegment, RfmSegment];
+    return { from, to, count };
+  });
+
+  return { transitions, movedCount, eligibleCount };
 }
 
 // ─── Retención por cohortes (el "balde que gotea") ────────────────────────────
