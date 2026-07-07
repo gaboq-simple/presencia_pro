@@ -131,12 +131,19 @@ export async function POST(
   }
 
   // 8. Registrar en scheduled_notifications — best-effort
+  // Ligamos la fila al cliente (customer_id) para que el pulso "contactados" de
+  // la pestaña Hoy pueda atribuir la reactivación — sin esto la fila queda huérfana.
+  // customer_phone y message_body ya están en scope (evidencia de a quién y qué se
+  // envió); las 3 columnas existen. business_id sigue scopeado por la sesión (Ola 1).
   try {
     const now = new Date().toISOString();
     await supabase.from('scheduled_notifications').insert({
       business_id:    businessId,
       appointment_id: null,
+      customer_id:    customerId,
+      customer_phone: customer.phone,
       type:           'reactivation',
+      message_body:   message,
       scheduled_for:  now,
       sent_at:        now,
     });
