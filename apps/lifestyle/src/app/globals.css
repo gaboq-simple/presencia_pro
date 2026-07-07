@@ -2,11 +2,123 @@
 
 /*
  * Tokens globales de la plataforma.
- * Los tokens específicos de cada negocio se inyectan como variables CSS
- * en el layout del [slug] a partir de los datos de la tabla businesses.
+ * Los tokens específicos de cada negocio (mini-sitio) se inyectan como variables
+ * CSS en el layout del [slug] a partir de la tabla businesses.
  *
  * @theme permite que Tailwind v4 genere utilidades a partir de estas variables.
+ *
+ * ── Zentriq claro (vista barbero) ──────────────────────────────────────────────
+ * Sistema de diseño de la maqueta v5 (zlot-barber-dashboard-v5). Los VALORES son
+ * 1:1 con la maqueta; solo se renombran a la convención Tailwind v4 (--color-*,
+ * --shadow-*, --radius-*). No cambiar hex/alpha sin actualizar la maqueta.
  */
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  /* ── Colores base ── */
+  --color-canvas:      #F4F7F7;              /* v5 --bg  (near-white) */
+  --color-card:        #FFFFFF;              /* v5 --card */
+  --color-ink:         #16181C;              /* v5 --ink */
+  --color-ink-2:       #5A5E63;              /* v5 --ink-2 */
+  --color-faint:       #8A8F94;              /* v5 --faint */
+  --color-line:        rgba(18, 32, 30, 0.08);  /* v5 --line   (alpha .08) */
+  --color-line-2:      rgba(18, 32, 30, 0.12);  /* v5 --line-2 (alpha .12) */
+
+  /* ── Teal (marca) ── */
+  --color-teal:        #00C2A8;              /* v5 --teal */
+  --color-teal-ink:    #025F53;              /* v5 --teal-ink   (texto AA-safe) */
+  --color-teal-border: #018271;             /* v5 --teal-border (borde AA-safe) */
+  --color-tint-1:      #EBFAF8;              /* v5 --tint-1 */
+  --color-tint-2:      #C7F2EC;              /* v5 --tint-2 */
+
+  /* ── Rojo semántico (no-show) ── */
+  --color-red-ink:     #A23B36;             /* v5 --red-ink */
+  --color-red-tint:    #FBF1F0;             /* v5 --red-tint */
+  --color-red-border:  #D98A85;             /* v5 --red-border */
+
+  /* ── Walk-in (violeta) — cita sin reserva; se distingue del resto en el panorama del asistente ── */
+  --color-walk:        #5B4CC4;             /* maqueta asistente --violet */
+  --color-walk-tint:   #ECEAF8;             /* maqueta asistente --violet-wash */
+  --color-walk-border: #A79EE6;             /* borde AA-safe derivado */
+
+  /* ── Ámbar (advertencia) — destino que SOLAPARÍA otra cita (forzable por la recepción) ── */
+  --color-amber:        #B45309;            /* maqueta asistente --amber */
+  --color-amber-tint:   #FBF0E2;            /* maqueta asistente --amber-wash */
+  --color-amber-border: #E0A868;            /* borde AA-safe derivado */
+
+  /* ── Pasado — apagado por COLOR (no opacity): el borde rojo del no-show NO se atenúa ── */
+  --color-past-bg:     #F0F2F2;             /* v5 --past-bg */
+  --color-past-line:   #C7CBCB;             /* v5 --past-line */
+  --color-past-ink:    #6E7378;             /* v5 --past-ink */
+  --color-past-faint:  #9CA0A4;             /* v5 --past-faint */
+
+  /* ── Avatar (iniciales sobre teal) ── */
+  --color-avatar-ink:  #04130F;             /* v5 iniciales del avatar */
+
+  /* ── Sombras (alpha preservado en rgba) ── */
+  --shadow-card: 0 1px 2px rgba(16, 40, 38, 0.05), 0 8px 22px -10px rgba(16, 40, 38, 0.10);
+  --shadow-hero: 0 1px 2px rgba(0, 120, 104, 0.07), 0 14px 34px -12px rgba(0, 150, 130, 0.16);
+
+  /* ── Radios (valores exactos de v5) ── */
+  --radius-hero: 28px;
+  --radius-card:   16px;
+  --radius-avatar: 13px;   /* v5 avatar (era --radius-md, que pisaba rounded-md=6px de Tailwind) */
+  --radius-pill:   999px;
+  /* Los radios 11px/8px de v5 se agregarán con nombre propio en PR3, al cablear su uso.
+     No se usan --radius-md/sm/xs para NO sobreescribir la escala default de Tailwind. */
+}
+
+/*
+ * Gradiente teal del hero (v5 --grad). No es color plano → var directa,
+ * consumible vía la utilidad bg-hero-grad de abajo.
+ */
+:root {
+  --grad-teal: linear-gradient(135deg, #00C2A8, #008F76);
+
+  /* Sub-rejilla de 15 min del panorama (asistente): estructura temporal silenciosa
+     de fondo. No es color plano de UI → var directa (como --grad-teal), no token @theme. */
+  --grid-15: rgba(21, 25, 27, 0.035);
+}
+
+@utility bg-hero-grad {
+  background-image: var(--grad-teal);
+}
+
+/*
+ * Grid técnico de fondo (v5): líneas teal al 4%, celda de 20px. Sutil a propósito.
+ */
+@utility bg-grid {
+  background-image:
+    linear-gradient(rgba(0, 194, 168, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 194, 168, 0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/*
+ * Microinteracción de marca — pulso del dot "En curso" (v5 --data-beat).
+ * Utilidad Tailwind: animate-data-beat (respeta motion-reduce:animate-none).
+ */
+@keyframes data-beat {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+@theme {
+  --animate-data-beat: data-beat 1.8s ease-in-out infinite;
+}
+
+/*
+ * Accesibilidad — prefers-reduced-motion (S6-UI-02 PR-6, corrección de spec).
+ * Neutraliza globalmente animaciones/transiciones para quien lo pide. Más robusto
+ * que guardar cada una con motion-reduce: el levantado del gesto (transform + shadow),
+ * los toggles, el hover, la transition de las tarjetas y el pulso quedan SIN animar —
+ * el estado visual (levantada, resaltada) se aplica al instante, no se pierde. El spec
+ * congelado (pulido item 1) pedía matar pulsos/FLIP/transiciones para reduced-motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

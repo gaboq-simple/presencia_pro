@@ -1,29 +1,27 @@
-// ─── Staff — Vista del Barbero / Asistente ────────────────────────────────────
+// ─── Staff — Vista del Barbero ────────────────────────────────────────────────
 // Server Component — sin protección de middleware.
-// Muestra PinForm si no hay sesión activa (acceso por PIN para barberos).
+// Sin sesión muestra BarbershopPrompt → el login por PIN queda scopeado por
+// negocio en /[slug]/staff (MT-02, sin login sin scope).
 //
-// Flujos:
-//   · Sin sesión                → PinForm
-//   · role 'owner' | 'admin'   → redirect('/dashboard')
-//   · role 'barber'             → StaffLayout con sus propias citas
-//   · role 'assistant'          → AssistantLayout con TODAS las citas del negocio
+// Flujos (Opción C — S6-UI-01):
+//   · Sin sesión                  → BarbershopPrompt (→ /[slug]/staff)
+//   · role 'owner'|'admin'|'assistant' → redirect('/dashboard')
+//   · role 'barber'               → StaffLayout con sus propias citas
+//
+// El modo gestión del barbero vive en su PROPIA ruta: /staff/gestion.
 //
 // REGLA: service_role_key nunca sale al cliente.
 
 import { redirect } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import {
-  getDayAppointments,
-  getActiveStaffWithAvailability,
   getStaffDayAppointments,
   getStaffRecurringAvailability,
   getStaffBlockRequests,
   toDateStr,
 } from '@/lib/dashboard.types';
-import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
-import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
+import { getCurrentSession } from '@/lib/auth';
 import StaffLayout from '@/components/staff/StaffLayout';
-import AssistantLayout from '@/components/staff/AssistantLayout';
 import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -51,8 +49,18 @@ function deriveUpcomingCustomerId(
 export default async function StaffPage({
   searchParams,
 }: {
+  // `view` es compat-only: el antiguo /staff?view=manage migró a /staff/gestion.
   searchParams: Promise<{ date?: string; view?: string }>;
 }) {
+  const { date: rawDate, view: rawView } = await searchParams;
+  const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
+
+  // Shim de compatibilidad — bookmarks/links viejos a /staff?view=manage
+  // se redirigen a la ruta propia /staff/gestion (preservando la fecha).
+  if (rawView === 'manage') {
+    redirect(`/staff/gestion?date=${date}`);
+  }
+
   // 1. Sesión activa — ls_session (PIN/token) o Supabase Auth
   const session = await getCurrentSession();
 
@@ -62,95 +70,13 @@ export default async function StaffPage({
     return <BarbershopPrompt />;
   }
 
-  // Owner / admin → dashboard
-  if (session.role === 'owner' || session.role === 'admin') {
+  // Cualquier rol que no sea barbero (owner / admin / assistant) → su vista vive
+  // en el dashboard. El asistente es canónico en /dashboard (no se duplica aquí).
+  if (session.role !== 'barber') {
     redirect('/dashboard');
   }
 
   const businessId = session.business_id;
-
-  // 2. Resolver fecha desde searchParams (default: hoy)
-  const { date: rawDate, view: rawView } = await searchParams;
-  const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
-
-  // ── Asistente: AssistantLayout — ve TODAS las citas + puede crear/cancelar ──
-  if (session.role === 'assistant') {
-    const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
-    const [businessName, timezone, appointments, allStaff, staffBlocks] = await Promise.all([
-      getBusinessName(businessId),
-      getBusinessTimezone(businessId),
-      getDayAppointments(businessId, date),
-      getActiveStaffWithAvailability(businessId, dayOfWeek),
-      getStaffBlocksForDay(date),
-    ]);
-
-    // Filtrar solo barberos para el formulario de nueva cita
-    const staffOptions = allStaff
-      .filter((s) => s.role === 'barber')
-      .map((s) => ({ id: s.id, name: s.name }));
-
-    // Barberos con disponibilidad para el timeline
-    const staffWithAvailability = allStaff
-      .filter((s) => s.role === 'barber')
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        availabilityToday: s.availabilityToday
-          ? { start_time: s.availabilityToday.start_time, end_time: s.availabilityToday.end_time }
-          : null,
-      }));
-
-    return (
-      <AssistantLayout
-        businessId={businessId}
-        businessName={businessName}
-        date={date}
-        timezone={timezone}
-        initialAppointments={appointments}
-        staffOptions={staffOptions}
-        staffWithAvailability={staffWithAvailability}
-        initialStaffBlocks={staffBlocks}
-      />
-    );
-  }
-
-  // ── Barbero en vista gestion (Feature 5B — Opción B) ─────────────────────
-  // Barbero accede a AssistantLayout con ?view=manage para gestionar citas
-  // del negocio. El staff_id de la sesión se usa para trazabilidad.
-  if (session.role === 'barber' && rawView === 'manage') {
-    const dayOfWeek = new Date(`${date}T12:00:00`).getDay();
-    const [businessName, timezone, appointments, allStaff, staffBlocks] = await Promise.all([
-      getBusinessName(businessId),
-      getBusinessTimezone(businessId),
-      getDayAppointments(businessId, date),
-      getActiveStaffWithAvailability(businessId, dayOfWeek),
-      getStaffBlocksForDay(date),
-    ]);
-    const staffOptions = allStaff
-      .filter((s) => s.role === 'barber')
-      .map((s) => ({ id: s.id, name: s.name }));
-    const staffWithAvailability = allStaff
-      .filter((s) => s.role === 'barber')
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        availabilityToday: s.availabilityToday
-          ? { start_time: s.availabilityToday.start_time, end_time: s.availabilityToday.end_time }
-          : null,
-      }));
-    return (
-      <AssistantLayout
-        businessId={businessId}
-        businessName={businessName}
-        date={date}
-        timezone={timezone}
-        initialAppointments={appointments}
-        staffOptions={staffOptions}
-        staffWithAvailability={staffWithAvailability}
-        initialStaffBlocks={staffBlocks}
-      />
-    );
-  }
 
   // ── Barbero: solo sus propias citas ──────────────────────────────────────
   // role === 'barber' — staffId requerido (viene de la sesión PIN)

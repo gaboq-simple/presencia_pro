@@ -21,6 +21,12 @@ import { useRouter } from 'next/navigation';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+// 🔴 businessSlug/businessName son REQUERIDAS por diseño (MT-02): el PIN es único
+// POR negocio, así que el login SIEMPRE debe estar scopeado a un negocio resuelto
+// desde el slug (ruta /[slug]/staff). NO las hagas opcionales "para compilar" — un
+// PinForm sin negocio reabre el login sin scope (barbero al negocio equivocado).
+// Si un consumidor no tiene el negocio en scope, usar <BarbershopPrompt /> (pide el
+// slug y rutea acá), NO relajar este tipo. El error de tipo es la barrera funcionando.
 export default function PinForm({
   businessSlug,
   businessName,

@@ -196,6 +196,39 @@ export async function handleConfirmingAppointment(
     return buildConfirmationResult(context, pendingSlots[0]!, business, supabase, msg.customerName);
   }
 
+  // ── "Otro día" → siguiente día con cupo (Hallazgo 4) ──────────────────────
+  // INTERCEPTACIÓN ANTES del router: "otro día"/"otra fecha" SIN fecha concreta = no
+  // ESTE día, el SIGUIENTE con cupo. Hoy routeSlotSelection lo manda a date_redirect,
+  // que BORRA requestedDate (pierde el ancla) y rebota a QUALIFYING_DATETIME, que no
+  // sabe parsear "otro día" → "no entendí". Acá el ancla (context.requestedDate, el día
+  // mostrado) AÚN existe: anclamos +1 día y delegamos a SHOWING_SLOTS, que muestra ese
+  // día o cae a findSlotsInNextDays si está vacío. Preserva barbero/servicio/autoAssign;
+  // limpia hora/turno/slots del día viejo (idéntico a date_redirect, pero seteando el
+  // día en vez de borrarlo). rejection_attempts=0: avanzar de día ES progreso. NO toca el
+  // router (slotSelection.test.ts sigue verde). Caveat: "otro día, el martes" lleva fecha
+  // concreta → detectsNextDayRedirect=false → cae al router → date_redirect (parsea martes).
+  if (context.requestedDate && detectsNextDayRedirect(msg.body, msg.timestamp, business.timezone)) {
+    const anchor = noonUTCDate(context.requestedDate);
+    anchor.setUTCDate(anchor.getUTCDate() + 1);
+    const nextDateStr =
+      `${anchor.getUTCFullYear()}-${String(anchor.getUTCMonth() + 1).padStart(2, '0')}-${String(anchor.getUTCDate()).padStart(2, '0')}`;
+    return {
+      newState:   'SHOWING_SLOTS',
+      newContext: {
+        ...context,
+        requestedDate:          nextDateStr,
+        requestedTime:          undefined,
+        requestedShift:         undefined,
+        pendingAgendaTime:      undefined,
+        pendingSlots:           undefined,
+        nearestOfferSlot:       null,
+        clarification_attempts: 0,
+        rejection_attempts:     0,
+      },
+      responseText: '',
+    };
+  }
+
   // ── Ruteo determinista de la selección ────────────────────────────────────
 
   const route = routeSlotSelection(msg.body, pendingSlots, msg.timestamp, business.timezone, interp);
@@ -770,6 +803,27 @@ const META_KEYWORDS = [
 function detectMetaFrustration(body: string): boolean {
   const n = ` ${cleanMessage(body)} `;
   return META_KEYWORDS.some((k) => n.includes(` ${k} `));
+}
+
+// ─── Detector "otro día" → siguiente día con cupo (Hallazgo 4) ────────────────
+// Tras ver slots, "otro día" / "otra fecha" SIN fecha concreta = avanzar al SIGUIENTE
+// día con cupo (no ESTE). Puro y testeable (sin DB/red/LLM). Lo consume el handler
+// ANTES de routeSlotSelection: hoy "otro día" cae en date_redirect (DATE_CHANGE_KEYWORDS),
+// que borra requestedDate y rebota a QUALIFYING_DATETIME → "no entendí". Aquí lo
+// detectamos para anclar requestedDate+1 en su lugar, SIN tocar el router.
+//
+// EXIGE parseDate==null sobre el probe sin frases de turno (mismo probe que el router):
+// "otro día, el martes" lleva fecha concreta → NO es siguiente-día (devuelve false),
+// sigue su curso a date_redirect, que parsea el martes (caveat 3). El keyword se matchea
+// sobre texto normalizado (sin acentos) → "otro día" ≡ "otro dia".
+const NEXT_DAY_KEYWORDS = ['otro dia', 'otra fecha'];
+
+export function detectsNextDayRedirect(body: string, now: Date, tz: string): boolean {
+  const lower = body.trim().toLowerCase();
+  if (!NEXT_DAY_KEYWORDS.some((k) => normalize(lower).includes(k))) return false;
+  // Fecha concreta presente (mismo probe que routeSlotSelection) → NO es siguiente-día.
+  const dateProbe = lower.replace(SHIFT_PHRASE_RE, ' ');
+  return parseDate(dateProbe, now, tz) === null;
 }
 
 // ─── Detector de corrección en el cierre (S5-BOT-08) ──────────────────────────

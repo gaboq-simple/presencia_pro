@@ -155,13 +155,6 @@ export default function ConsolidatedView({ organizationId: _organizationId, busi
           <div className="flex items-center justify-between">
             {/* Selector de sucursal — "Todas" seleccionado */}
             <BranchSelector branches={branches} currentBranchId="all" />
-
-            <a
-              href="/staff"
-              className="ml-3 shrink-0 text-xs text-gray-500 hover:text-gray-700"
-            >
-              Vista barbero →
-            </a>
           </div>
         </div>
       </header>

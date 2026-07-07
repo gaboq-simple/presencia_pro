@@ -202,15 +202,9 @@ export async function handleConfirmationResponse(
       };
     }
 
-    // Factible — actualizar cita
-    await supabase
-      .from('appointments')
-      .update({
-        adjusted_starts_at:        result.adjusted_start,
-        delay_reported_minutes:    delayMinutes,
-        late_arrival_acknowledged: true,
-      })
-      .eq('id', appt.id);
+    // Factible — la cita YA fue ajustada por el RPC check_late_arrival_feasibility
+    // (2c-ii): cuando es factible, aplica adjusted_starts_at/delay/ack DENTRO de la
+    // misma txn con actor_type='bot'. No hay .update() externo (caía en 'unknown').
 
     // Notificar al barbero — best-effort
     try {
@@ -303,11 +297,13 @@ export async function handleConfirmationResponse(
   // ── CANCELACIÓN EXPLÍCITA ─────────────────────────────────────────────────
 
   if (isNegative) {
-    // Cancelar cita
-    await supabase
-      .from('appointments')
-      .update({ status: 'cancelled' })
-      .eq('id', appt.id);
+    // Cancelar cita — vía RPC (2c-ii): set_config('app.actor_type','bot',true) +
+    // UPDATE atómicos → el audit atribuye 'bot' en vez de 'unknown'. Resultado
+    // ignorado, idéntico al .update() anterior.
+    await supabase.rpc('bot_set_appointment_status', {
+      p_appointment_id: appt.id,
+      p_status:         'cancelled',
+    });
 
     const whatsappToken = process.env['WHATSAPP_ACCESS_TOKEN'] ?? '';
     if (!whatsappToken) {
@@ -379,10 +375,11 @@ export async function handleConfirmationResponse(
   // ── CONFIRMACIÓN EXPLÍCITA ────────────────────────────────────────────────
 
   if (isPositive) {
-    await supabase
-      .from('appointments')
-      .update({ status: 'confirmed' })
-      .eq('id', appt.id);
+    // Re-confirmar — vía RPC (2c-ii): actor_type='bot' (GUC transaction-local).
+    await supabase.rpc('bot_set_appointment_status', {
+      p_appointment_id: appt.id,
+      p_status:         'confirmed',
+    });
 
     return {
       newState:     'CONFIRMED',
