@@ -358,6 +358,16 @@ export async function createAssistantAppointment(
   const name  = input.customerName.trim();
   const phone = input.customerPhone?.trim() || null;
 
+  // ── Nombre obligatorio (defensa en profundidad de la liga cita↔cliente) ──
+  // Sin nombre no hay cliente al que ligar la cita → sin este guard, un caller
+  // programático (o un bug de UI) crearía una cita con customer_id null, que el
+  // detector de fugas del dashboard nunca vería. La UI ya lo valida; esto lo
+  // asegura también a nivel action.
+  if (!name) {
+    // Validación de cara al usuario → return (los throw se redactan en prod).
+    return { error: 'El nombre del cliente es obligatorio para agendar' };
+  }
+
   // ── Teléfono obligatorio (política de negocio configurable) ──────────────
   // Si el negocio activó require_customer_phone, toda alta manual (cualquier
   // rol — barbero Y recepcionista) exige teléfono del cliente. Default FALSE →
