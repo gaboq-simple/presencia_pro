@@ -1397,6 +1397,41 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 
 ---
 
+## Olas de fundación multi-tenant (post-auditoría 2026-07-06)
+
+> **Marco:** la auditoría read-only de fundación multi-tenant encontró que el aislamiento entre negocios descansa en **disciplina de código, no en garantías de DB** (RLS está bypasseado en runtime: bot + dashboard + proxy corren como `service_role`). Decisión de Gabriel: **enfoque híbrido pragmático** — garantías estructurales baratas ahora, migración a RLS-autenticado diferida. **La Ola 1 (aislamiento) BLOQUEA el cableado del dashboard del dueño y va ANTES que él.** La Ola 2 (fiabilidad) va antes del primer cliente real. Estas tareas están **registradas, NO ejecutadas** (salvo MT-01, cuya propuesta está en revisión). Cada una es su propio PR chico.
+
+### Ola 1 — Aislamiento multi-tenant (bloquea el dashboard del dueño)
+
+- **MT-01 · Llaves de routing UNIQUE (`whatsapp_phone_number_id` + `whatsapp_number`)** 🟢 done (2026-07-06)
+  Llaves de routing del bot: eran `NOT NULL` pero **ni UNIQUE ni indexadas** → dos negocios con el mismo id/número → el `.maybeSingle()` del router falla y **descarta mensajes en silencio**. Fix: **dos partial UNIQUE indexes `WHERE <> ''`** (migración `044_routing_keys_unique.sql`, aplicada al demo vía MCP) → colisión ahora es fail-loud (23505); tolera los `''` de onboarding Fase 1. Verificado por ruta real: rechazo de duplicado en ambas llaves, tolerancia de borradores `''`, no-regresión del router (EXPLAIN usa el índice parcial). **Contracara: MT-06** debe presentar error claro cuando el UPDATE de Fase 2 choque con estos índices.
+- **MT-02 · Login por PIN acotado al negocio correcto** ⚪ todo
+  `api/auth/pin/route.ts` hace `SELECT … FROM staff WHERE pin=$1 AND active=true LIMIT 1` sin `business_id`. El PIN es único **por negocio** (`UNIQUE(business_id,pin)`), no global → con N clientes, dos barberos pueden compartir PIN y `.limit(1)` mete al barbero **al dashboard del negocio equivocado**. Probabilístico, crece con N, silencioso.
+- **MT-03 · `.eq('business_id')` defensivo en las ~6 queries del bot** ⚪ todo
+  `scheduling.ts` (round-robin ~201, `staff_blocks` ~478, `staff_schedule_exceptions` ~486, `staff_services` ~563) y `confirmed.ts` (solape ~59, `favorite_staff_id` ~162) filtran solo por `staff_id`/`customer_id`. El bot es `service_role` → RLS NO las cubre; el único guard es el pre-filtrado de `staffIds` aguas-arriba. Defensa en profundidad ante una regresión de esa fuente o un call-site nuevo.
+- **MT-04 · FK compuesta / trigger de coherencia de tenant** ⚪ todo
+  Nada a nivel DB impide una cita "Frankenstein": `appointments.business_id` puede no coincidir con el `business_id` del staff/servicio/cliente referenciado (las FK solo validan existencia, no pertenencia). Hoy 0 casos; con N, un bug de app lo permite y la DB lo acepta. Forzar `appointments.business_id == staff/service/customer.business_id`.
+- **MT-05 · Cerrar listing cross-tenant del bucket `staff-photos`** ⚪ todo
+  Advisor de seguridad Supabase: el bucket público permite *listing* → un negocio puede enumerar las fotos de staff de todos los demás.
+
+### Ola 2 — Fiabilidad de datos (antes del primer cliente real, no antes de "Hoy")
+
+- **REL-01 · Backup R2 verificado end-to-end** ⚪ todo
+  Correr el workflow y **confirmar un restore drill real** (no un Action en verde). Hoy no hay backup verificado.
+- **REL-02 · Reconciliar el ledger de migraciones + documentar recreación** ⚪ todo
+  Remoto tiene **7 filas** en `supabase_migrations.schema_migrations` (versiones timestamp) vs repo `001–043` (numeradas); migraciones aplicadas fuera de banda (SQL editor / MCP). Hoy **no se puede recrear la DB replayando el repo**. Documentar el procedimiento de recreación incluyendo los crons (que solo viven en el Dashboard).
+- **REL-03 · Confirmar los 2 crons/schedules activos en el Dashboard** ⚪ todo
+  `dispatch-lifestyle-notifications` y `dispatch-auto-cancel` son schedules de edge functions en el Dashboard (no versionados, `pg_cron` no instalado). Verificar que estén activos antes del go-live.
+
+### Diferido
+
+- **MT-06 · Onboarding que no nazca inservible** ⚪ todo
+  Que el onboarding **falle** (no advierta) si `whatsapp_phone_number_id` queda vacío; separar estado "borrador" de "activo". (Es la raíz de los `''` que MT-01 debe tolerar.)
+- **ARCH-01 · Evaluar migración a RLS-autenticado (no service_role)** ⚪ todo
+  Decisión de arquitectura diferida del enfoque híbrido: mover la app de `service_role` a sesiones autenticadas donde RLS sea la red real de aislamiento, cuando el volumen lo justifique.
+
+---
+
 ## Visión del motor de agendamiento (modelo objetivo)
 
 > **Qué es esto:** NO es un bug ni una tarea. Es el modelo objetivo del motor de agendamiento — la foto de cómo debe comportarse cuando esté completo. Guía los próximos sprints de scheduling y sirve de norte para decidir fixes y features. Las piezas concretas se irán cortando en tareas `S{n}-BOT-*` a medida que se aborden.
