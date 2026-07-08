@@ -2,10 +2,12 @@
 // Server Component presentacional. Lectura pura (no muta nada).
 // PR-Neg-1: Ingresos (héroe sellado + comparación mismo-tramo + 6 meses).
 // PR-Neg-2: Ocupación (heatmap POSITIVO día×hora + huecos + potencial hedged).
+// PR-Neg-3: Barberos (recompra de héroe vs promedio del local, SIN ranking).
 // Copy sin promesas. Tokens Zentriq-claro.
 
 import type { NegocioRevenue } from '@/lib/negocioMetrics';
 import type { OccupancyResult } from '@/lib/occupancy';
+import type { StaffRecompraResult, StaffRecompraRow, RecompraTone } from '@/lib/staffRecompra';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 function money(n: number): string {
@@ -168,7 +170,109 @@ function OcupacionBlock({ occ }: { occ: OccupancyResult }): React.ReactElement |
   );
 }
 
-export default function NegocioView({ revenue, occupancy }: { revenue: NegocioRevenue; occupancy: OccupancyResult }): React.ReactElement {
+// ── Barberos: recompra de héroe vs promedio del local (PR-Neg-3) ──
+function pct(n: number): number {
+  return Math.round(n * 100);
+}
+
+// Tono → colores del relleno de la barra (teal arriba, gris cerca, ámbar abajo).
+// El color habla de la relación con el PROMEDIO, no de un puesto en un ranking.
+const TONE_FILL: Record<RecompraTone, string> = {
+  above: 'bg-teal-border',
+  near: 'bg-line-2',
+  below: 'bg-amber-border',
+  insufficient: 'bg-line-2',
+};
+
+function BarberoRow({ row, avgRate }: { row: StaffRecompraRow; avgRate: number | null }): React.ReactElement {
+  const r = row.rate; // narrowing por status del union discriminado
+  return (
+    <li className="py-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-sm font-medium text-ink">{row.staffName}</span>
+        {r.status === 'ok' ? (
+          <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">{pct(r.rate)}%</span>
+        ) : (
+          <span className="shrink-0 text-[11px] text-faint">aún juntando datos</span>
+        )}
+      </div>
+
+      {r.status === 'ok' ? (
+        // Track 0–100% igual para todos; la línea del promedio cae en la MISMA x en
+        // cada barbero → "vs promedio" se lee sin ordenar por la métrica.
+        <div className="relative mt-1 h-5 w-full overflow-hidden rounded bg-tint-1">
+          <div
+            className={`h-full rounded ${TONE_FILL[row.tone]}`}
+            style={{ width: `${Math.max(pct(r.rate), 2)}%` }}
+          />
+          {avgRate !== null && (
+            <div
+              className="absolute inset-y-0 w-px bg-ink/50"
+              style={{ left: `${pct(avgRate)}%` }}
+              title={`Promedio del local: ${pct(avgRate)}%`}
+            />
+          )}
+        </div>
+      ) : (
+        // Piso: <5 clientes maduros → sin barra (una barra sería un juicio con ruido).
+        <p className="mt-1 text-[11px] text-faint">
+          {r.cohortSize === 0
+            ? 'Sin clientes con visita completada todavía.'
+            : `Solo ${r.cohortSize} cliente${r.cohortSize === 1 ? '' : 's'} con historia — hace falta más para una tasa creíble.`}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElement | null {
+  if (data.staff.length === 0) return null; // sin barberos activos → no renderiza
+
+  const avg = data.localAverage;
+  const avgRate = avg.status === 'ok' ? avg.rate : null;
+  const anyRate = data.staff.some((s) => s.rate.status === 'ok');
+
+  return (
+    <section className="mt-6 rounded-xl bg-card p-4 shadow-card">
+      <p className="text-xs font-medium uppercase tracking-wide text-faint">Barberos · recompra</p>
+      <p className="mt-1 text-sm text-ink-2">
+        De los clientes que atendió cada barbero, cuántos <span className="font-medium">volvieron a él</span>.
+        No es cuántos cortes hizo — es si su gente regresa.
+      </p>
+
+      {avgRate !== null ? (
+        <p className="mt-2 text-sm text-ink-2">
+          Promedio del local:{' '}
+          <span className="font-semibold tabular-nums text-ink">{pct(avgRate)}%</span>
+          <span className="text-faint"> — la línea de referencia en cada barra.</span>
+        </p>
+      ) : (
+        <p className="mt-2 text-sm text-faint">Aún juntando historia de recompra del local.</p>
+      )}
+
+      <ul className="mt-3 divide-y divide-line">
+        {data.staff.map((row) => (
+          <BarberoRow key={row.staffId} row={row} avgRate={avgRate} />
+        ))}
+      </ul>
+
+      {/* Caveat de justicia — el número se conversa, no se castiga. */}
+      <div className="mt-3 rounded-xl border-l-4 border-l-line-2 bg-tint-1/40 px-3 py-2">
+        <p className="text-[11px] text-ink-2">
+          La recompra cambia por horario, antigüedad o tipo de cliente. Un barbero con menos
+          clientes no es peor — tiene menos datos. Úsalo para conversar, no para castigar.
+        </p>
+      </div>
+
+      <p className="mt-2 px-1 text-[11px] text-faint">
+        {anyRate ? 'Histórico. ' : ''}Un cliente entra al cálculo cuando pasaron al menos {data.matureDays} días
+        desde su primera visita con ese barbero (antes, aún está en tiempo de volver).
+      </p>
+    </section>
+  );
+}
+
+export default function NegocioView({ revenue, occupancy, barberos }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult }): React.ReactElement {
   const { thisMonth, comparison, months, hasAnyRevenue } = revenue;
 
   return (
@@ -208,10 +312,8 @@ export default function NegocioView({ revenue, occupancy }: { revenue: NegocioRe
       {/* ── Ocupación (PR-Neg-2) ── */}
       <OcupacionBlock occ={occupancy} />
 
-      {/* Próximo bloque de Negocio (PR-Neg-3). */}
-      <p className="mt-6 px-1 text-xs text-faint">
-        El desempeño por barbero llega pronto a esta pestaña.
-      </p>
+      {/* ── Barberos · recompra de héroe (PR-Neg-3) ── */}
+      <BarberosBlock data={barberos} />
     </div>
   );
 }
