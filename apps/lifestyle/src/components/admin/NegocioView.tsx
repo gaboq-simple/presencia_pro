@@ -1,11 +1,11 @@
-// ─── Pestaña "Negocio" — la operación (PR-Neg-1: Ingresos) ────────────────────
-// Server Component presentacional. Lectura pura (no muta nada). Bloque Ingresos:
-// héroe del mes en curso (precio SELLADO), comparación con el mismo tramo del mes
-// anterior, y la serie de 6 meses (la del mes en curso marcada PARCIAL).
-// Copy sin promesas: muestra lo real + comparación honesta, cero proyección (eso es
-// PR-Neg-2, ocupación). Tokens Zentriq-claro.
+// ─── Pestaña "Negocio" — la operación ─────────────────────────────────────────
+// Server Component presentacional. Lectura pura (no muta nada).
+// PR-Neg-1: Ingresos (héroe sellado + comparación mismo-tramo + 6 meses).
+// PR-Neg-2: Ocupación (heatmap POSITIVO día×hora + huecos + potencial hedged).
+// Copy sin promesas. Tokens Zentriq-claro.
 
 import type { NegocioRevenue } from '@/lib/negocioMetrics';
+import type { OccupancyResult } from '@/lib/occupancy';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 function money(n: number): string {
@@ -57,7 +57,118 @@ function MonthlyBars({ months }: { months: NegocioRevenue['months'] }): React.Re
   );
 }
 
-export default function NegocioView({ revenue }: { revenue: NegocioRevenue }): React.ReactElement {
+// ── Ocupación: heatmap positivo día×hora ──
+const DOW_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+function fmtHour(h: number): string {
+  const am = h < 12;
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}${am ? 'a' : 'p'}`;
+}
+// Verde creciente con ocupación (llenar = orgullo). Vacío = teal muy pálido, calmo.
+function cellBg(intensity: number): string {
+  const alpha = 0.08 + intensity * 0.82; // 0.08 (pálido) → 0.9 (lleno)
+  return `rgba(29,158,117,${alpha.toFixed(2)})`; // teal operativo #1D9E75
+}
+
+function Heatmap({ occ }: { occ: OccupancyResult }): React.ReactElement {
+  const cellOf = new Map(occ.cells.map((c) => [`${c.dow}:${c.hour}`, c]));
+  const isOpportunity = new Set(occ.opportunities.map((o) => `${o.dow}:${o.hour}`));
+  const isStar = occ.starCell ? `${occ.starCell.dow}:${occ.starCell.hour}` : '';
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <table className="border-separate" style={{ borderSpacing: '2px' }}>
+        <thead>
+          <tr>
+            <th className="w-8" />
+            {occ.hours.map((h) => (
+              <th key={h} className="px-0.5 text-[9px] font-normal text-faint tabular-nums">{fmtHour(h)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {occ.dows.map((dow) => (
+            <tr key={dow}>
+              <td className="pr-1 text-[10px] text-faint">{DOW_SHORT[dow]}</td>
+              {occ.hours.map((h) => {
+                const c = cellOf.get(`${dow}:${h}`);
+                const k = `${dow}:${h}`;
+                if (!c || c.capacity === 0 && occ.mode === 'capacity') {
+                  return <td key={h} className="h-6 w-6 rounded-sm bg-past-bg/40" title="cerrado" />;
+                }
+                const opp = isOpportunity.has(k);
+                return (
+                  <td
+                    key={h}
+                    className={`h-6 w-6 rounded-sm text-center align-middle ${opp ? 'ring-2 ring-amber-border' : ''}`}
+                    style={{ backgroundColor: cellBg(c.intensity) }}
+                    title={`${DOW_SHORT[dow]} ${fmtHour(h)} · ${occ.mode === 'capacity' ? `${Math.round((c.occPct ?? 0) * 100)}% lleno` : `${c.booked} citas`}`}
+                  >
+                    {k === isStar && <span className="text-[10px] leading-none">★</span>}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function OcupacionBlock({ occ }: { occ: OccupancyResult }): React.ReactElement | null {
+  if (occ.cells.length === 0) return null; // sin datos → no renderiza (sin crash)
+
+  const capMode = occ.mode === 'capacity';
+  const pct = capMode && occ.overallPct !== null ? Math.round(occ.overallPct * 100) : null;
+
+  return (
+    <section className="mt-6 rounded-xl bg-card p-4 shadow-card">
+      <p className="text-xs font-medium uppercase tracking-wide text-faint">Ocupación · semana típica</p>
+
+      {capMode && pct !== null ? (
+        <p className="mt-2 text-sm text-ink-2">
+          <span className="text-2xl font-bold tabular-nums text-ink">{pct}%</span> de tus sillas ocupadas.
+          El otro {100 - pct}% son huecos que igual pagás — ahí está tu espacio para crecer.
+        </p>
+      ) : (
+        <p className="mt-2 text-sm text-faint">
+          Definí los horarios de tus barberos para ver ocupación real; por ahora, el patrón de concurrencia.
+        </p>
+      )}
+
+      <Heatmap occ={occ} />
+
+      {capMode && occ.opportunities.length > 0 && (
+        <div className="mt-3 rounded-xl border-l-4 border-l-amber-border bg-amber-tint/40 px-3 py-2">
+          <p className="text-sm font-medium text-ink">Tu mayor oportunidad</p>
+          <p className="mt-0.5 text-sm text-ink-2">
+            {occ.opportunities.map((o) => `${DOW_SHORT[o.dow]} ${fmtHour(o.hour)}`).join(' y ')}
+            {' '}está{occ.opportunities.length > 1 ? 'n' : ''} casi {occ.opportunities.length > 1 ? 'vacías' : 'vacía'}.
+          </p>
+          {occ.potentialMonthly !== null && occ.potentialMonthly > 0 && (
+            <p className="mt-1 text-xs text-faint">
+              Potencial estimado: hasta ~{money(occ.potentialMonthly)}/mes si trabajás esas franjas. No es un resultado garantizado.
+            </p>
+          )}
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            title="Próximamente"
+            className="mt-2 cursor-not-allowed rounded-lg border border-teal-border bg-tint-1 px-3 py-1.5 text-sm font-medium text-teal-ink opacity-70"
+          >
+            Crear promo
+          </button>
+        </div>
+      )}
+      <p className="mt-2 px-1 text-[11px] text-faint">
+        Ocupación estimada sobre los horarios de tus barberos (servicio típico), últimas 8 semanas.
+      </p>
+    </section>
+  );
+}
+
+export default function NegocioView({ revenue, occupancy }: { revenue: NegocioRevenue; occupancy: OccupancyResult }): React.ReactElement {
   const { thisMonth, comparison, months, hasAnyRevenue } = revenue;
 
   return (
@@ -94,9 +205,12 @@ export default function NegocioView({ revenue }: { revenue: NegocioRevenue }): R
         )}
       </section>
 
-      {/* Próximos bloques de Negocio (PR-Neg-2/3). */}
+      {/* ── Ocupación (PR-Neg-2) ── */}
+      <OcupacionBlock occ={occupancy} />
+
+      {/* Próximo bloque de Negocio (PR-Neg-3). */}
       <p className="mt-6 px-1 text-xs text-faint">
-        Ocupación, huecos y barberos llegan pronto a esta pestaña.
+        El desempeño por barbero llega pronto a esta pestaña.
       </p>
     </div>
   );
