@@ -77,7 +77,10 @@ type ExceptionRow     = { staff_id: string; exception_date: string; available: b
  * @param requestedDate     Date en noon UTC para la misma fecha (para isSameDayInTZ)
  * @param tz                IANA timezone del negocio
  */
-function generateSlotsForStaff(
+// Exportada (solo visibilidad, sin cambio de comportamiento) para reusarla como
+// primitiva de CAPACIDAD en el dashboard del dueño (Negocio · ocupación): capacidad
+// = generar los slots con ocupación vacía. Fuente única de "qué es un slot".
+export function generateSlotsForStaff(
   staffId: string,
   staffName: string,
   availability: StaffAvailabilityRow,
