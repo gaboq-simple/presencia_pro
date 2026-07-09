@@ -28,7 +28,9 @@ import {
   refreshAssistantAppointments,
   createAssistantAppointment,
   noShowAppointment,
+  getActiveConversations,
 } from '@/app/staff/assistant-actions';
+import ConversationList from './ConversationList';
 import PanoramaTimeline, {
   type MoveState,
   type WalkinRequest,
@@ -210,11 +212,30 @@ export default function AssistantControlDesk({
   const dateRef = useRef(date);
   dateRef.current = date;
 
+  // ── Handoff bot→humano: acceso al chat de conversaciones ────────────────────
+  // Reusa los componentes existentes (ConversationList → ChatPanel), que se
+  // autoabastecen vía server actions. Aquí solo abrimos/cerramos el sheet y
+  // contamos las conversaciones en modo 'human' para el badge del botón.
+  const [showConversations, setShowConversations] = useState(false);
+  const [humanCount, setHumanCount] = useState(0);
+
   // Polling cada 20s — refresca las citas del día sin recargar (cita nueva del bot,
   // cambio de otro dispositivo). Se SALTA si hay un gesto en curso o una mutación en
   // vuelo → no le regenera el panorama al asistente a mitad de un reacomodo.
   useEffect(() => {
+    // Conteo de conversaciones humanas para el badge. Se refresca aunque haya un
+    // gesto en curso (el guard de abajo solo protege el panorama, no el badge).
+    const pollHumanCount = async () => {
+      try {
+        const convs = await getActiveConversations();
+        setHumanCount(convs.filter((c) => c.sessionMode === 'human').length);
+      } catch {
+        // silencioso — el próximo tick reintenta
+      }
+    };
+    void pollHumanCount(); // conteo inicial
     const id = setInterval(async () => {
+      void pollHumanCount();
       if (interactingRef.current || mutatingRef.current) return;
       try {
         const fresh = await refreshAssistantAppointments(dateRef.current);
@@ -719,6 +740,33 @@ export default function AssistantControlDesk({
             </div>
 
             <div className="ml-auto flex items-center gap-2">
+              {/* Conversaciones (handoff bot→humano) — abre ConversationList */}
+              <button
+                onClick={() => setShowConversations(true)}
+                aria-label="Conversaciones de WhatsApp"
+                className="relative flex items-center gap-1.5 rounded-pill border border-line px-3 py-1.5 text-sm font-medium text-ink-2 transition hover:bg-canvas"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+                  />
+                </svg>
+                Conversaciones
+                {humanCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow-500 px-1 text-[10px] font-bold text-white">
+                    {humanCount > 9 ? '9+' : humanCount}
+                  </span>
+                )}
+              </button>
               {/* Buscar cliente → pieza aparte (searchCustomers), fuera del núcleo PR-5. */}
               <button
                 disabled
@@ -840,6 +888,15 @@ export default function AssistantControlDesk({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Chat de conversaciones (handoff). ConversationList/ChatPanel usan z-20/z-30
+          internos; el wrapper crea un stacking context a z-[60] para quedar por
+          encima de la hoja de walk-in (z-40) y el toast (z-50) del desk. */}
+      {showConversations && (
+        <div className="relative z-[60]">
+          <ConversationList onClose={() => setShowConversations(false)} />
         </div>
       )}
 
