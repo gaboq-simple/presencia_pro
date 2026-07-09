@@ -878,7 +878,15 @@ export async function searchCustomers(
  */
 export async function takeoverConversation(customerPhone: string): Promise<void> {
   const session = await requireAssistantSession();
-  if (!session.staff_id) throw new Error('Se requiere identificación de staff para tomar control');
+  // Identidad del handoff: el barbero (login por PIN) se atribuye a su staff_id;
+  // la recepción/asistente (login por token, sin staff_id) toma control A NIVEL
+  // NEGOCIO → taken_by NULL. Cualquier otro rol sin identidad válida se rechaza.
+  const isBarber = session.role === 'barber' && !!session.staff_id;
+  const isAssistant = session.role === 'assistant';
+  if (!isBarber && !isAssistant) {
+    throw new Error('Se requiere identificación de staff para tomar control');
+  }
+  const takenBy = isBarber ? session.staff_id : null;
   const supabase = getServiceClient();
 
   // Leer estado previo para no enviar aviso si ya estaba en modo humano
@@ -894,7 +902,7 @@ export async function takeoverConversation(customerPhone: string): Promise<void>
     .from('bot_conversations')
     .update({
       session_mode: 'human',
-      taken_by:     session.staff_id,
+      taken_by:     takenBy,
       taken_at:     new Date().toISOString(),
     })
     .eq('business_id', session.business_id)
@@ -982,7 +990,14 @@ export async function sendMessageFromPanel(
   message: string,
 ): Promise<{ sent: boolean }> {
   const session = await requireAssistantSession();
-  if (!session.staff_id) throw new Error('Se requiere identificación de staff para enviar mensajes');
+  // Mismo criterio de identidad que el takeover: barbero (staff_id) o
+  // recepción/asistente del negocio. El mensaje del asistente se persiste
+  // sent_by:'human' con staff_id NULL (autoría a nivel negocio).
+  const isBarber = session.role === 'barber' && !!session.staff_id;
+  const isAssistant = session.role === 'assistant';
+  if (!isBarber && !isAssistant) {
+    throw new Error('Se requiere identificación de staff para enviar mensajes');
+  }
   const supabase = getServiceClient();
 
   // ── Verificar que la conversación está bajo control humano ────────────────
@@ -1030,7 +1045,7 @@ export async function sendMessageFromPanel(
       direction:      'outbound',
       body:           message,
       sent_by:        'human',
-      staff_id:       session.staff_id,
+      staff_id:       isBarber ? session.staff_id : null,
     })
     .then(() => {/* best-effort */}, () => {/* best-effort */});
 

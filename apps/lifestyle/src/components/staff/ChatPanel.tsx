@@ -79,6 +79,7 @@ export default function ChatPanel({
   const [messageText, setMessageText]   = useState('');
   const [loadingMsgs, setLoadingMsgs]   = useState(true);
   const [sendError, setSendError]       = useState<string | null>(null);
+  const [actionError, setActionError]   = useState<string | null>(null);
   const [isPending, startTransition]    = useTransition();
   const scrollRef                       = useRef<HTMLDivElement>(null);
 
@@ -110,18 +111,30 @@ export default function ChatPanel({
   // ── Acciones de control ────────────────────────────────────────────────────
 
   function handleTakeover() {
+    setActionError(null);
     startTransition(async () => {
-      await takeoverConversation(customerPhone);
-      setSessionMode('human');
-      onModeChange();
+      try {
+        await takeoverConversation(customerPhone);
+        setSessionMode('human');
+        onModeChange();
+      } catch (err) {
+        // Error SUAVE en el panel — nunca dejar que suba al error boundary del
+        // dashboard (tumbaría toda la vista).
+        setActionError(err instanceof Error ? err.message : 'No se pudo tomar control');
+      }
     });
   }
 
   function handleRelease() {
+    setActionError(null);
     startTransition(async () => {
-      await releaseConversation(customerPhone);
-      setSessionMode('bot');
-      onModeChange();
+      try {
+        await releaseConversation(customerPhone);
+        setSessionMode('bot');
+        onModeChange();
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'No se pudo devolver al bot');
+      }
     });
   }
 
@@ -225,6 +238,14 @@ export default function ChatPanel({
             </button>
           </div>
         </div>
+
+        {/* Aviso suave de error de acción (tomar control / devolver) — NO sube al
+            error boundary del dashboard */}
+        {actionError && (
+          <div className="shrink-0 border-b border-red-100 bg-red-50 px-4 py-2 text-center text-xs text-red-600">
+            {actionError}
+          </div>
+        )}
 
         {/* ── Área de mensajes ────────────────────────────────────────────── */}
         <div

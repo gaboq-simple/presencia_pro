@@ -175,10 +175,15 @@ export default function ConversationList({ onClose }: Props) {
                         </span>
                       </div>
 
-                      {/* Estado FSM + quien tiene control */}
+                      {/* Estado FSM + quien tiene control. Takeover a nivel negocio
+                          (recepción/asistente, sin staff) → "Recepción". */}
                       <p className="mt-0.5 truncate text-xs text-gray-500">
                         {conv.state}
-                        {conv.takenByName ? ` · ${conv.takenByName}` : ''}
+                        {conv.takenByName
+                          ? ` · ${conv.takenByName}`
+                          : conv.sessionMode === 'human'
+                            ? ' · Recepción'
+                            : ''}
                       </p>
 
                       {/* Tiempo desde último mensaje */}
