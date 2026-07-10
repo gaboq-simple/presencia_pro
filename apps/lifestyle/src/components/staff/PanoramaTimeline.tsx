@@ -373,9 +373,18 @@ export default function PanoramaTimeline({
       : dayStart;
 
   const [winStart, setWinStart] = useState<number | null>(null);
+  // La ventana NO se resetea en re-renders espurios: el poll de citas (20s) mueve
+  // dayStart, y en Hoy el tick de reloj (30s) mueve defaultStart (= nowMin−60) →
+  // antes eso reseteaba la ventana sola cada ~30s (pan "pegajoso"). Ahora solo se
+  // ajusta cuando cambia la FECHA (navegación de día intencional): ahí se PRESERVA
+  // la franja horaria que mirabas, clampeada al rango válido del nuevo día (Opción 1).
+  // El primer render usa el fallback `winStart ?? defaultStart` (no hace falta setear).
+  const prevDateRef = useRef(date);
   useEffect(() => {
-    setWinStart(defaultStart);
-  }, [defaultStart]);
+    if (prevDateRef.current === date) return; // poll / tick / re-render → preservar
+    prevDateRef.current = date;               // cambio de fecha real → ajustar
+    setWinStart((w) => Math.max(dayStart, Math.min(maxWinStart, w ?? defaultStart)));
+  }, [date, dayStart, maxWinStart, defaultStart]);
 
   const win = winStart ?? defaultStart;
   const pctOf = (min: number) => ((min - win) / WIN) * 100;
