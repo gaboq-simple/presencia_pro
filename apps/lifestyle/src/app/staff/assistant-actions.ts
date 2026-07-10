@@ -14,9 +14,19 @@ import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
 import {
   sendCancellationNotice,
-  sendRescheduleNotice,
   type MetaConfig,
 } from '@/lib/whatsapp-templates';
+
+// Ventana de gracia (debounce deslizante) del aviso de reagenda al cliente: el
+// movimiento persiste al instante, pero el WhatsApp "tu cita se movió" se encola
+// con este colchón y cada nuevo movimiento lo resetea → el cliente recibe UN solo
+// mensaje con la posición final. Ver rescheduleAppointment.
+const RESCHEDULE_NOTICE_GRACE_MIN = 4;
+
+// Umbral de magnitud: solo se avisa al cliente si la posición FINAL se corrió al
+// menos esto respecto de la ORIGINAL (antes del burst). Movimientos < umbral son
+// microajustes operativos → no molestan al cliente.
+const RESCHEDULE_NOTICE_MIN_DELTA_MIN = 30;
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -590,15 +600,22 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
 
   if (error) throw new Error(`rescheduleAppointment failed: ${error.message}`);
 
-  // Cancelar recordatorios obsoletos del horario anterior — best-effort
+  // Cancelar recordatorios obsoletos del horario anterior — best-effort. Acotado a
+  // los reminder_* a propósito: el aviso de reagenda (reschedule_notice) ahora vive
+  // PENDIENTE en esta misma tabla y su ciclo de vida lo maneja el bloque de abajo
+  // (encolar/superseder/borrar) — este cancel NO debe tocarlo.
   await supabase
     .from('scheduled_notifications')
     .update({ failed_at: new Date().toISOString() })
     .eq('appointment_id', input.appointmentId)
+    .in('type', ['reminder_24h', 'reminder_2h', 'reminder_1h'])
     .is('sent_at', null)
     .is('failed_at', null);
 
-  // ── Notificar al cliente y programar nuevos reminders — best-effort ───
+  // ── Aviso al cliente (política de magnitud + debounce) y reminders — best-effort ──
+  // El movimiento YA se persistió arriba. Acá solo: (1) el aviso "tu cita se movió"
+  // — encolado, NO inline — sujeto a umbral de 30 min y ventana deslizante; (2) los
+  // reminders reprogramados a la nueva hora (independientes del aviso).
   try {
     let customerPhone: string | null = null;
     let customerName:  string | null = null;
@@ -617,7 +634,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
       const [bizResult, staffResult] = await Promise.all([
         supabase
           .from('businesses')
-          .select('timezone, whatsapp_phone_number_id, name')
+          .select('timezone, name')
           .eq('id', session.business_id)
           .maybeSingle(),
         supabase
@@ -626,110 +643,134 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
           .eq('id', newStaffId)
           .maybeSingle(),
       ]);
-      const b             = bizResult.data as { timezone: string; whatsapp_phone_number_id: string; name: string } | null;
-      const tz            = b?.timezone ?? 'America/Mexico_City';
-      const phoneNumberId = b?.whatsapp_phone_number_id;
-      const accessToken   = process.env['WHATSAPP_ACCESS_TOKEN'];
-      const businessName  = b?.name ?? '';
-      const staffName     = (staffResult.data as { name: string } | null)?.name ?? '';
+      const b            = bizResult.data as { timezone: string; name: string } | null;
+      const tz           = b?.timezone ?? 'America/Mexico_City';
+      const businessName = b?.name ?? '';
+      const staffName    = (staffResult.data as { name: string } | null)?.name ?? '';
+      const firstName    = customerName ? customerName.split(' ')[0]! : '';
 
-      if (phoneNumberId && accessToken) {
-        const config: MetaConfig = { phoneNumberId, accessToken };
-        const oldDateStr = formatApptDate(appt.starts_at, tz);
-        const oldTimeStr = formatApptTime(appt.starts_at, tz);
+      const nowMs      = Date.now();
+      const newStart   = new Date(newStartsAt);
+      const newTimeStr = formatApptTime(newStartsAt, tz);
+
+      // ── Aviso de reagenda: encolar / superseder / borrar ──────────────────────
+      // NO se manda inline. Se encola en scheduled_notifications; el dispatcher (cron,
+      // solo prod) lo envía como texto libre cuando vence scheduled_for. La decisión
+      // se evalúa SIEMPRE sobre la posición FINAL vs la ORIGINAL (la de antes del
+      // burst, preservada en metadata.old_iso de la fila pendiente).
+      const { data: pendingRows } = await supabase
+        .from('scheduled_notifications')
+        .select('id, metadata')
+        .eq('appointment_id', input.appointmentId)
+        .eq('type', 'reschedule_notice')
+        .is('sent_at', null)
+        .is('failed_at', null)
+        .limit(1);
+      const pending = (pendingRows?.[0] ?? null) as
+        | { id: string; metadata: { old_iso?: string } | null }
+        | null;
+
+      // Origen del burst: el de la fila pendiente si existe; si no, la posición previa
+      // a ESTE movimiento (= inicio del burst). Magnitud por instante (robusta a día).
+      const originalIso = pending?.metadata?.old_iso ?? appt.starts_at;
+      const deltaMin = Math.abs(Date.parse(newStartsAt) - Date.parse(originalIso)) / 60_000;
+
+      if (deltaMin >= RESCHEDULE_NOTICE_MIN_DELTA_MIN) {
+        // Amerita aviso: encolar (o actualizar el pendiente) con la hora FINAL,
+        // preservando el origen del burst. Ventana deslizante → cada movimiento la
+        // resetea, así el cliente recibe UN mensaje cuando la agenda se asienta.
+        const graceIso   = new Date(nowMs + RESCHEDULE_NOTICE_GRACE_MIN * 60_000).toISOString();
+        const oldDateStr = formatApptDate(originalIso, tz);
+        const oldTimeStr = formatApptTime(originalIso, tz);
         const newDateStr = formatApptDate(newStartsAt, tz);
-        const newTimeStr = formatApptTime(newStartsAt, tz);
-        const firstName  = customerName ? customerName.split(' ')[0]! : '';
+        const body =
+          `Hola ${firstName}, tu cita del ${oldDateStr} a las ${oldTimeStr} fue movida al ` +
+          `${newDateStr} a las ${newTimeStr} en ${businessName}. Si necesitas cambios, responde a este mensaje.`;
 
-        await sendRescheduleNotice(
-          config,
-          customerPhone,
-          firstName,
-          oldDateStr,
-          oldTimeStr,
-          newDateStr,
-          newTimeStr,
-          businessName,
-        );
-
-        const nowIso = new Date().toISOString();
-        const nowMs  = Date.now();
-        const newStart = new Date(newStartsAt);
-
-        // Metadata for template-based sending in the dispatcher
-        const reminderMeta: Record<string, string> = {
-          customer_name: firstName,
-          service_name:  appt.service?.name ?? '',
-          staff_name:    staffName,
-          time_str:      newTimeStr,
-          business_name: businessName,
-        };
-
-        // Log del envio + nuevos reminders
-        type NotifRow = {
-          business_id:    string;
-          appointment_id: string;
-          customer_phone: string;
-          type:           string;
-          scheduled_for:  string;
-          sent_at?:       string;
-          message_body:   string;
-          metadata?:      Record<string, string>;
-        };
-
-        const notifRows: NotifRow[] = [
-          {
+        if (pending) {
+          await supabase
+            .from('scheduled_notifications')
+            .update({ scheduled_for: graceIso, message_body: body, metadata: { old_iso: originalIso } })
+            .eq('id', pending.id);
+        } else {
+          await supabase.from('scheduled_notifications').insert({
             business_id:    session.business_id,
             appointment_id: input.appointmentId,
             customer_phone: customerPhone,
             type:           'reschedule_notice',
-            scheduled_for:  nowIso,
-            sent_at:        nowIso,
-            message_body:   `Hola ${firstName}, tu cita del ${oldDateStr} a las ${oldTimeStr} fue movida al ${newDateStr} a las ${newTimeStr} en ${businessName}. Si necesitas cambios, responde a este mensaje.`,
-          },
-        ];
-
-        // Nuevos reminders para la nueva fecha (solo si quedan en el futuro)
-        const at24h = new Date(newStart.getTime() - 24 * 60 * 60_000);
-        if (at24h.getTime() > nowMs) {
-          notifRows.push({
-            business_id:    session.business_id,
-            appointment_id: input.appointmentId,
-            customer_phone: customerPhone,
-            type:           'reminder_24h',
-            scheduled_for:  at24h.toISOString(),
-            message_body:   `Hola, manana tienes tu cita a las ${newTimeStr}. Te esperamos!`,
-            metadata:       reminderMeta,
+            scheduled_for:  graceIso,
+            message_body:   body,
+            metadata:       { old_iso: originalIso },
           });
         }
+      } else if (pending) {
+        // La posición final quedó a < umbral del origen (incluye net-zero / deshacer)
+        // → ya no amerita aviso: borrar el pendiente del burst. Sin fila = sin mensaje.
+        await supabase.from('scheduled_notifications').delete().eq('id', pending.id);
+      }
 
-        const at2h = new Date(newStart.getTime() - 2 * 60 * 60_000);
-        if (at2h.getTime() > nowMs) {
-          notifRows.push({
-            business_id:    session.business_id,
-            appointment_id: input.appointmentId,
-            customer_phone: customerPhone,
-            type:           'reminder_2h',
-            scheduled_for:  at2h.toISOString(),
-            message_body:   `Hola, en 2 horas tienes tu cita a las ${newTimeStr}. Te esperamos!`,
-            metadata:       reminderMeta,
-          });
-        }
+      // ── Reminders 24h/2h/1h para la nueva hora (independiente del aviso) ───────
+      // Siempre reflejan la hora vigente de la cita; no son el mensaje "se movió".
+      const reminderMeta: Record<string, string> = {
+        customer_name: firstName,
+        service_name:  appt.service?.name ?? '',
+        staff_name:    staffName,
+        time_str:      newTimeStr,
+        business_name: businessName,
+      };
 
-        const at1h = new Date(newStart.getTime() - 1 * 60 * 60_000);
-        if (at1h.getTime() > nowMs) {
-          notifRows.push({
-            business_id:    session.business_id,
-            appointment_id: input.appointmentId,
-            customer_phone: customerPhone,
-            type:           'reminder_1h',
-            scheduled_for:  at1h.toISOString(),
-            message_body:   `Hola, te recordamos tu cita hoy a las ${newTimeStr}.`,
-            metadata:       reminderMeta,
-          });
-        }
+      type ReminderRow = {
+        business_id:    string;
+        appointment_id: string;
+        customer_phone: string;
+        type:           string;
+        scheduled_for:  string;
+        message_body:   string;
+        metadata:       Record<string, string>;
+      };
+      const reminderRows: ReminderRow[] = [];
 
-        await supabase.from('scheduled_notifications').insert(notifRows);
+      const at24h = new Date(newStart.getTime() - 24 * 60 * 60_000);
+      if (at24h.getTime() > nowMs) {
+        reminderRows.push({
+          business_id:    session.business_id,
+          appointment_id: input.appointmentId,
+          customer_phone: customerPhone,
+          type:           'reminder_24h',
+          scheduled_for:  at24h.toISOString(),
+          message_body:   `Hola, manana tienes tu cita a las ${newTimeStr}. Te esperamos!`,
+          metadata:       reminderMeta,
+        });
+      }
+
+      const at2h = new Date(newStart.getTime() - 2 * 60 * 60_000);
+      if (at2h.getTime() > nowMs) {
+        reminderRows.push({
+          business_id:    session.business_id,
+          appointment_id: input.appointmentId,
+          customer_phone: customerPhone,
+          type:           'reminder_2h',
+          scheduled_for:  at2h.toISOString(),
+          message_body:   `Hola, en 2 horas tienes tu cita a las ${newTimeStr}. Te esperamos!`,
+          metadata:       reminderMeta,
+        });
+      }
+
+      const at1h = new Date(newStart.getTime() - 1 * 60 * 60_000);
+      if (at1h.getTime() > nowMs) {
+        reminderRows.push({
+          business_id:    session.business_id,
+          appointment_id: input.appointmentId,
+          customer_phone: customerPhone,
+          type:           'reminder_1h',
+          scheduled_for:  at1h.toISOString(),
+          message_body:   `Hola, te recordamos tu cita hoy a las ${newTimeStr}.`,
+          metadata:       reminderMeta,
+        });
+      }
+
+      if (reminderRows.length > 0) {
+        await supabase.from('scheduled_notifications').insert(reminderRows);
       }
     }
   } catch {
