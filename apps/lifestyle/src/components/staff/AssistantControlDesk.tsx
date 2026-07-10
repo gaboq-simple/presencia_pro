@@ -762,7 +762,7 @@ export default function AssistantControlDesk({
                 </svg>
                 Conversaciones
                 {humanCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow-500 px-1 text-[10px] font-bold text-white">
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-pill bg-teal px-1 text-[10px] font-bold text-card">
                     {humanCount > 9 ? '9+' : humanCount}
                   </span>
                 )}

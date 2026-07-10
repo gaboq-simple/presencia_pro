@@ -35,9 +35,9 @@ type Props = {
 // ─── Config visual ────────────────────────────────────────────────────────────
 
 const MODE_BADGE: Record<string, string> = {
-  human:  'bg-yellow-100 text-yellow-800',
-  paused: 'bg-gray-100 text-gray-600',
-  bot:    'bg-green-100 text-green-800',
+  human:  'bg-tint-1 text-teal-ink',
+  paused: 'bg-amber-tint text-amber',
+  bot:    'bg-past-bg text-past-ink',
 };
 
 const MODE_LABEL: Record<string, string> = {
@@ -160,26 +160,26 @@ export default function ChatPanel({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-20 bg-black/40"
+        className="fixed inset-0 z-20 bg-ink/30"
         onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Sheet — altura fija para dejar espacio al teclado en móvil */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex max-w-xl flex-col rounded-t-2xl bg-white shadow-2xl"
+        className="fixed bottom-0 left-0 right-0 z-30 mx-auto flex max-w-xl flex-col rounded-t-card border border-line bg-card shadow-hero"
         style={{ height: '85vh' }}
       >
         {/* Handle */}
-        <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-gray-200" />
+        <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-pill bg-line-2" />
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="shrink-0 border-b border-gray-100 px-3 py-3">
+        <div className="shrink-0 border-b border-line px-3 py-3">
           <div className="flex items-center gap-2">
             {/* Botón volver */}
             <button
               onClick={onBack}
-              className="shrink-0 rounded p-1 text-gray-400 hover:text-gray-600"
+              className="shrink-0 rounded p-1 text-faint hover:text-ink-2"
               aria-label="Volver"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
@@ -194,12 +194,12 @@ export default function ChatPanel({
             {/* Teléfono + badge */}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className="truncate text-sm font-semibold tabular-nums text-gray-900">
+                <p className="truncate text-sm font-semibold tabular-nums text-ink">
                   {formatPhone(customerPhone)}
                 </p>
                 <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    MODE_BADGE[sessionMode] ?? 'bg-gray-100 text-gray-500'
+                  className={`shrink-0 rounded-pill px-2 py-0.5 text-[10px] font-semibold ${
+                    MODE_BADGE[sessionMode] ?? 'bg-past-bg text-past-ink'
                   }`}
                 >
                   {MODE_LABEL[sessionMode] ?? sessionMode}
@@ -212,7 +212,7 @@ export default function ChatPanel({
               <button
                 onClick={handleTakeover}
                 disabled={isPending}
-                className="shrink-0 rounded-lg bg-yellow-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
+                className="shrink-0 rounded-pill bg-teal px-3 py-1.5 text-xs font-semibold text-card shadow-card transition hover:opacity-90 disabled:opacity-50"
               >
                 {isPending ? '…' : 'Tomar control'}
               </button>
@@ -220,7 +220,7 @@ export default function ChatPanel({
               <button
                 onClick={handleRelease}
                 disabled={isPending}
-                className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                className="shrink-0 rounded-pill border border-line bg-card px-3 py-1.5 text-xs font-medium text-ink-2 transition hover:bg-canvas disabled:opacity-50"
               >
                 {isPending ? '…' : 'Devolver al bot'}
               </button>
@@ -229,7 +229,7 @@ export default function ChatPanel({
             {/* Cerrar todo */}
             <button
               onClick={onClose}
-              className="shrink-0 rounded p-1 text-gray-400 hover:text-gray-600"
+              className="shrink-0 rounded p-1 text-faint hover:text-ink-2"
               aria-label="Cerrar"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
@@ -242,7 +242,7 @@ export default function ChatPanel({
         {/* Aviso suave de error de acción (tomar control / devolver) — NO sube al
             error boundary del dashboard */}
         {actionError && (
-          <div className="shrink-0 border-b border-red-100 bg-red-50 px-4 py-2 text-center text-xs text-red-600">
+          <div className="shrink-0 border-b border-red-border bg-red-tint px-4 py-2 text-center text-xs text-red-ink">
             {actionError}
           </div>
         )}
@@ -253,9 +253,9 @@ export default function ChatPanel({
           className="flex-1 space-y-2 overflow-y-auto px-4 py-3"
         >
           {loadingMsgs ? (
-            <p className="py-8 text-center text-sm text-gray-400">Cargando mensajes…</p>
+            <p className="py-8 text-center text-sm text-faint">Cargando mensajes…</p>
           ) : messages.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-400">
+            <p className="py-8 text-center text-sm text-faint">
               Sin mensajes registrados para esta conversación.
             </p>
           ) : (
@@ -267,12 +267,12 @@ export default function ChatPanel({
                   className={`flex ${isCustomer ? 'justify-start' : 'justify-end'}`}
                 >
                   <div
-                    className={`max-w-[75%] rounded-2xl px-3 py-2 ${
+                    className={`max-w-[75%] rounded-card px-3 py-2 ${
                       isCustomer
-                        ? 'rounded-tl-sm bg-gray-100 text-gray-900'
+                        ? 'rounded-tl-sm border border-line bg-canvas text-ink'
                         : msg.sentBy === 'bot'
-                        ? 'rounded-tr-sm bg-gray-800 text-white'
-                        : 'rounded-tr-sm bg-blue-600 text-white'
+                        ? 'rounded-tr-sm bg-ink text-card'
+                        : 'rounded-tr-sm bg-teal-ink text-card'
                     }`}
                   >
                     {/* Label del remitente (solo mensajes salientes) */}
@@ -284,7 +284,7 @@ export default function ChatPanel({
                     <p className="text-sm leading-snug">{msg.body}</p>
                     <p
                       className={`mt-0.5 text-[10px] ${
-                        isCustomer ? 'text-gray-400' : 'opacity-60'
+                        isCustomer ? 'text-faint' : 'opacity-60'
                       }`}
                     >
                       {formatTime(msg.createdAt)}
@@ -297,14 +297,14 @@ export default function ChatPanel({
         </div>
 
         {/* ── Input de mensaje ────────────────────────────────────────────── */}
-        <div className="shrink-0 border-t border-gray-100 px-4 pb-6 pt-3">
+        <div className="shrink-0 border-t border-line px-4 pb-6 pt-3">
           {sessionMode !== 'human' && (
-            <p className="mb-2 text-center text-xs text-gray-400">
+            <p className="mb-2 text-center text-xs text-faint">
               Toma control para enviar mensajes
             </p>
           )}
           {sendError && (
-            <p className="mb-1 text-xs text-red-600">{sendError}</p>
+            <p className="mb-1 text-xs text-red-ink">{sendError}</p>
           )}
           <div className="flex items-end gap-2">
             <textarea
@@ -320,12 +320,12 @@ export default function ChatPanel({
               rows={2}
               maxLength={1000}
               placeholder={sessionMode === 'human' ? 'Escribe un mensaje…' : '—'}
-              className="flex-1 resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400 disabled:placeholder-gray-300"
+              className="flex-1 resize-none rounded-card border border-line px-3 py-2 text-sm outline-none focus:border-teal-border disabled:bg-canvas disabled:text-faint disabled:placeholder-faint"
             />
             <button
               onClick={() => void handleSend()}
               disabled={sessionMode !== 'human' || !messageText.trim()}
-              className="shrink-0 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-40"
+              className="shrink-0 rounded-pill bg-teal px-4 py-2.5 text-sm font-semibold text-card shadow-card transition hover:opacity-90 disabled:opacity-40"
             >
               Enviar
             </button>

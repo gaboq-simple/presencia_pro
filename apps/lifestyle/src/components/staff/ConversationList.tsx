@@ -24,9 +24,9 @@ type Props = {
 // ─── Config visual ────────────────────────────────────────────────────────────
 
 const MODE_BADGE: Record<string, string> = {
-  human:  'bg-yellow-100 text-yellow-800',
-  paused: 'bg-gray-100 text-gray-600',
-  bot:    'bg-green-100 text-green-800',
+  human:  'bg-tint-1 text-teal-ink',
+  paused: 'bg-amber-tint text-amber',
+  bot:    'bg-past-bg text-past-ink',
 };
 
 const MODE_LABEL: Record<string, string> = {
@@ -100,25 +100,25 @@ export default function ConversationList({ onClose }: Props) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-20 bg-black/40"
+        className="fixed inset-0 z-20 bg-ink/30"
         onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Sheet */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-xl rounded-t-2xl bg-white shadow-2xl"
+        className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-xl rounded-t-card border border-line bg-card shadow-hero"
         style={{ maxHeight: '80vh' }}
       >
         {/* Handle */}
-        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-gray-200" />
+        <div className="mx-auto mt-3 h-1 w-10 rounded-pill bg-line-2" />
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Conversaciones</h2>
+            <h2 className="text-base font-semibold text-ink">Conversaciones</h2>
             {!loading && (
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-faint">
                 {humanCount > 0
                   ? `${humanCount} bajo control humano · ${conversations.length} total`
                   : `${conversations.length} conversacion${conversations.length !== 1 ? 'es' : ''}`}
@@ -127,7 +127,7 @@ export default function ConversationList({ onClose }: Props) {
           </div>
           <button
             onClick={onClose}
-            className="rounded p-1 text-gray-400 hover:text-gray-600"
+            className="rounded p-1 text-faint hover:text-ink-2"
             aria-label="Cerrar"
           >
             <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
@@ -142,9 +142,9 @@ export default function ConversationList({ onClose }: Props) {
           style={{ maxHeight: 'calc(80vh - 80px)' }}
         >
           {loading ? (
-            <p className="px-4 py-8 text-center text-sm text-gray-400">Cargando…</p>
+            <p className="px-4 py-8 text-center text-sm text-faint">Cargando…</p>
           ) : conversations.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-gray-400">
+            <p className="px-4 py-8 text-center text-sm text-faint">
               Sin conversaciones registradas.
             </p>
           ) : (
@@ -153,22 +153,22 @@ export default function ConversationList({ onClose }: Props) {
                 <li key={conv.customerPhone}>
                   <button
                     onClick={() => setSelectedPhone(conv.customerPhone)}
-                    className="flex w-full items-start gap-3 border-b border-gray-50 px-4 py-3 text-left hover:bg-gray-50 active:bg-gray-100"
+                    className="flex w-full items-start gap-3 border-b border-line-2 px-4 py-3 text-left transition hover:bg-canvas active:bg-tint-1"
                   >
                     {/* Avatar — últimos 2 dígitos del teléfono */}
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-avatar bg-ink text-xs font-semibold text-card">
                       {conv.customerPhone.replace(/\D/g, '').slice(-2)}
                     </div>
 
                     <div className="min-w-0 flex-1">
                       {/* Teléfono + badge de modo */}
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium tabular-nums text-gray-900">
+                        <p className="text-sm font-medium tabular-nums text-ink">
                           {formatPhone(conv.customerPhone)}
                         </p>
                         <span
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            MODE_BADGE[conv.sessionMode] ?? 'bg-gray-100 text-gray-500'
+                          className={`shrink-0 rounded-pill px-2 py-0.5 text-[10px] font-semibold ${
+                            MODE_BADGE[conv.sessionMode] ?? 'bg-past-bg text-past-ink'
                           }`}
                         >
                           {MODE_LABEL[conv.sessionMode] ?? conv.sessionMode}
@@ -177,7 +177,7 @@ export default function ConversationList({ onClose }: Props) {
 
                       {/* Estado FSM + quien tiene control. Takeover a nivel negocio
                           (recepción/asistente, sin staff) → "Recepción". */}
-                      <p className="mt-0.5 truncate text-xs text-gray-500">
+                      <p className="mt-0.5 truncate text-xs text-ink-2">
                         {conv.state}
                         {conv.takenByName
                           ? ` · ${conv.takenByName}`
@@ -187,14 +187,14 @@ export default function ConversationList({ onClose }: Props) {
                       </p>
 
                       {/* Tiempo desde último mensaje */}
-                      <p className="mt-0.5 text-[11px] text-gray-400">
+                      <p className="mt-0.5 text-[11px] text-faint">
                         {timeAgo(conv.lastMessage)}
                       </p>
                     </div>
 
                     {/* Chevron */}
                     <svg
-                      className="mt-1 h-4 w-4 shrink-0 text-gray-300"
+                      className="mt-1 h-4 w-4 shrink-0 text-faint"
                       fill="none"
                       stroke="currentColor"
                       strokeWidth={2}
