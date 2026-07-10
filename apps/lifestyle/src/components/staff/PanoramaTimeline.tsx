@@ -192,6 +192,12 @@ export default function PanoramaTimeline({
   const moveRef = useRef<MoveState | null>(null);
   useEffect(() => { moveRef.current = move; }, [move]);
 
+  // ── Pan de la ventana: arrastrar el FONDO de la pista mueve winStart (explorar
+  // horarios sin los chevrones). Va en una capa hermana por DEBAJO de los bloques,
+  // así el arrastre/tap de una cita nunca lo dispara. Solo arma cuando !move.
+  const panDragRef = useRef<{ startX: number; startWin: number; active: boolean } | null>(null);
+  const [panning, setPanning] = useState(false);
+
   // Salir del modo mover limpia también la confirmación pendiente y el ghost.
   useEffect(() => {
     if (!move) {
@@ -629,6 +635,51 @@ export default function PanoramaTimeline({
     window.addEventListener('pointerup', onDragUp);
   }
 
+  // ── Pan del fondo: agarrar y deslizar la timeline (1:1) ─────────────────────
+  const PAN_THRESH = 4; // px — mover más que esto arranca el pan (un click no panea)
+
+  function onPanMove(ev: PointerEvent) {
+    const p = panDragRef.current;
+    if (!p) return;
+    const dx = ev.clientX - p.startX;
+    if (!p.active) {
+      if (Math.abs(dx) < PAN_THRESH) return; // aún es un click potencial
+      p.active = true;
+      setPanning(true);
+    }
+    const anyTrack = trackRefs.current.values().next().value as HTMLDivElement | undefined;
+    const w = anyTrack?.getBoundingClientRect().width ?? 1;
+    // Agarrar-y-tirar: arrastrar a la DERECHA (dx>0) revela horas más temprano →
+    // winStart BAJA. Continuo (sigue al dedo); clamp al rango del día.
+    const next = p.startWin - (dx / w) * WIN;
+    setWinStart(Math.max(dayStart, Math.min(maxWinStart, next)));
+  }
+
+  function onPanUp() {
+    const wasActive = panDragRef.current?.active === true;
+    panDragRef.current = null;
+    window.removeEventListener('pointermove', onPanMove);
+    window.removeEventListener('pointerup', onPanUp);
+    setPanning(false);
+    if (!wasActive) return; // fue un click en el fondo, no un pan
+    // Al soltar: snap a la marca de 15 min más cercana (re-alinea eje + sub-rejilla).
+    setWinStart((cur) => {
+      const base = cur ?? defaultStart;
+      const snapped = Math.round(base / 15) * 15;
+      return Math.max(dayStart, Math.min(maxWinStart, snapped));
+    });
+  }
+
+  // mousedown/touch sobre el FONDO de la pista (no una cita): arma el pan. draggedRef
+  // no aplica acá — el pan no compite con el tap-tap de una cita (capas distintas).
+  function armPan(ev: ReactPointerEvent) {
+    if (ev.button !== 0) return; // solo botón primario (mouse); touch usa button 0
+    if (move) return;            // no panear mientras se coloca/arrastra una cita
+    panDragRef.current = { startX: ev.clientX, startWin: winRef.current, active: false };
+    window.addEventListener('pointermove', onPanMove);
+    window.addEventListener('pointerup', onPanUp);
+  }
+
   return (
     <div ref={rootRef} className="min-w-0 select-none">
       {/* ── Cabecera sticky: barra de modo-mover (si aplica) + nav + eje ── */}
@@ -803,6 +854,18 @@ export default function PanoramaTimeline({
                     backgroundSize: `${(15 / WIN) * 100}% 100%`,
                   }}
                 >
+                  {/* Capa de pan: arrastrar el fondo mueve la ventana temporal. Va
+                      DEBAJO de bloques/chips (hermana, no ancestro) → no intercepta el
+                      gesto de cita. cursor grab/grabbing = affordance de "arrastrable";
+                      touch-action pan-y deja el scroll vertical nativo y captura el
+                      horizontal para el pan. */}
+                  <div
+                    className={`absolute inset-0 ${panning ? 'cursor-grabbing' : 'cursor-grab'}`}
+                    style={{ touchAction: 'pan-y' }}
+                    onPointerDown={armPan}
+                    aria-hidden
+                  />
+
                   {/* Bandas no-disponibles: descanso + bloqueos (siempre visibles) */}
                   {unavail.map((u, i) => {
                     const l = pctOf(u.start);
@@ -813,7 +876,7 @@ export default function PanoramaTimeline({
                     return (
                       <div
                         key={`unavail-${i}`}
-                        className="absolute inset-y-0 z-[1] grid place-items-center overflow-hidden rounded-[8px] text-[9px] font-semibold text-faint"
+                        className="pointer-events-none absolute inset-y-0 z-[1] grid place-items-center overflow-hidden rounded-[8px] text-[9px] font-semibold text-faint"
                         style={{
                           left: `${cl}%`,
                           width: `${cr - cl}%`,
@@ -838,7 +901,7 @@ export default function PanoramaTimeline({
                       return (
                         <div
                           key={`gap-${i}`}
-                          className="absolute inset-y-0 grid place-items-center rounded-[8px] border border-dashed border-line text-[10px] font-medium text-faint"
+                          className="pointer-events-none absolute inset-y-0 grid place-items-center rounded-[8px] border border-dashed border-line text-[10px] font-medium text-faint"
                           style={{ left: `${cl}%`, width: `${cr - cl}%` }}
                         >
                           libre
@@ -959,7 +1022,7 @@ export default function PanoramaTimeline({
                   {/* Línea "ahora" (roja) */}
                   {nowInWin && (
                     <div
-                      className="absolute inset-y-0 z-10 w-0.5 bg-red-ink"
+                      className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-red-ink"
                       style={{ left: `${nowPct}%` }}
                       aria-hidden
                     />
