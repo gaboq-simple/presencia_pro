@@ -181,7 +181,14 @@ export default function PanoramaTimeline({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollParentRef = useRef<HTMLElement | null>(null);
   const winRef = useRef(0);
-  const dropsRef = useRef<Map<string, DropChip[]>>(new Map());
+  // Metadata reducida por carril + piso "ahora", en refs para el resolvedor del
+  // drag (corre en handlers de pointer, fuera del render). El arrastre ya NO usa los
+  // chips sugeridos: calcula la hora del cursor y la snapea a 15 min reales (ver
+  // resolveDragTarget) → suelta donde apuntás, no en el chip ralo más cercano.
+  const laneMetaRef = useRef<
+    Map<string, { availFrom: number; availTo: number; unavail: Interval[]; appts: { id: string; start: number; dur: number; name: string }[] }>
+  >(new Map());
+  const floorRef = useRef<number>(-Infinity);
   const moveRef = useRef<MoveState | null>(null);
   useEffect(() => { moveRef.current = move; }, [move]);
 
@@ -385,6 +392,11 @@ export default function PanoramaTimeline({
   const atEnd = win >= maxWinStart;
   const offNow = isToday && win !== defaultStart;
 
+  // Durante un arrastre activo, el carril muestra chips FINOS de 15 min (decisión B)
+  // para que lo que ves coincida con dónde cae el drop (que snapea a 15). El tap-tap
+  // fuera del arrastre respeta el toggle Sugeridas/Cada-15 sin cambios.
+  const dragging = drag !== null;
+
   // ── Destinos del carril durante el gesto ───────────────────────────────────
   // DURO (no se ofrece): fuera del turno / descanso / bloqueo. Dentro de ese
   // tiempo físicamente disponible se ofrecen chips: LIMPIO (no pisa nada) o
@@ -408,7 +420,7 @@ export default function PanoramaTimeline({
     for (const av of available) {
       const last = av.end - dur; // último inicio donde el servicio cabe en el tiempo disponible
       if (last < av.start - 0.5) continue;
-      const starts = fineMode ? fineStarts(av.start, av.end, dur) : suggestedStarts(av.start, av.end, dur);
+      const starts = fineMode || dragging ? fineStarts(av.start, av.end, dur) : suggestedStarts(av.start, av.end, dur);
       for (const s of starts) {
         if (s > last + 0.5) continue;
         const p = pctOf(s);
@@ -421,16 +433,31 @@ export default function PanoramaTimeline({
     return chips;
   }
 
-  // Mapa laneId → chips: MISMA fuente que el render (los botones de destino) y el
-  // hit-test del drag, para no divergir. Solo se calcula durante un gesto.
+  // Mapa laneId → chips: fuente de los botones de destino (tap-tap). Con fineMode o
+  // durante un arrastre → chips de 15 min. Solo se calcula durante un gesto.
   const dropsByLane = useMemo(() => {
     const m = new Map<string, DropChip[]>();
     if (move) for (const lane of lanes) m.set(lane.staff.id, laneDrops(lane));
     return m;
-    // laneDrops depende de move/fineMode/win/lanes/nowMin/isToday (recreada cada render).
+    // laneDrops depende de move/fineMode/dragging/win/lanes/nowMin/isToday.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [move, fineMode, win, lanes, nowMin, isToday]);
-  useEffect(() => { dropsRef.current = dropsByLane; }, [dropsByLane]);
+  }, [move, fineMode, dragging, win, lanes, nowMin, isToday]);
+
+  // Metadata por carril para el resolvedor del drag (misma aritmética que laneDrops:
+  // turno − descanso − bloqueos + citas para el solape). Se refresca con los carriles.
+  useEffect(() => {
+    const m = new Map<string, { availFrom: number; availTo: number; unavail: Interval[]; appts: { id: string; start: number; dur: number; name: string }[] }>();
+    for (const lane of lanes) {
+      m.set(lane.staff.id, {
+        availFrom: lane.availFrom,
+        availTo: lane.availTo,
+        unavail: lane.unavail,
+        appts: lane.blocks.map((b) => ({ id: b.id, start: b.start, dur: b.dur, name: b.name })),
+      });
+    }
+    laneMetaRef.current = m;
+    floorRef.current = isToday && nowMin !== null ? nowMin : -Infinity;
+  }, [lanes, isToday, nowMin]);
 
   function doDrop(laneId: string, chip: DropChip) {
     if (!move || !onPlace) return;
@@ -453,25 +480,54 @@ export default function PanoramaTimeline({
     setMove(null);
   }
 
-  // ── Drag: hit-test + movimiento + soltar + auto-pan de borde ────────────────
-  // Carril bajo el cursor (por Y) → chip válido más cercano (por X). Sin cap de
-  // distancia: soltar en un carril cae en su hueco válido más cercano (perdonador
-  // y honesto). Carril sin chips (el servicio no cabe) → sin destino → cancela.
-  function hitTest(x: number, y: number): { laneId: string; chip: DropChip | null } | null {
+  // ── Drag: resuelve el destino DONDE APUNTA EL CURSOR (no el chip ralo cercano) ──
+  // Carril bajo el cursor (por Y). Hora = posición X del cursor, snapeada a 15 min
+  // reales (:00/:15/:30/:45). Se valida contra el tiempo físicamente disponible del
+  // carril (turno − descanso − bloqueos): si el cursor cae en tiempo DURO (fuera de
+  // turno / descanso / bloqueo) → sin destino (cancela). Dentro de un hueco, se
+  // clampea al último inicio de 15 min donde cabe la duración (soltar "al final" sin
+  // rebote). El solape con otra cita NO es duro → chip ámbar (mismo ⚠ "Encajar igual").
+  function resolveDragTarget(x: number, y: number): { laneId: string; chip: DropChip | null } | null {
+    const m = moveRef.current;
+    if (!m) return null;
+    const dur = m.dur;
     for (const [laneId, el] of trackRefs.current) {
       const r = el.getBoundingClientRect();
       if (y < r.top || y > r.bottom) continue;
-      const chips = dropsRef.current.get(laneId) ?? [];
-      if (chips.length === 0) return { laneId, chip: null };
+      const meta = laneMetaRef.current.get(laneId);
+      if (!meta) return { laneId, chip: null };
+
+      const domainStart = Math.max(meta.availFrom, floorRef.current);
+      const available = availableIntervals(meta.unavail, domainStart, meta.availTo);
+
+      // Hora bajo el cursor (X) dentro de la ventana visible.
       const clampedX = Math.max(r.left, Math.min(r.right, x));
       const cursorMin = winRef.current + ((clampedX - r.left) / r.width) * WIN;
-      let best = chips[0]!;
-      let bd = Infinity;
-      for (const c of chips) {
-        const d = Math.abs(c.min - cursorMin);
-        if (d < bd) { bd = d; best = c; }
+
+      // Hueco disponible que contiene la hora del cursor. Si ninguno → tiempo DURO.
+      const iv = available.find((a) => cursorMin >= a.start - 0.5 && cursorMin <= a.end + 0.5);
+      if (!iv) return { laneId, chip: null };
+
+      const lastStart = iv.end - dur; // último inicio donde cabe la duración
+      if (lastStart < iv.start - 0.5) return { laneId, chip: null }; // hueco más chico que el servicio
+
+      // Snap a 15 min reales, clampeado al rango [primer 15-grid ≥ inicio, último que cabe].
+      const lo = Math.ceil((iv.start - 0.5) / 15) * 15;
+      const hi = Math.floor((lastStart + 0.5) / 15) * 15;
+      let targetMin: number;
+      if (lo > hi) {
+        // El hueco es tan chico que no hay marca de 15 min que quepa → usa el inicio real.
+        targetMin = iv.start;
+      } else {
+        const snapped = Math.round(cursorMin / 15) * 15;
+        targetMin = Math.min(Math.max(snapped, lo), hi);
       }
-      return { laneId, chip: best };
+
+      // Solape (blando) contra las otras citas del carril (excluye la levantada).
+      const excludeId = m.kind === 'reschedule' ? m.apptId : null;
+      const appts = meta.appts.filter((b) => b.id !== excludeId);
+      const { min: overlapMin, name: overlapName } = overlapAt(targetMin, dur, appts);
+      return { laneId, chip: { min: targetMin, soft: overlapMin > 0, overlapMin, overlapName } };
     }
     return null;
   }
@@ -523,7 +579,7 @@ export default function PanoramaTimeline({
       });
       if (!panRef.current) panRef.current = setInterval(panTick, 450);
     }
-    const target = hitTest(ev.clientX, ev.clientY);
+    const target = resolveDragTarget(ev.clientX, ev.clientY);
     setDrag({ x: ev.clientX, y: ev.clientY, laneId: target?.laneId ?? null, chip: target?.chip ?? null, name: arm.block.name });
   }
 
@@ -535,7 +591,7 @@ export default function PanoramaTimeline({
     window.removeEventListener('pointermove', onDragMove);
     window.removeEventListener('pointerup', onDragUp);
     if (!wasDragging) return; // fue un tap → el onClick del bloque lo maneja
-    const target = hitTest(ev.clientX, ev.clientY);
+    const target = resolveDragTarget(ev.clientX, ev.clientY);
     setDrag(null);
     // `move`/`onPlace` en vivo vía refs: el closure de doDrop cerró sobre el `move`
     // del render que armó el drag (null) → replicamos su lógica con el estado actual.
@@ -565,7 +621,7 @@ export default function PanoramaTimeline({
   }
 
   return (
-    <div ref={rootRef} className="min-w-0">
+    <div ref={rootRef} className="min-w-0 select-none">
       {/* ── Cabecera sticky: barra de modo-mover (si aplica) + nav + eje ── */}
       <div className="sticky top-0 z-20 border-b border-line bg-canvas">
         {/* Barra de modo mover */}
@@ -840,6 +896,9 @@ export default function PanoramaTimeline({
                           borderBottomRightRadius: clipR ? 0 : 8,
                           padding: '6px 9px',
                           pointerEvents: dimmed ? 'none' : undefined,
+                          // El gesto de arrastre es dueño del touch en tablet (sin
+                          // pelear con scroll/selección nativos); las no-movibles no.
+                          touchAction: interactive ? 'none' : undefined,
                         }}
                         title={`${fmtMin(b.start)} · ${b.name}${b.service ? ` · ${b.service}` : ''}${b.approvedOverlap ? ' · solape aprobado' : ''}`}
                       >
