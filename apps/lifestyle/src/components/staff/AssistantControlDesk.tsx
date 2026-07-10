@@ -684,15 +684,20 @@ export default function AssistantControlDesk({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-card shadow-card">
           {/* ── Header ── */}
           <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3">
-            {today && (
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <span
-                  className="inline-block h-2 w-2 rounded-pill bg-red-ink animate-data-beat motion-reduce:animate-none"
-                  aria-hidden
-                />
-                Ahora · <span className="tabular-nums">{nowLabel}</span>
-              </div>
-            )}
+            {/* Ancho fijo reservado: el indicador "Ahora" solo tiene contenido en Hoy,
+                pero su espacio se mantiene en otros días para que la navegación de día
+                NO se reposicione (los chevrones ‹ › quedan anclados). */}
+            <div className="flex w-40 items-center gap-2 text-sm font-semibold">
+              {today && (
+                <>
+                  <span
+                    className="inline-block h-2 w-2 rounded-pill bg-red-ink animate-data-beat motion-reduce:animate-none"
+                    aria-hidden
+                  />
+                  Ahora · <span className="tabular-nums">{nowLabel}</span>
+                </>
+              )}
+            </div>
 
             {/* Navegación de día */}
             <div className="flex items-center gap-1">
@@ -713,14 +718,19 @@ export default function AssistantControlDesk({
               >
                 ›
               </button>
-              {!today && (
-                <button
-                  onClick={() => navigate(todayInTz(timezone))}
-                  className="ml-1 rounded-pill border border-line px-3 py-1 text-xs font-semibold text-teal-ink transition hover:bg-tint-1"
-                >
-                  Hoy
-                </button>
-              )}
+              {/* Siempre presente para reservar su espacio; invisible en Hoy (no
+                  reflowea la nav de día al cambiar de fecha). */}
+              <button
+                onClick={() => navigate(todayInTz(timezone))}
+                disabled={today}
+                aria-hidden={today}
+                tabIndex={today ? -1 : undefined}
+                className={`ml-1 rounded-pill border border-line px-3 py-1 text-xs font-semibold text-teal-ink transition hover:bg-tint-1 ${
+                  today ? 'invisible pointer-events-none' : ''
+                }`}
+              >
+                Hoy
+              </button>
             </div>
 
             <div className="h-5 w-px bg-line" aria-hidden />
