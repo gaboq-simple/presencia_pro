@@ -90,17 +90,17 @@ export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onHov
       {count === 0 ? (
         // ── Estado tranquilo ──
         <div className="flex flex-1 flex-col">
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-            <span className="grid h-12 w-12 place-items-center rounded-pill bg-tint-1 text-teal-ink" aria-hidden>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+          {/* Indicador discreto (decisión-5): una fila slim en vez de una tarjeta
+              alta. La cabecera ya da el contexto ("0 · atención ahora") → sin párrafo. */}
+          <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
+            <span className="grid h-5 w-5 shrink-0 place-items-center rounded-pill bg-tint-1 text-teal-ink" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             </span>
             <b className="text-sm">Todo bajo control</b>
-            <p className="max-w-[26ch] text-xs text-ink-2">
-              Nadie atrasado. Cuando una cita pase de su hora sin llegar, aparece aquí.
-            </p>
           </div>
+          <div className="flex-1" aria-hidden />
           {nextUp && (
             <div className="border-t border-line px-4 py-3">
               <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-faint">
