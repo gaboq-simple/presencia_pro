@@ -22,15 +22,15 @@ import {
   getDayAppointments,
   getActiveStaffWithAvailability,
   getDayExceptions,
-  getRequireCustomerPhone,
-  getMaxLateMinutes,
+  getBusinessDeskConfig,
+  queryStaffBlocksForDay,
   computeDayRevenue,
   getPendingBlockRequests,
   getActiveStaffWithPhoto,
   getAllStaffForManagement,
   toDateStr,
 } from '@/lib/dashboard.types';
-import { getCurrentSession, getBusinessName, getBusinessTimezone, getOrganizationBranches } from '@/lib/auth';
+import { getCurrentSession, getBusinessName, getOrganizationBranches } from '@/lib/auth';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import ConsolidatedView from '@/components/admin/ConsolidatedView';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
@@ -38,7 +38,6 @@ import OwnerTabs from '@/components/admin/OwnerTabs';
 import HoyFeed from '@/components/admin/HoyFeed';
 import ClientelaView from '@/components/admin/ClientelaView';
 import NegocioView from '@/components/admin/NegocioView';
-import { getStaffBlocksForDay } from '@/app/staff/assistant-actions';
 import { getRetentionFeed, getContactadosCount } from '@/lib/retentionFeed';
 import { getClientelaStats } from '@/lib/clientelaStats';
 import { getNegocioRevenue } from '@/lib/negocioMetrics';
@@ -124,17 +123,23 @@ export default async function DashboardPage({
   // Diverge de owner/admin: monta AssistantControlDesk (diseño congelado).
   // /staff/gestion del barbero sigue usando AssistantLayout intacto.
   if (session.role === 'assistant') {
-    const [businessName, timezone, appointments, allStaff, staffBlocks, dayExceptions, requireCustomerPhone, maxLateMinutes] =
-      await Promise.all([
-        getBusinessName(businessId),
-        getBusinessTimezone(businessId),
-        getDayAppointments(businessId, date),
-        getActiveStaffWithAvailability(businessId, dayOfWeek),
-        getStaffBlocksForDay(date),
-        getDayExceptions(businessId, date),
-        getRequireCustomerPhone(businessId),
-        getMaxLateMinutes(businessId),
-      ]);
+    // Etapa 1 (paralela): config del negocio en 1 query fusionada + staff +
+    // excepciones. Ninguna depende de otra.
+    const [bizConfig, allStaff, dayExceptions] = await Promise.all([
+      getBusinessDeskConfig(businessId),
+      getActiveStaffWithAvailability(businessId, dayOfWeek),
+      getDayExceptions(businessId, date),
+    ]);
+    const { name: businessName, timezone, requireCustomerPhone, maxLateMinutes } = bizConfig;
+
+    // Etapa 2 (paralela): citas + bloqueos del día, reusando la tz y los staffIds
+    // ya cargados (evita re-consultar businesses y staff). activeStaffIds = TODOS
+    // los activos, para igualar exactamente el set del fetch interno de la action.
+    const activeStaffIds = allStaff.map((s) => s.id);
+    const [appointments, staffBlocks] = await Promise.all([
+      getDayAppointments(businessId, date, timezone),
+      queryStaffBlocksForDay(activeStaffIds, timezone, date),
+    ]);
     const staffOptions = allStaff
       .filter((s) => s.role === 'barber')
       .map((s) => ({ id: s.id, name: s.name }));
