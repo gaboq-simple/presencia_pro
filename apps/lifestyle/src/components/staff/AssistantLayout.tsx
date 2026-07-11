@@ -24,6 +24,7 @@ import type { CustomerSearchResult } from '@/app/staff/assistant-actions';
 import AssistantUpcoming from './AssistantUpcoming';
 import AssistantDayTimeline from './AssistantDayTimeline';
 import AvailabilityTimeline from './AvailabilityTimeline';
+import AssistantVerticalCalendar from './AssistantVerticalCalendar';
 import NewAppointmentForm from './NewAppointmentForm';
 import ConversationList from './ConversationList';
 import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
@@ -57,6 +58,10 @@ export type AssistantLayoutProps = {
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const POLL_MS = 30_000; // 30 segundos
+
+// Switch trivial timeline horizontal ↔ calendario vertical (rediseño trozo 1/5).
+// Poner en false para volver a AvailabilityTimeline (fallback de una linea).
+const USE_VERTICAL_CALENDAR = true;
 
 // ─── Helpers de fecha ─────────────────────────────────────────────────────────
 
@@ -369,14 +374,25 @@ export default function AssistantLayout({
             </button>
           </div>
           {timelineOpen && (
-            <AvailabilityTimeline
-              appointments={appointments}
-              staff={staffWithAvailability}
-              staffBlocks={initialStaffBlocks}
-              date={date}
-              timezone={timezone}
-              onSlotClick={openFormFromSlot}
-            />
+            USE_VERTICAL_CALENDAR ? (
+              <AssistantVerticalCalendar
+                appointments={appointments}
+                staff={staffWithAvailability}
+                staffBlocks={initialStaffBlocks}
+                date={date}
+                timezone={timezone}
+                onSlotClick={openFormFromSlot}
+              />
+            ) : (
+              <AvailabilityTimeline
+                appointments={appointments}
+                staff={staffWithAvailability}
+                staffBlocks={initialStaffBlocks}
+                date={date}
+                timezone={timezone}
+                onSlotClick={openFormFromSlot}
+              />
+            )
           )}
         </section>
 
