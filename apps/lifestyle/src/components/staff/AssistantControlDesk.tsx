@@ -703,7 +703,7 @@ export default function AssistantControlDesk({
             <div className="flex items-center gap-1">
               <button
                 onClick={() => navigate(addDays(date, -1))}
-                className="grid h-8 w-8 place-items-center rounded-pill border border-line text-ink-2 transition hover:bg-canvas"
+                className="grid h-8 w-8 place-items-center rounded-pill border border-line text-ink-2 transition hover:bg-canvas active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
                 aria-label="Día anterior"
               >
                 ‹
@@ -713,7 +713,7 @@ export default function AssistantControlDesk({
               </span>
               <button
                 onClick={() => navigate(addDays(date, 1))}
-                className="grid h-8 w-8 place-items-center rounded-pill border border-line text-ink-2 transition hover:bg-canvas"
+                className="grid h-8 w-8 place-items-center rounded-pill border border-line text-ink-2 transition hover:bg-canvas active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
                 aria-label="Día siguiente"
               >
                 ›
@@ -725,7 +725,7 @@ export default function AssistantControlDesk({
                 disabled={today}
                 aria-hidden={today}
                 tabIndex={today ? -1 : undefined}
-                className={`ml-1 rounded-pill border border-line px-3 py-1 text-xs font-semibold text-teal-ink transition hover:bg-tint-1 ${
+                className={`ml-1 rounded-pill border border-line px-3 py-1 text-xs font-semibold text-teal-ink transition hover:bg-tint-1 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink ${
                   today ? 'invisible pointer-events-none' : ''
                 }`}
               >
@@ -754,7 +754,7 @@ export default function AssistantControlDesk({
               <button
                 onClick={() => setShowConversations(true)}
                 aria-label="Conversaciones de WhatsApp"
-                className="relative flex items-center gap-1.5 rounded-pill border border-line px-3 py-1.5 text-sm font-medium text-ink-2 transition hover:bg-canvas"
+                className="relative flex items-center gap-1.5 rounded-pill border border-line px-3 py-1.5 text-sm font-medium text-ink-2 transition hover:bg-canvas active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
               >
                 <svg
                   className="h-4 w-4"
@@ -788,7 +788,7 @@ export default function AssistantControlDesk({
               <button
                 onClick={() => setSheetOpen(true)}
                 disabled={walkin !== null}
-                className="rounded-pill border border-teal-border bg-tint-1 px-3 py-1.5 text-sm font-semibold text-teal-ink transition hover:bg-tint-2 disabled:opacity-40"
+                className="rounded-pill border border-teal-border bg-tint-1 px-3 py-1.5 text-sm font-semibold text-teal-ink transition hover:bg-tint-2 enabled:active:scale-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
               >
                 + Walk-in
               </button>

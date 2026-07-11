@@ -755,7 +755,7 @@ export default function PanoramaTimeline({
             onClick={() => setWin(win - NAV_STEP)}
             disabled={atStart}
             aria-label="Ver antes"
-            className="grid h-7 w-7 place-items-center rounded-pill border border-line text-sm text-ink-2 transition enabled:hover:bg-card disabled:opacity-40"
+            className="grid h-7 w-7 place-items-center rounded-pill border border-line text-sm text-ink-2 transition enabled:hover:bg-card enabled:active:scale-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
           >
             ‹
           </button>
@@ -766,18 +766,22 @@ export default function PanoramaTimeline({
             onClick={() => setWin(win + NAV_STEP)}
             disabled={atEnd}
             aria-label="Ver después"
-            className="grid h-7 w-7 place-items-center rounded-pill border border-line text-sm text-ink-2 transition enabled:hover:bg-card disabled:opacity-40"
+            className="grid h-7 w-7 place-items-center rounded-pill border border-line text-sm text-ink-2 transition enabled:hover:bg-card enabled:active:scale-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
           >
             ›
           </button>
+          {/* Recentra la ventana en el foco del día ("ahora" en Hoy, inicio del turno
+              en otros días). Renombrado de "Ahora" → "Centrar" para no chocar con el
+              reloj "Ahora · HH:MM" del header (eran el mismo label, cosas distintas). */}
           <button
             onClick={() => setWin(defaultStart)}
-            className={`ml-1 flex items-center gap-1.5 rounded-pill border px-3 py-1 text-xs font-semibold transition ${
+            aria-label="Centrar la vista en ahora"
+            className={`ml-1 flex items-center gap-1.5 rounded-pill border px-3 py-1 text-xs font-semibold transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink ${
               offNow ? 'border-teal-border bg-tint-1 text-teal-ink' : 'border-line text-ink-2 hover:bg-card'
             }`}
           >
             {offNow && <span className="inline-block h-1.5 w-1.5 rounded-pill bg-red-ink" aria-hidden />}
-            Ahora
+            Centrar
           </button>
           <span className="ml-auto text-xs text-faint">
             {appointments.filter((a) => a.status !== 'cancelled').length} citas · {staff.length} barberos
@@ -951,7 +955,7 @@ export default function PanoramaTimeline({
                         }
                         role={interactive ? 'button' : undefined}
                         aria-label={interactive ? `Mover cita de ${b.name}` : undefined}
-                        className={`absolute inset-y-0 overflow-hidden border border-line ${st.bg} shadow-card transition-all ${
+                        className={`absolute inset-y-0 overflow-hidden border border-line ${st.bg} shadow-card transition ${
                           b.state === 'late' && !move ? 'animate-data-beat motion-reduce:animate-none' : ''
                         } ${interactive ? 'cursor-pointer' : ''} ${
                           lifted ? 'z-20 -translate-y-1 shadow-hero ring-2 ring-ink' : ''
