@@ -47,6 +47,34 @@ export async function handleConfirmed(
   const startsAt = new Date(context.selectedSlot);
   const endsAt   = new Date(startsAt.getTime() + service.duration_minutes * 60_000);
 
+  // ── Guard "no agendar en el pasado" ───────────────────────────────────────
+  // Autoridad estricta: aunque getDayAvailability ya no ofrece horas pasadas,
+  // la hora elegida puede cruzar "ahora" entre el ofrecimiento y la confirmación
+  // (cliente que demora en responder). Referencia de "ahora" = msg.timestamp:
+  // el instante real en que llega esta confirmación, que es el reloj canónico
+  // del bot (mismo que usa el guard de office_hours en handler.ts). Comparamos
+  // instantes absolutos (epoch) → TZ-agnóstico. Si ya pasó, NO se inserta.
+  if (startsAt.getTime() <= msg.timestamp.getTime()) {
+    console.error(JSON.stringify({
+      ts:             new Date().toISOString(),
+      service:        'bot',
+      event:          'past_slot_rejected',
+      business_id:    business.id,
+      customer_phone: maskPhone(msg.customerPhone),
+      staff_id:       context.staffId,
+      starts_at:      startsAt.toISOString(),
+    }));
+    return {
+      newState:   'SHOWING_SLOTS',
+      newContext: {
+        ...context,
+        selectedSlot: undefined,
+        pendingSlots: [],
+      },
+      responseText: 'Esa hora ya pasó. Déjame buscarte el siguiente horario disponible.',
+    };
+  }
+
   // ── Pre-check: verificar que el slot sigue disponible ────────────────────
   // Defense in depth: el constraint de DB (016_no_overlapping_appointments)
   // es la última línea de defensa, pero este check previo evita un INSERT

@@ -431,7 +431,13 @@ export async function getDayAvailability(
     dedupe = 'per-barber',
   } = opts;
 
-  const minStart = isWalkIn ? addMinutes(new Date(), walkInBufferMinutes) : null;
+  // Piso "no agendar en el pasado":
+  //   walk-in     → NOW + walkInBufferMinutes (anticipación mínima; sin cambios).
+  //   reserva normal → NOW estricto (sin buffer). Antes era null (sin piso), lo que
+  //     permitía ofrecer horas ya pasadas del día de hoy. El guard de
+  //     generateSlotsForStaff solo aplica el piso cuando isSameDayInTZ(minStart,
+  //     requestedDate) → días futuros quedan intactos.
+  const minStart = isWalkIn ? addMinutes(new Date(), walkInBufferMinutes) : new Date();
   // dateStr en timezone del negocio (requestedDate es noon UTC de ese día local)
   const dateStr   = utcToLocalDateStr(requestedDate, tz);
   // weekday TZ-independiente: derivado de la fecha LOCAL del negocio, no del TZ
