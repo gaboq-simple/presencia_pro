@@ -8,8 +8,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
-import { getDayAppointments, localDayRangeUtc } from '@/lib/dashboard.types';
-import type { DashboardAppointment } from '@/lib/dashboard.types';
+import { getDayAppointments, queryStaffBlocksForDay } from '@/lib/dashboard.types';
+import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
 import {
@@ -780,15 +780,16 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
 
 // ─── Staff blocks del día (para AvailabilityTimeline) ────────────────────────
 
-export type StaffBlockForDay = {
-  staffId: string;
-  startsAt: string;  // ISO 8601 UTC
-  endsAt: string;    // ISO 8601 UTC
-};
+// Re-export para retrocompatibilidad: el tipo ahora vive en @/lib/dashboard.types
+// (junto al core queryStaffBlocksForDay). Los consumidores que lo importan desde
+// aquí (AssistantLayout, AssistantControlDesk, AvailabilityTimeline) no cambian.
+export type { StaffBlockForDay } from '@/lib/dashboard.types';
 
 /**
- * Retorna los bloques aprobados de todos los barberos del negocio para el día dado.
- * Solo status='approved' — los pending no afectan la operación.
+ * Server action: bloques aprobados de todos los barberos del negocio para el día.
+ * Deriva staffIds/tz de la sesión (scope por negocio) y delega en el core puro
+ * queryStaffBlocksForDay. Firma sin cambios — /staff/gestion y AvailabilityTimeline
+ * la siguen llamando igual. Solo status='approved' — los pending no afectan.
  */
 export async function getStaffBlocksForDay(
   date: string,
@@ -796,7 +797,7 @@ export async function getStaffBlocksForDay(
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
 
-  // 1. IDs de staff activo del negocio
+  // IDs de staff activo del negocio (scopeados por la sesión)
   const { data: staffData, error: staffErr } = await supabase
     .from('staff')
     .select('id')
@@ -808,31 +809,15 @@ export async function getStaffBlocksForDay(
   const staffIds = (staffData as { id: string }[]).map((s) => s.id);
   if (staffIds.length === 0) return [];
 
-  // 2. Bloques aprobados que se solapan con el día — límites en la TZ del negocio
-  //    (no UTC), si no se perdían los bloqueos de la tarde/noche (≥18:00 en UTC-6).
+  // tz del negocio para los límites del día
   const { data: bizRow } = await supabase
     .from('businesses')
     .select('timezone')
     .eq('id', session.business_id)
     .maybeSingle();
   const tz = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
-  const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, tz);
 
-  const { data, error } = await supabase
-    .from('staff_blocks')
-    .select('staff_id, starts_at, ends_at')
-    .in('staff_id', staffIds)
-    .eq('status', 'approved')
-    .lt('starts_at', dayEnd)
-    .gt('ends_at', dayStart);
-
-  if (error || !data) return [];
-
-  return (data as { staff_id: string; starts_at: string; ends_at: string }[]).map((b) => ({
-    staffId: b.staff_id,
-    startsAt: b.starts_at,
-    endsAt: b.ends_at,
-  }));
+  return queryStaffBlocksForDay(staffIds, tz, date);
 }
 
 // ─── Buscar cliente ───────────────────────────────────────────────────────────

@@ -326,16 +326,22 @@ export function localDayRangeUtc(date: string, timeZone: string): { start: strin
 export async function getDayAppointments(
   businessId: string,
   date: string,
+  // Opcional: tz del negocio ya cargada por el caller. Si se pasa, se evita el
+  // round-trip interno a `businesses`. Retrocompatible: sin él, se consulta.
+  timezone?: string,
 ): Promise<DashboardAppointment[]> {
   const supabase = getServiceClient();
 
   // Límites del día en la tz del negocio → instantes UTC para filtrar timestamptz.
-  const { data: bizRow } = await supabase
-    .from('businesses')
-    .select('timezone')
-    .eq('id', businessId)
-    .maybeSingle();
-  const timeZone = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
+  let timeZone = timezone;
+  if (timeZone === undefined) {
+    const { data: bizRow } = await supabase
+      .from('businesses')
+      .select('timezone')
+      .eq('id', businessId)
+      .maybeSingle();
+    timeZone = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
+  }
   const { start, end } = localDayRangeUtc(date, timeZone);
 
   const { data, error } = await supabase
@@ -446,6 +452,40 @@ export async function getMaxLateMinutes(businessId: string): Promise<number> {
   return (data as { max_late_minutes: number | null } | null)?.max_late_minutes ?? 15;
 }
 
+/**
+ * Config del negocio para la mesa de control, en UN solo round-trip a `businesses`.
+ * Fusiona lo que antes eran 4 lecturas separadas al MISMO row (getBusinessName +
+ * getBusinessTimezone + getRequireCustomerPhone + getMaxLateMinutes). Mismos
+ * fallbacks que esas 4 funciones — no cambia ningún valor observable.
+ */
+export type BusinessDeskConfig = {
+  name: string;
+  timezone: string;
+  requireCustomerPhone: boolean;
+  maxLateMinutes: number;
+};
+
+export async function getBusinessDeskConfig(businessId: string): Promise<BusinessDeskConfig> {
+  const supabase = getServiceClient();
+  const { data } = await supabase
+    .from('businesses')
+    .select('name, timezone, require_customer_phone, max_late_minutes')
+    .eq('id', businessId)
+    .maybeSingle();
+  const row = data as {
+    name: string | null;
+    timezone: string | null;
+    require_customer_phone: boolean | null;
+    max_late_minutes: number | null;
+  } | null;
+  return {
+    name:                 row?.name ?? '',
+    timezone:             row?.timezone ?? 'America/Mexico_City',
+    requireCustomerPhone: row?.require_customer_phone ?? false,
+    maxLateMinutes:       row?.max_late_minutes ?? 15,
+  };
+}
+
 export async function getDayExceptions(
   businessId: string,
   date: string,
@@ -458,6 +498,52 @@ export async function getDayExceptions(
     .eq('exception_date', date);
   if (error) throw new Error(`getDayExceptions failed: ${error.message}`);
   return (data ?? []) as DayException[];
+}
+
+// ─── Query: bloqueos aprobados del día (core reutilizable) ─────────────────────
+
+export type StaffBlockForDay = {
+  staffId: string;
+  startsAt: string;  // ISO 8601 UTC
+  endsAt: string;    // ISO 8601 UTC
+};
+
+/**
+ * Core puro de bloqueos aprobados que se solapan con el día, dado el set de
+ * staff IDs y la tz del negocio YA resueltos por el caller. Sirve a dos rutas:
+ *  - la mesa de control (dashboard/page) que ya cargó staff + tz → los reusa
+ *    (evita re-consultar `staff` y `businesses`).
+ *  - la server action `getStaffBlocksForDay` (assistant-actions), que deriva
+ *    staffIds/tz de la sesión y delega aquí.
+ * NO es una server action (no client-callable): los staffIds llegan solo desde
+ * código server que ya los scopeó por negocio → sin superficie cross-tenant.
+ */
+export async function queryStaffBlocksForDay(
+  staffIds: string[],
+  timezone: string,
+  date: string,
+): Promise<StaffBlockForDay[]> {
+  if (staffIds.length === 0) return [];
+  const supabase = getServiceClient();
+  // Límites en la TZ del negocio (no UTC), si no se perdían bloqueos de la
+  // tarde/noche (≥18:00 en UTC-6).
+  const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, timezone);
+
+  const { data, error } = await supabase
+    .from('staff_blocks')
+    .select('staff_id, starts_at, ends_at')
+    .in('staff_id', staffIds)
+    .eq('status', 'approved')
+    .lt('starts_at', dayEnd)
+    .gt('ends_at', dayStart);
+
+  if (error || !data) return [];
+
+  return (data as { staff_id: string; starts_at: string; ends_at: string }[]).map((b) => ({
+    staffId: b.staff_id,
+    startsAt: b.starts_at,
+    endsAt: b.ends_at,
+  }));
 }
 
 // ─── Función pura: ingresos del día ──────────────────────────────────────────
