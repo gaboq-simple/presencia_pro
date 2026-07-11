@@ -74,6 +74,10 @@ type PanoramaTimelineProps = {
   highlightApptId?: string | null;
   // El panorama avisa cuando hay un gesto en curso → el desk pausa el polling.
   onInteractingChange?: (active: boolean) => void;
+  // Tap (sin arrastre) sobre el fondo LIBRE de un carril: abre la hoja de walk-in
+  // pre-apuntada a ese barbero + esa hora. Solo dispara si la hora cae en tiempo
+  // realmente disponible (turno − descanso − bloqueo, piso en "ahora", sin cita).
+  onTapFreeSlot?: (staffId: string, startMin: number) => void;
 };
 
 // Estado visual derivado de una cita.
@@ -142,6 +146,7 @@ export default function PanoramaTimeline({
   onRescheduleConsumed,
   highlightApptId,
   onInteractingChange,
+  onTapFreeSlot,
 }: PanoramaTimelineProps) {
   // "Ahora" en vivo (min-desde-medianoche, tz) + el día de hoy en la tz del negocio.
   const [now, setNow] = useState<{ min: number; ymd: string } | null>(null);
@@ -195,7 +200,7 @@ export default function PanoramaTimeline({
   // ── Pan de la ventana: arrastrar el FONDO de la pista mueve winStart (explorar
   // horarios sin los chevrones). Va en una capa hermana por DEBAJO de los bloques,
   // así el arrastre/tap de una cita nunca lo dispara. Solo arma cuando !move.
-  const panDragRef = useRef<{ startX: number; startWin: number; active: boolean } | null>(null);
+  const panDragRef = useRef<{ startX: number; startWin: number; active: boolean; staffId: string } | null>(null);
   const [panning, setPanning] = useState(false);
 
   // Salir del modo mover limpia también la confirmación pendiente y el ghost.
@@ -656,12 +661,22 @@ export default function PanoramaTimeline({
   }
 
   function onPanUp() {
-    const wasActive = panDragRef.current?.active === true;
+    const pan = panDragRef.current;
+    const wasActive = pan?.active === true;
     panDragRef.current = null;
     window.removeEventListener('pointermove', onPanMove);
     window.removeEventListener('pointerup', onPanUp);
     setPanning(false);
-    if (!wasActive) return; // fue un click en el fondo, no un pan
+    if (!wasActive) {
+      // Fue un TAP en el fondo (no cruzó PAN_THRESH) → pre-apunta un walk-in en la
+      // hora libre bajo el dedo. No compite con el pan (≥PAN_THRESH) ni con el gesto
+      // de cita (capa aparte). Guard: solo si hay hueco real (resolveFreeTap).
+      if (pan && onTapFreeSlot && !moveRef.current) {
+        const min = resolveFreeTap(pan.staffId, pan.startX);
+        if (min !== null) onTapFreeSlot(pan.staffId, min);
+      }
+      return;
+    }
     // Al soltar: snap a la marca de 15 min más cercana (re-alinea eje + sub-rejilla).
     setWinStart((cur) => {
       const base = cur ?? defaultStart;
@@ -672,12 +687,41 @@ export default function PanoramaTimeline({
 
   // mousedown/touch sobre el FONDO de la pista (no una cita): arma el pan. draggedRef
   // no aplica acá — el pan no compite con el tap-tap de una cita (capas distintas).
-  function armPan(ev: ReactPointerEvent) {
+  // Guarda el carril (staffId): si el gesto queda en TAP (no cruza PAN_THRESH), la
+  // hora bajo la X en ese carril pre-apunta un walk-in (ver onPanUp).
+  function armPan(ev: ReactPointerEvent, staffId: string) {
     if (ev.button !== 0) return; // solo botón primario (mouse); touch usa button 0
     if (move) return;            // no panear mientras se coloca/arrastra una cita
-    panDragRef.current = { startX: ev.clientX, startWin: winRef.current, active: false };
+    panDragRef.current = { startX: ev.clientX, startWin: winRef.current, active: false, staffId };
     window.addEventListener('pointermove', onPanMove);
     window.addEventListener('pointerup', onPanUp);
+  }
+
+  // Tap sobre el fondo (sin arrastre): minuto bajo la X snapeado a 15, validado como
+  // hueco REAL del carril. Sin duración conocida (el servicio se elige en la hoja):
+  // solo confirma que el instante es tiempo disponible y libre. Devuelve el minuto o
+  // null (pasado / fuera de turno / descanso / bloqueo / dentro de una cita).
+  function resolveFreeTap(staffId: string, x: number): number | null {
+    const el = trackRefs.current.get(staffId);
+    const meta = laneMetaRef.current.get(staffId);
+    if (!el || !meta) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0) return null;
+    const clampedX = Math.max(r.left, Math.min(r.right, x));
+    const rawMin = winRef.current + ((clampedX - r.left) / r.width) * WIN;
+    const snapped = Math.round(rawMin / 15) * 15;
+    const floor = floorRef.current;
+    if (snapped < floor) return null; // pasado (piso "ahora" en Hoy)
+    const domainStart = Math.max(meta.availFrom, floor);
+    const avail = availableIntervals(meta.unavail, domainStart, meta.availTo);
+    // Dentro de un tramo disponible y con algo de margen antes de su fin.
+    const iv = avail.find((a) => snapped >= a.start - 0.5 && snapped <= a.end - 0.5);
+    if (!iv) return null;
+    // Ocupado: la hora cae dentro de una cita existente del carril.
+    for (const b of meta.appts) {
+      if (snapped >= b.start - 0.5 && snapped < b.start + b.dur - 0.5) return null;
+    }
+    return snapped;
   }
 
   return (
@@ -866,7 +910,7 @@ export default function PanoramaTimeline({
                   <div
                     className={`absolute inset-0 ${panning ? 'cursor-grabbing' : 'cursor-grab'}`}
                     style={{ touchAction: 'pan-y' }}
-                    onPointerDown={armPan}
+                    onPointerDown={(e) => armPan(e, s.id)}
                     aria-hidden
                   />
 

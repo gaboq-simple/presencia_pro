@@ -46,6 +46,8 @@ import {
   minutesOfDay,
   hhmmToMin,
   firstCompatibleSlot,
+  availableIntervals,
+  overlapAt,
 } from './panoramaEngine';
 
 const POLL_MS = 20_000; // 20s — auto-refresh de la mesa de control (se pausa en gesto)
@@ -270,6 +272,16 @@ export default function AssistantControlDesk({
   const [wiName, setWiName] = useState('');
   const [wiPhone, setWiPhone] = useState('');
   const [wiServiceId, setWiServiceId] = useState('');
+  // Pre-apuntado: tap en un hueco libre del panorama fija barbero+hora ANTES de la
+  // hoja. Si el servicio elegido cabe ahí → crea directo; si no → cae al place-mode.
+  const [pendingAim, setPendingAim] = useState<{ staffId: string; startMin: number } | null>(null);
+
+  // Cerrar la hoja SIN crear limpia también el pre-apuntado (no queda pegado para el
+  // próximo "+ Walk-in" del header).
+  function closeSheet() {
+    setSheetOpen(false);
+    setPendingAim(null);
+  }
 
   // Catálogo de servicios (lazy, al abrir la hoja) — para el picker de servicio.
   useEffect(() => {
@@ -291,16 +303,57 @@ export default function AssistantControlDesk({
     // Servicio opcional → default al primero del catálogo (su duración). Su serviceId
     // es real (createAssistantAppointment lo exige); la duración ilumina los huecos.
     const svc = services.find((s) => s.id === wiServiceId) ?? services[0];
-    setWalkin({
+    const move: MoveState = {
+      kind: 'walkin',
       serviceId: svc?.id ?? '',
       dur: svc?.duration_minutes ?? 30,
       name,
       service: svc?.name ?? 'Walk-in',
       phone: wiPhone.trim() || undefined,
-    });
+    };
+    const aim = pendingAim;
     setSheetOpen(false);
     setWiName('');
     setWiPhone('');
+    setPendingAim(null);
+
+    // Pre-apuntado (tap en hueco): si el servicio elegido CABE limpio en ese
+    // barbero+hora → crea directo (sin pasar por los chips). Si NO cabe (el servicio
+    // es más largo que el hueco, o pisaría una cita) → cae con gracia al place-mode
+    // normal para que el asistente elija un hueco que sí entra.
+    if (aim && walkinFitsAt(aim.staffId, aim.startMin, move.dur)) {
+      void handleWalkinPlace(move, aim.staffId, aim.startMin);
+      return;
+    }
+    if (aim) {
+      setToast({ msg: 'No cabe ahí — elegí un hueco', kind: 'warn' });
+    }
+    setWalkin(move); // place-mode: iluminan los chips donde el servicio entra
+  }
+
+  // ¿Cabe un walk-in de `dur` min en `staffId` a las `startMin`? Limpio = dentro del
+  // tiempo físicamente disponible del carril (turno − descanso − bloqueo, piso en
+  // "ahora") y sin solapar ninguna cita. Misma aritmética que el gesto (panoramaEngine),
+  // sobre los engineLanes ya derivados abajo.
+  function walkinFitsAt(staffId: string, startMin: number, dur: number): boolean {
+    const lane = engineLanes.find((l) => l.staffId === staffId);
+    if (!lane) return false;
+    const floor = today && nowMin !== null ? nowMin : -Infinity;
+    if (startMin < floor) return false;
+    const domainStart = Math.max(lane.availFrom, floor);
+    const avail = availableIntervals(lane.unavail, domainStart, lane.availTo);
+    const fits = avail.some((iv) => startMin >= iv.start - 0.5 && startMin + dur <= iv.end + 0.5);
+    if (!fits) return false;
+    return overlapAt(startMin, dur, lane.appts).min === 0;
+  }
+
+  // Tap en un hueco libre del panorama → abre la hoja PRE-APUNTADA a ese barbero+hora.
+  // El servicio (y su duración) se eligen en la hoja; el fit final se valida en
+  // startWalkin. Ignorado si ya hay un walk-in colocándose.
+  function handleTapFreeSlot(staffId: string, startMin: number) {
+    if (walkin) return;
+    setPendingAim({ staffId, startMin });
+    setSheetOpen(true);
   }
 
   // Barberos del panorama: los que TIENEN TURNO HOY (availabilityToday != null →
@@ -786,7 +839,7 @@ export default function AssistantControlDesk({
                 Buscar cliente
               </button>
               <button
-                onClick={() => setSheetOpen(true)}
+                onClick={() => { setPendingAim(null); setSheetOpen(true); }}
                 disabled={walkin !== null}
                 className="rounded-pill border border-teal-border bg-tint-1 px-3 py-1.5 text-sm font-semibold text-teal-ink transition hover:bg-tint-2 enabled:active:scale-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
               >
@@ -815,6 +868,7 @@ export default function AssistantControlDesk({
                 onRescheduleConsumed={() => setReschedReq(null)}
                 highlightApptId={highlightId}
                 onInteractingChange={(active) => { interactingRef.current = active; }}
+                onTapFreeSlot={handleTapFreeSlot}
               />
             </section>
 
@@ -834,16 +888,22 @@ export default function AssistantControlDesk({
       {sheetOpen && (
         <div
           className="fixed inset-0 z-40 flex items-end justify-center bg-ink/30 sm:items-center"
-          onClick={() => setSheetOpen(false)}
+          onClick={closeSheet}
         >
           <div
             className="w-full max-w-md rounded-t-card border border-line bg-card p-5 shadow-hero sm:rounded-card"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-base font-semibold">Nuevo walk-in</h2>
-            <p className="mt-0.5 text-xs text-faint">
-              Captura lo mínimo; después tocás el hueco donde encaja.
-            </p>
+            {pendingAim ? (
+              <p className="mt-0.5 text-xs font-semibold text-teal-ink">
+                Encaja en {staffNameById.get(pendingAim.staffId) ?? 'este barbero'} · {fmtHora(pendingAim.startMin)}
+              </p>
+            ) : (
+              <p className="mt-0.5 text-xs text-faint">
+                Captura lo mínimo; después tocás el hueco donde encaja.
+              </p>
+            )}
             <div className="mt-4 flex flex-col gap-3">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Nombre</span>
@@ -884,7 +944,7 @@ export default function AssistantControlDesk({
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setSheetOpen(false)}
+                onClick={closeSheet}
                 className="rounded-pill border border-line px-4 py-2 text-sm font-semibold text-ink-2 transition hover:bg-canvas"
               >
                 Cancelar
@@ -894,7 +954,7 @@ export default function AssistantControlDesk({
                 disabled={!wiName.trim() || (requireCustomerPhone && !wiPhone.trim())}
                 className="rounded-pill bg-teal px-4 py-2 text-sm font-bold text-card shadow-card transition hover:opacity-90 disabled:opacity-40"
               >
-                Elegir hueco →
+                {pendingAim ? 'Crear walk-in →' : 'Elegir hueco →'}
               </button>
             </div>
           </div>
