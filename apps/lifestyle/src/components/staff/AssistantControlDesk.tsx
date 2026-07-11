@@ -37,6 +37,7 @@ import PanoramaTimeline, {
   type PlaceOpts,
   type RescheduleRequest,
 } from './PanoramaTimeline';
+import AssistantVerticalCalendar from './AssistantVerticalCalendar';
 import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
 import {
   type EngineLane,
@@ -51,6 +52,11 @@ import {
 } from './panoramaEngine';
 
 const POLL_MS = 20_000; // 20s — auto-refresh de la mesa de control (se pausa en gesto)
+
+// Migración del panorama horizontal de 3h → calendario vertical de día completo.
+// true = calendario vertical (AssistantVerticalCalendar); false = panorama (comparar).
+// PanoramaTimeline NO se retira hasta que el vertical esté completo (fin del plan).
+const USE_VERTICAL = true;
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 
@@ -855,21 +861,39 @@ export default function AssistantControlDesk({
               className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:border-r lg:border-line"
               aria-label="Panorama de barberos"
             >
-              <PanoramaTimeline
-                date={date}
-                timezone={timezone}
-                appointments={appointments}
-                staff={workingStaff}
-                staffBlocks={initialStaffBlocks}
-                onPlace={handlePlace}
-                walkinRequest={walkin}
-                onWalkinConsumed={() => setWalkin(null)}
-                rescheduleRequest={reschedReq}
-                onRescheduleConsumed={() => setReschedReq(null)}
-                highlightApptId={highlightId}
-                onInteractingChange={(active) => { interactingRef.current = active; }}
-                onTapFreeSlot={handleTapFreeSlot}
-              />
+              {USE_VERTICAL ? (
+                <AssistantVerticalCalendar
+                  date={date}
+                  timezone={timezone}
+                  appointments={appointments}
+                  staff={workingStaff}
+                  staffBlocks={initialStaffBlocks}
+                  onPlace={handlePlace}
+                  walkinRequest={walkin}
+                  onWalkinConsumed={() => setWalkin(null)}
+                  rescheduleRequest={reschedReq}
+                  onRescheduleConsumed={() => setReschedReq(null)}
+                  highlightApptId={highlightId}
+                  onInteractingChange={(active) => { interactingRef.current = active; }}
+                  onTapFreeSlot={handleTapFreeSlot}
+                />
+              ) : (
+                <PanoramaTimeline
+                  date={date}
+                  timezone={timezone}
+                  appointments={appointments}
+                  staff={workingStaff}
+                  staffBlocks={initialStaffBlocks}
+                  onPlace={handlePlace}
+                  walkinRequest={walkin}
+                  onWalkinConsumed={() => setWalkin(null)}
+                  rescheduleRequest={reschedReq}
+                  onRescheduleConsumed={() => setReschedReq(null)}
+                  highlightApptId={highlightId}
+                  onInteractingChange={(active) => { interactingRef.current = active; }}
+                  onTapFreeSlot={handleTapFreeSlot}
+                />
+              )}
             </section>
 
             {/* COLA DE ACCIÓN — fija; atrasados + tranquilo (PR-5) */}
