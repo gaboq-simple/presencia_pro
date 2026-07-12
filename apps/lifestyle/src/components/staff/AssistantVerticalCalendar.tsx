@@ -1,135 +1,182 @@
 // ─── AssistantVerticalCalendar ─────────────────────────────────────────────────
-// Calendario VERTICAL de disponibilidad del dia (rediseño — trozo 1/5).
+// Calendario VERTICAL de día completo de la mesa de control del asistente.
 //
-// Rotacion de AvailabilityTimeline (H → V):
-//   Eje Y (scroll vertical): tiempo — etiquetas de hora en columna izquierda sticky.
-//   Eje X (columnas): barberos — cabecera por barbero sticky arriba.
-//   Bloques de cita: posicionados por top (inicio) + height (duracion) en su columna.
-//   Overlays rotados: fuera-de-horario, staff_blocks (rayas), guias de hora horizontales.
-//   Linea "ahora" HORIZONTAL: reusa nowLocalMinutes(timezone) (TZ-correcto), 60s, isToday.
-//   Click-en-hueco: posicion VERTICAL del click → hora (redondeo a 15 min) → onSlotClick.
+// Reemplaza el panorama horizontal de 3h (PanoramaTimeline) por un calendario de
+// día completo: barberos en COLUMNAS, tiempo en el eje Y con scroll vertical natural.
+// Al montar hace auto-scroll para dejar "ahora" visible (arranca en el presente,
+// pero sin limitar a 3h — el asistente puede scrollear a todo el día).
 //
-// ALCANCE trozo 1/5: solo geometria, paleta gris actual, mismos datos, sin interacciones
-// nuevas (ni card de detalle, ni hover, ni drag, ni foco de barbero, ni tokens Zentriq).
+// Se pliega al contenedor (AssistantControlDesk): recibe la MISMA data que hoy
+// recibe PanoramaTimeline (appointments, staff=PanoramaStaff, staffBlocks, date,
+// timezone) y el callback de creación onTapFreeSlot(staffId, startMin).
 //
-// NOTA: los helpers de tiempo son un espejo de AvailabilityTimeline.tsx (:44-93). Son
-// module-local (no exportados) alla, por eso se duplican aca. Extraerlos a un util
-// compartido queda para un trozo posterior (implica tocar AvailabilityTimeline).
+// ALCANCE (Paso 1): geometría vertical + tokens Zentriq + auto-scroll + línea-ahora
+// + click-en-hueco. Estilo de bloque Zentriq con tono mínimo por estado (completed
+// atenuado, no_show / walk-in distinguibles) para NO regresar respecto al panorama.
+// PENDIENTE de pasos siguientes: diferenciación fina de los 6 estados (curso/late/
+// pending), card de detalle, drag / click-to-place / walk-in de un toque, "banda
+// sutil" del ahora, foco de barbero, descansos (break_start/end), y el retiro final
+// de PanoramaTimeline. Los callbacks de interacción que aún no honramos se aceptan
+// inertes (ver más abajo) para no romper el montaje.
+//
+// NOTA: los helpers de tiempo son un espejo de PanoramaTimeline/AvailabilityTimeline
+// (module-local, no exportados). Extraerlos a un util compartido es de un paso posterior.
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
-import type { StaffBlockForDay } from '@/app/staff/assistant-actions';
+import type {
+  PanoramaStaff,
+  PanoramaBlock,
+  MoveState,
+  WalkinRequest,
+  RescheduleRequest,
+  PlaceOpts,
+} from './PanoramaTimeline';
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
-
-type StaffWithAvailability = {
-  id: string;
-  name: string;
-  availabilityToday: { start_time: string; end_time: string } | null;
-};
+// ─── Props ────────────────────────────────────────────────────────────────────
+// Mismo contrato de data que PanoramaTimeline (el desk lo monta con las mismas
+// props). Los callbacks de gesto que el vertical aún NO implementa se aceptan como
+// opcionales e inertes (Paso 1) para no romper el montaje detrás del flag.
 
 type Props = {
+  date: string;                 // 'YYYY-MM-DD' del día mostrado
+  timezone: string;             // IANA — p.ej. 'America/Mexico_City'
   appointments: DashboardAppointment[];
-  staff: StaffWithAvailability[];
-  staffBlocks: StaffBlockForDay[];
-  date: string;         // 'YYYY-MM-DD'
-  timezone: string;     // IANA — p.ej. 'America/Mexico_City'
-  onSlotClick: (staffId: string, time: string) => void;
+  staff: PanoramaStaff[];       // barberos (columnas), en orden
+  staffBlocks: PanoramaBlock[]; // bloqueos aprobados del día
+  // Click-en-hueco → crear cita: el desk abre la hoja de walk-in pre-apuntada.
+  onTapFreeSlot?: (staffId: string, startMin: number) => void;
+  // ── Inertes en Paso 1 (drag / click-to-place / walk-in de un toque = pasos sig.) ──
+  onPlace?: (move: MoveState, newStaffId: string, newStartMin: number, opts?: PlaceOpts) => void;
+  walkinRequest?: WalkinRequest | null;
+  onWalkinConsumed?: () => void;
+  rescheduleRequest?: RescheduleRequest | null;
+  onRescheduleConsumed?: () => void;
+  highlightApptId?: string | null;
+  onInteractingChange?: (active: boolean) => void;
 };
 
 // ─── Config visual ────────────────────────────────────────────────────────────
 
-const HOUR_HEIGHT_PX  = 60;   // alto de cada hora en px (equivalente vertical a HOUR_WIDTH_PX)
-const COL_MIN_WIDTH_PX = 200; // ancho minimo comodo por barbero antes de scroll horizontal
-const TIME_COL_WIDTH_PX = 52; // ancho de la columna de horas (sticky izquierda)
-const HEADER_HEIGHT_PX = 32;  // alto de la cabecera de nombres (sticky arriba)
-const FALLBACK_START = 9;     // hora de apertura default si no hay datos
-const FALLBACK_END   = 20;    // hora de cierre default si no hay datos
+const HOUR_HEIGHT_PX   = 60;   // alto de cada hora en px
+const COL_MIN_WIDTH_PX = 200;  // ancho mínimo cómodo por barbero antes de scroll-X
+const TIME_COL_WIDTH_PX = 52;  // ancho de la columna de horas (sticky izquierda)
+const HEADER_HEIGHT_PX = 40;   // alto de la cabecera de nombres (sticky arriba)
+const FALLBACK_START = 9;      // hora de apertura default si no hay datos
+const FALLBACK_END   = 20;     // hora de cierre default si no hay datos
 
-const PX_PER_MIN = HOUR_HEIGHT_PX / 60; // px por minuto (con 60px/h = 1px/min)
+const PX_PER_MIN = HOUR_HEIGHT_PX / 60; // 60px/h = 1px/min
 
-// ─── Helpers (espejo de AvailabilityTimeline.tsx :44-93) ──────────────────────
+// Tono Zentriq por estado (Paso 1: base + mínimo para no regresar). El set fino de
+// 6 estados (curso/late/pending distinguidos) es del Paso 2. Espejo del STATE_STYLE
+// de PanoramaTimeline, sin los estados derivados del tiempo.
+type BlockTone = 'conf' | 'done' | 'noshow' | 'walk';
+const TONE: Record<BlockTone, { bar: string; bg: string; ink: string }> = {
+  conf:   { bar: 'var(--color-ink-2)',       bg: 'bg-card',     ink: 'text-ink' },
+  done:   { bar: 'var(--color-past-line)',   bg: 'bg-past-bg',  ink: 'text-past-ink' },
+  noshow: { bar: 'var(--color-red-border)',  bg: 'bg-red-tint', ink: 'text-red-ink' },
+  walk:   { bar: 'var(--color-walk-border)', bg: 'bg-walk-tint', ink: 'text-walk' },
+};
+function toneFor(a: DashboardAppointment): BlockTone {
+  if (a.status === 'completed') return 'done';
+  if (a.status === 'no_show') return 'noshow';
+  if (a.status === 'walkin' || a.source === 'walkin') return 'walk';
+  return 'conf';
+}
 
-/** Convierte 'HH:MM' o 'HH:MM:SS' a minutos desde medianoche */
+// ─── Helpers de tiempo (espejo de PanoramaTimeline/AvailabilityTimeline) ──────
+
+/** 'HH:MM[:SS]' → minutos desde medianoche */
 function timeToMinutes(t: string): number {
   const [hh, mm] = t.split(':').map(Number);
   return (hh ?? 0) * 60 + (mm ?? 0);
 }
 
-/** Convierte ISO a minutos desde medianoche en el timezone dado */
+/** ISO → minutos desde medianoche en el timezone dado */
 function isoToLocalMinutes(iso: string, timezone: string): number {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
+    timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false,
   }).formatToParts(new Date(iso));
-
   const h = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10);
   const m = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
-  // Intl puede devolver hora 24 como "24" — normalizar
   return (h === 24 ? 0 : h) * 60 + m;
 }
 
-/** Hora actual en minutos desde medianoche segun el timezone del negocio */
+/** Hora actual en minutos desde medianoche según el timezone del negocio */
 function nowLocalMinutes(timezone: string): number {
   return isoToLocalMinutes(new Date().toISOString(), timezone);
 }
 
-/** 'HH:MM' a partir de minutos desde medianoche */
-function minutesToTime(minutes: number): string {
+/** minutos desde medianoche → 'HH:MM' 24h */
+function minutesToLabel(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-/** Verifica si la fecha dada es hoy segun el timezone */
+/** ¿la fecha dada es hoy según el timezone? */
 function isToday(date: string, timezone: string): boolean {
-  const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: timezone })
-    .format(new Date());
-  return localDate === date;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date()) === date;
+}
+
+/** iniciales para el avatar del barbero */
+function initials(name: string): string {
+  const p = name.trim().split(/\s+/);
+  return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase() || '·';
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AssistantVerticalCalendar({
+  date,
+  timezone,
   appointments,
   staff,
   staffBlocks,
-  date,
-  timezone,
-  onSlotClick,
+  onTapFreeSlot,
+  walkinRequest,
+  onWalkinConsumed,
+  rescheduleRequest,
+  onRescheduleConsumed,
 }: Props) {
-  // ── Hora actual (actualiza cada minuto) — mismo patron que AvailabilityTimeline ──
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const didAutoScrollRef = useRef<string | null>(null);
+
+  // ── Solicitudes de gesto que el vertical aún NO honra (Paso 1): las acusamos y
+  //    limpiamos de inmediato para no dejar al desk en un estado colgado (p.ej. el
+  //    botón "+ Walk-in" deshabilitado para siempre). El gesto real llega después.
+  useEffect(() => {
+    if (walkinRequest) onWalkinConsumed?.();
+  }, [walkinRequest, onWalkinConsumed]);
+  useEffect(() => {
+    if (rescheduleRequest) onRescheduleConsumed?.();
+  }, [rescheduleRequest, onRescheduleConsumed]);
+
+  // ── Hora actual (poll 60s) — mismo patrón TZ-aware que el panorama ──
   const [nowMinutes, setNowMinutes] = useState<number | null>(null);
   const [prevDateTz, setPrevDateTz] = useState(`${date}|${timezone}`);
   const dateTz = `${date}|${timezone}`;
   if (prevDateTz !== dateTz) {
     setPrevDateTz(dateTz);
-    if (!isToday(date, timezone)) {
-      setNowMinutes(null);
-    }
+    if (!isToday(date, timezone)) setNowMinutes(null);
   }
-
   useEffect(() => {
     if (!isToday(date, timezone)) return;
     const update = () => setNowMinutes(nowLocalMinutes(timezone));
     update();
-    const interval = setInterval(update, 60_000);
-    return () => clearInterval(interval);
+    const id = setInterval(update, 60_000);
+    return () => clearInterval(id);
   }, [date, timezone]);
 
-  // ── Rango de horas del dia (mismo calculo que AvailabilityTimeline :128-143) ──
+  // ── Rango de horas del día (min start / max end de barberos con turno) ──
   const hoursWithAvail = staff
     .map((s) => s.availabilityToday)
     .filter((a): a is NonNullable<typeof a> => a !== null);
-
   const startHour = hoursWithAvail.length > 0
     ? Math.min(...hoursWithAvail.map((a) => Math.floor(timeToMinutes(a.start_time) / 60)))
     : FALLBACK_START;
-
   const endHour = hoursWithAvail.length > 0
     ? Math.max(...hoursWithAvail.map((a) => Math.ceil(timeToMinutes(a.end_time) / 60)))
     : FALLBACK_END;
@@ -140,29 +187,39 @@ export default function AssistantVerticalCalendar({
   const totalHours   = endHour - startHour;
   const gridHeightPx = totalHours * HOUR_HEIGHT_PX;
 
-  /** minutos-desde-medianoche → offset vertical en px dentro de la grilla */
   const minutesToPx = useCallback(
     (m: number) => (m - startMinutes) * PX_PER_MIN,
     [startMinutes],
   );
 
-  // ── Click en hueco: calcular hora desde posicion Y (rotacion del click X→Y) ──
+  // ── Auto-scroll: dejar "ahora" visible al montar / cambiar de día ──
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || didAutoScrollRef.current === dateTz) return;
+    didAutoScrollRef.current = dateTz;
+    if (!isToday(date, timezone)) { el.scrollTop = 0; return; }
+    const nowTop = (nowLocalMinutes(timezone) - startMinutes) * PX_PER_MIN;
+    // "ahora" a ~1/3 desde arriba (contexto previo visible), clamp a [0, max].
+    el.scrollTop = Math.max(0, HEADER_HEIGHT_PX + nowTop - el.clientHeight / 3);
+  }, [dateTz, date, timezone, startMinutes, gridHeightPx]);
+
+  // ── Click en hueco: posición Y → hora (redondeo a 15 min) → onTapFreeSlot ──
   const handleColumnClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>, staffId: string) => {
+      if (!onTapFreeSlot) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const relY = e.clientY - rect.top;
-      const clickedMinutes =
-        startMinutes + Math.round((relY / gridHeightPx) * totalMinutes / 15) * 15;
-      const clamped = Math.max(startMinutes, Math.min(endMinutes - 15, clickedMinutes));
-      onSlotClick(staffId, minutesToTime(clamped));
+      const clickedMin = startMinutes + Math.round((relY / gridHeightPx) * totalMinutes / 15) * 15;
+      const clamped = Math.max(startMinutes, Math.min(endMinutes - 15, clickedMin));
+      onTapFreeSlot(staffId, clamped);
     },
-    [startMinutes, endMinutes, totalMinutes, gridHeightPx, onSlotClick],
+    [onTapFreeSlot, startMinutes, endMinutes, totalMinutes, gridHeightPx],
   );
 
   if (staff.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-5 text-center">
-        <p className="text-xs text-gray-400">Sin barberos activos para mostrar.</p>
+      <div className="m-3 rounded-card border border-dashed border-line px-4 py-6 text-center">
+        <p className="text-xs text-faint">Sin barberos con turno hoy.</p>
       </div>
     );
   }
@@ -172,44 +229,46 @@ export default function AssistantVerticalCalendar({
 
   return (
     <div
-      className="rounded-xl border border-gray-200 bg-white overflow-auto"
-      style={{ maxHeight: '65vh', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
+      ref={scrollRef}
+      className="overflow-auto bg-card"
+      // El shell del desk es min-h-dvh (crece con el contenido), así que el calendario
+      // se acota a sí mismo para poseer su scroll (sticky + auto-scroll funcionan) en
+      // vez de estirar la página. Cap ~ viewport menos el header del desk.
+      style={{ maxHeight: 'calc(100dvh - 132px)', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
     >
-      {/* w-max + min-w-full: pocos barberos → columnas crecen y llenan; muchos → scroll-X */}
+      {/* w-max + min-w-full: pocos barberos → columnas llenan; muchos → scroll-X */}
       <div className="flex w-max min-w-full">
 
-        {/* ── Columna de horas (sticky izquierda) ────────────────────────── */}
+        {/* ── Columna de horas (sticky izquierda) ─────────────────────────── */}
         <div
-          className="sticky left-0 z-30 shrink-0 bg-white border-r border-gray-100"
+          className="sticky left-0 z-30 shrink-0 border-r border-line bg-card"
           style={{ width: TIME_COL_WIDTH_PX }}
         >
-          {/* Esquina (sticky arriba tambien → queda fija en ambos ejes) */}
           <div
-            className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100"
+            className="sticky top-0 z-10 border-b border-line bg-canvas"
             style={{ height: HEADER_HEIGHT_PX }}
           />
-          {/* Etiquetas de hora */}
           <div className="relative" style={{ height: gridHeightPx }}>
             {Array.from({ length: totalHours }, (_, i) => (
               <span
                 key={i}
-                className="absolute right-1 -translate-y-1/2 text-[10px] text-gray-400 tabular-nums"
+                className="absolute right-1.5 -translate-y-1/2 text-[10px] tabular-nums text-faint"
                 style={{ top: i * HOUR_HEIGHT_PX }}
               >
                 {String(startHour + i).padStart(2, '0')}:00
               </span>
             ))}
-            {/* Punto rojo "ahora" sobre el eje de tiempo */}
             {showNow && (
               <div
-                className="absolute right-0 w-2 h-2 rounded-full bg-red-500 -translate-y-1/2 pointer-events-none z-20"
+                className="absolute right-0 z-20 h-1.5 w-1.5 -translate-y-1/2 rounded-pill bg-red-ink"
                 style={{ top: nowTop! }}
+                aria-hidden
               />
             )}
           </div>
         </div>
 
-        {/* ── Columnas por barbero ───────────────────────────────────────── */}
+        {/* ── Columnas por barbero ────────────────────────────────────────── */}
         {staff.map((s) => {
           const avail = s.availabilityToday;
           const availStart = avail ? timeToMinutes(avail.start_time) : null;
@@ -223,65 +282,58 @@ export default function AssistantVerticalCalendar({
           return (
             <div
               key={s.id}
-              className="flex flex-col border-r border-gray-50 last:border-r-0"
+              className="flex flex-col border-r border-line last:border-r-0"
               style={{ flex: '1 0 auto', minWidth: COL_MIN_WIDTH_PX }}
             >
-              {/* Cabecera de barbero (sticky arriba) */}
+              {/* Cabecera de barbero (sticky arriba) — avatar + nombre */}
               <div
-                className="sticky top-0 z-20 flex items-center border-b border-gray-100 bg-gray-50 px-2"
+                className="sticky top-0 z-20 flex items-center gap-2 border-b border-line bg-canvas px-2.5"
                 style={{ height: HEADER_HEIGHT_PX }}
               >
-                <span className="truncate text-xs font-medium text-gray-700" title={s.name}>
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-avatar bg-ink text-[10px] font-semibold text-card">
+                  {initials(s.name)}
+                </span>
+                <span className="truncate text-[13px] font-semibold text-ink" title={s.name}>
                   {s.name}
                 </span>
               </div>
 
-              {/* Cuerpo de la columna (clickable → nueva cita) */}
+              {/* Cuerpo (clickable → crear cita) */}
               <div
                 role="button"
                 tabIndex={0}
-                aria-label={`Seleccionar slot para ${s.name}`}
+                aria-label={`Crear cita para ${s.name}`}
                 className="relative cursor-pointer"
                 style={{ height: gridHeightPx }}
                 onClick={(e) => handleColumnClick(e, s.id)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if ((e.key === 'Enter' || e.key === ' ') && onTapFreeSlot) {
                     e.preventDefault();
-                    onSlotClick(s.id, minutesToTime(startMinutes + Math.floor(totalMinutes / 2)));
+                    onTapFreeSlot(s.id, startMinutes + Math.floor(totalMinutes / 2));
                   }
                 }}
               >
-                {/* Guias de hora (horizontales) */}
+                {/* Guías de hora (horizontales) */}
                 {Array.from({ length: totalHours }, (_, i) => (
                   <div
                     key={i}
-                    className="absolute left-0 right-0 border-t border-gray-100"
+                    className="absolute left-0 right-0 border-t border-line"
                     style={{ top: i * HOUR_HEIGHT_PX }}
                   />
                 ))}
 
-                {/* Overlay: fuera de horario (antes del inicio) */}
+                {/* Fuera de horario (antes del inicio) — tono canvas, sin opacity */}
                 {availStart !== null && availStart > startMinutes && (
-                  <div
-                    className="absolute left-0 right-0 bg-gray-100/70"
-                    style={{ top: 0, height: minutesToPx(availStart) }}
-                  />
+                  <div className="absolute left-0 right-0 bg-canvas" style={{ top: 0, height: minutesToPx(availStart) }} />
                 )}
-
-                {/* Overlay: fuera de horario (despues del cierre) */}
+                {/* Fuera de horario (después del cierre) */}
                 {availEnd !== null && availEnd < endMinutes && (
-                  <div
-                    className="absolute left-0 right-0 bg-gray-100/70"
-                    style={{ top: minutesToPx(availEnd), bottom: 0 }}
-                  />
+                  <div className="absolute left-0 right-0 bg-canvas" style={{ top: minutesToPx(availEnd), bottom: 0 }} />
                 )}
+                {/* Sin horario configurado → todo el día inactivo */}
+                {avail === null && <div className="absolute inset-0 bg-canvas" />}
 
-                {/* Overlay: sin horario configurado (todo el dia inactivo) */}
-                {avail === null && (
-                  <div className="absolute inset-0 bg-gray-100/70" />
-                )}
-
-                {/* Bloques de staff_blocks (rayas — aprobados) */}
+                {/* staff_blocks (bloqueos aprobados) — rayas Zentriq */}
                 {barberBlocks.map((block, idx) => {
                   const bStart = isoToLocalMinutes(block.startsAt, timezone);
                   const bEnd   = isoToLocalMinutes(block.endsAt,   timezone);
@@ -292,18 +344,17 @@ export default function AssistantVerticalCalendar({
                   return (
                     <div
                       key={idx}
-                      className="absolute left-1 right-1 rounded"
+                      className="absolute left-1 right-1 rounded-[8px]"
                       style={{
-                        top,
-                        height,
+                        top, height,
                         background:
-                          'repeating-linear-gradient(45deg,#d1d5db,#d1d5db 3px,#e5e7eb 3px,#e5e7eb 8px)',
+                          'repeating-linear-gradient(45deg, var(--color-past-line) 0 2px, var(--color-past-bg) 2px 7px)',
                       }}
                     />
                   );
                 })}
 
-                {/* Bloques de citas */}
+                {/* Bloques de cita — tono Zentriq mínimo por estado (fino = Paso 2) */}
                 {barberAppts.map((appt) => {
                   const apptStart = isoToLocalMinutes(appt.starts_at, timezone);
                   const apptEnd   = isoToLocalMinutes(appt.ends_at,   timezone);
@@ -311,29 +362,38 @@ export default function AssistantVerticalCalendar({
                   const bottom    = minutesToPx(Math.min(apptEnd,   endMinutes));
                   const height    = Math.max(0, bottom - top);
                   if (height <= 0) return null;
+                  const dur   = apptEnd - apptStart;
                   const label = appt.customer?.name ?? appt.service.name;
+                  const tone  = TONE[toneFor(appt)];
                   return (
                     <div
                       key={appt.id}
-                      className="absolute left-1 right-1 rounded bg-gray-800 px-1 overflow-hidden"
-                      style={{ top, height }}
+                      className={`absolute left-1 right-1 overflow-hidden rounded-[10px] border border-line shadow-card ${tone.bg}`}
+                      style={{ top, height, borderLeft: `3px solid ${tone.bar}`, padding: '4px 8px' }}
                       onClick={(e) => e.stopPropagation()}
-                      title={`${label} · ${appt.service.name}`}
+                      title={`${minutesToLabel(apptStart)} · ${label} · ${appt.service.name}`}
                     >
                       {height >= 20 && (
-                        <span className="block truncate pt-0.5 text-[10px] font-medium text-white leading-tight">
-                          {label}
-                        </span>
+                        <>
+                          <div className={`whitespace-nowrap text-[9.5px] font-semibold tabular-nums ${tone.ink}`}>
+                            {minutesToLabel(apptStart)}
+                          </div>
+                          <div className={`truncate text-[12px] font-semibold ${tone.ink}`}>{label}</div>
+                          {dur >= 45 && (
+                            <div className="truncate text-[9.5px] text-faint">{appt.service.name}</div>
+                          )}
+                        </>
                       )}
                     </div>
                   );
                 })}
 
-                {/* Linea "ahora" (horizontal, roja) */}
+                {/* Línea "ahora" (horizontal, roja) */}
                 {showNow && (
                   <div
-                    className="absolute left-0 right-0 h-0.5 bg-red-500 opacity-80 pointer-events-none z-10"
+                    className="pointer-events-none absolute left-0 right-0 z-10 h-0.5 bg-red-ink"
                     style={{ top: nowTop! }}
+                    aria-hidden
                   />
                 )}
               </div>
