@@ -11,13 +11,16 @@
 // timezone) y el callback de creación onTapFreeSlot(staffId, startMin).
 //
 // ALCANCE (Paso 1): geometría vertical + tokens Zentriq + auto-scroll + línea-ahora
-// + click-en-hueco. Estilo de bloque Zentriq con tono mínimo por estado (completed
-// atenuado, no_show / walk-in distinguibles) para NO regresar respecto al panorama.
-// PENDIENTE de pasos siguientes: diferenciación fina de los 6 estados (curso/late/
-// pending), card de detalle, drag / click-to-place / walk-in de un toque, "banda
-// sutil" del ahora, foco de barbero, descansos (break_start/end), y el retiro final
-// de PanoramaTimeline. Los callbacks de interacción que aún no honramos se aceptan
-// inertes (ver más abajo) para no romper el montaje.
+// + click-en-hueco.
+// ALCANCE (Paso 2A): estados finos del bloque con paridad al panorama + cierre del
+// gap pending≠confirmed (ámbar): conf/pending/curso/late/done/noshow/walk por
+// color/tono (nunca opacity); curso/late derivados del "ahora" TZ-aware; pulso
+// animate-data-beat en late. Info completa (nombre + servicio + hora) con degradación
+// por alto en bloques cortos. Badge de source solo para bot.
+// PENDIENTE de pasos siguientes: "banda sutil" del ahora (2B), card de detalle (3),
+// drag / click-to-place / walk-in de un toque (4), foco de barbero, descansos
+// (break_start/end), y el retiro final de PanoramaTimeline. Los callbacks de
+// interacción que aún no honramos se aceptan inertes (ver más abajo).
 //
 // NOTA: los helpers de tiempo son un espejo de PanoramaTimeline/AvailabilityTimeline
 // (module-local, no exportados). Extraerlos a un util compartido es de un paso posterior.
@@ -72,17 +75,41 @@ const PX_PER_MIN = HOUR_HEIGHT_PX / 60; // 60px/h = 1px/min
 // Tono Zentriq por estado (Paso 1: base + mínimo para no regresar). El set fino de
 // 6 estados (curso/late/pending distinguidos) es del Paso 2. Espejo del STATE_STYLE
 // de PanoramaTimeline, sin los estados derivados del tiempo.
-type BlockTone = 'conf' | 'done' | 'noshow' | 'walk';
-const TONE: Record<BlockTone, { bar: string; bg: string; ink: string }> = {
-  conf:   { bar: 'var(--color-ink-2)',       bg: 'bg-card',     ink: 'text-ink' },
-  done:   { bar: 'var(--color-past-line)',   bg: 'bg-past-bg',  ink: 'text-past-ink' },
-  noshow: { bar: 'var(--color-red-border)',  bg: 'bg-red-tint', ink: 'text-red-ink' },
-  walk:   { bar: 'var(--color-walk-border)', bg: 'bg-walk-tint', ink: 'text-walk' },
+// Estado visual del bloque — paridad con el STATE_STYLE del panorama (mismos tokens)
+// + `pending` (ámbar) para cerrar el gap "pending ≠ confirmed" que el panorama no
+// distinguía. Diferenciación por color/tono (border-left + fondo + tinta), NUNCA por
+// opacity. `curso`/`late` son derivados del "ahora" TZ-aware (no del campo status).
+type BlockState = 'conf' | 'pending' | 'curso' | 'late' | 'done' | 'noshow' | 'walk';
+const STATE_STYLE: Record<BlockState, { bar: string; bg: string; ink: string }> = {
+  conf:    { bar: 'var(--color-ink-2)',       bg: 'bg-card',      ink: 'text-ink' },
+  pending: { bar: 'var(--color-amber-border)', bg: 'bg-amber-tint', ink: 'text-amber' },
+  curso:   { bar: 'var(--color-teal-border)', bg: 'bg-tint-1',    ink: 'text-teal-ink' },
+  late:    { bar: 'var(--color-red-border)',  bg: 'bg-red-tint',  ink: 'text-red-ink' },
+  done:    { bar: 'var(--color-past-line)',   bg: 'bg-past-bg',   ink: 'text-past-ink' },
+  noshow:  { bar: 'var(--color-red-border)',  bg: 'bg-red-tint',  ink: 'text-red-ink' },
+  walk:    { bar: 'var(--color-walk-border)', bg: 'bg-walk-tint', ink: 'text-walk' },
 };
-function toneFor(a: DashboardAppointment): BlockTone {
+
+// Palabra de estado en la meta-línea (paridad con el panorama: solo para los estados
+// que ganan claridad con texto; el resto se lee por color).
+const STATE_WORD: Partial<Record<BlockState, string>> = {
+  curso: 'En curso', late: 'Atrasado', noshow: 'No llegó', pending: 'Por confirmar',
+};
+
+/**
+ * Estado del bloque combinando status + momento (mismo criterio que PanoramaTimeline
+ * :298-305, con `pending` insertado). `startM`/`endM` = min-desde-medianoche (tz negocio).
+ * nowM = null cuando el día mostrado no es hoy → sin curso/late (no hay "ahora").
+ */
+function stateFor(
+  a: DashboardAppointment, startM: number, endM: number, nowM: number | null,
+): BlockState {
   if (a.status === 'completed') return 'done';
   if (a.status === 'no_show') return 'noshow';
   if (a.status === 'walkin' || a.source === 'walkin') return 'walk';
+  if (nowM !== null && startM <= nowM && nowM < endM) return 'curso';
+  if (nowM !== null && nowM >= endM) return 'late'; // ventana pasó, sin cerrar
+  if (a.status === 'pending') return 'pending';
   return 'conf';
 }
 
@@ -354,7 +381,7 @@ export default function AssistantVerticalCalendar({
                   );
                 })}
 
-                {/* Bloques de cita — tono Zentriq mínimo por estado (fino = Paso 2) */}
+                {/* Bloques de cita — estado por color/tono + info completa + badge bot */}
                 {barberAppts.map((appt) => {
                   const apptStart = isoToLocalMinutes(appt.starts_at, timezone);
                   const apptEnd   = isoToLocalMinutes(appt.ends_at,   timezone);
@@ -362,24 +389,48 @@ export default function AssistantVerticalCalendar({
                   const bottom    = minutesToPx(Math.min(apptEnd,   endMinutes));
                   const height    = Math.max(0, bottom - top);
                   if (height <= 0) return null;
-                  const dur   = apptEnd - apptStart;
-                  const label = appt.customer?.name ?? appt.service.name;
-                  const tone  = TONE[toneFor(appt)];
+
+                  const state = stateFor(appt, apptStart, apptEnd, nowMinutes);
+                  const st    = STATE_STYLE[state];
+                  const isWalk = appt.status === 'walkin' || appt.source === 'walkin';
+                  const name = appt.customer?.name ?? (isWalk ? 'Walk-in' : 'Sin cliente');
+                  const word = STATE_WORD[state];
+                  const time = minutesToLabel(apptStart);
+                  // Badge de source SOLO para bot: es la cita que agendó el asistente
+                  // virtual (dato operativo útil). walk-in ya se lee por color; manual
+                  // es "la hicimos nosotros" → sin badge. Se omite en bloques sin meta.
+                  const showBot = appt.source === 'bot';
+                  // Degradación por alto (1px/min): nombre siempre que quepa; meta
+                  // (hora+estado+badge) desde ~26px; servicio desde ~42px.
+                  const showName    = height >= 14;
+                  const showMeta    = height >= 26;
+                  const showService = height >= 42;
+
                   return (
                     <div
                       key={appt.id}
-                      className={`absolute left-1 right-1 overflow-hidden rounded-[10px] border border-line shadow-card ${tone.bg}`}
-                      style={{ top, height, borderLeft: `3px solid ${tone.bar}`, padding: '4px 8px' }}
+                      className={`absolute left-1 right-1 overflow-hidden rounded-[10px] border border-line shadow-card ${st.bg} ${
+                        state === 'late' ? 'animate-data-beat motion-reduce:animate-none' : ''
+                      }`}
+                      style={{ top, height, borderLeft: `3px solid ${st.bar}`, padding: '4px 8px' }}
                       onClick={(e) => e.stopPropagation()}
-                      title={`${minutesToLabel(apptStart)} · ${label} · ${appt.service.name}`}
+                      title={`${time} · ${name} · ${appt.service.name}${word ? ` · ${word}` : ''}`}
                     >
-                      {height >= 20 && (
+                      {showName && (
                         <>
-                          <div className={`whitespace-nowrap text-[9.5px] font-semibold tabular-nums ${tone.ink}`}>
-                            {minutesToLabel(apptStart)}
-                          </div>
-                          <div className={`truncate text-[12px] font-semibold ${tone.ink}`}>{label}</div>
-                          {dur >= 45 && (
+                          {showMeta && (
+                            <div className={`flex items-center gap-1 whitespace-nowrap text-[9.5px] font-semibold tabular-nums ${st.ink}`}>
+                              <span>{time}</span>
+                              {word && <span className="font-medium">· {word}</span>}
+                              {showBot && (
+                                <span className="ml-auto shrink-0 rounded-pill border border-line px-1 text-[8px] font-semibold uppercase tracking-wide text-faint">
+                                  bot
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <div className={`truncate text-[12px] font-semibold ${st.ink}`}>{name}</div>
+                          {showService && (
                             <div className="truncate text-[9.5px] text-faint">{appt.service.name}</div>
                           )}
                         </>
