@@ -17,10 +17,13 @@
 // color/tono (nunca opacity); curso/late derivados del "ahora" TZ-aware; pulso
 // animate-data-beat en late. Info completa (nombre + servicio + hora) con degradación
 // por alto en bloques cortos. Badge de source solo para bot.
-// PENDIENTE de pasos siguientes: "banda sutil" del ahora (2B), card de detalle (3),
-// drag / click-to-place / walk-in de un toque (4), foco de barbero, descansos
-// (break_start/end), y el retiro final de PanoramaTimeline. Los callbacks de
-// interacción que aún no honramos se aceptan inertes (ver más abajo).
+// ALCANCE (Paso 3A): card de detalle VISUAL al click-en-cita (anclada al bloque, velo
+// claro sutil, ring/border por estado, acciones por estado+momento con ventana
+// anticipada de 10min — SIN mutar datos, el cableado es Paso 3B) + banda sutil del
+// "ahora" (franja tenue + hairline + pastilla de hora en el gutter).
+// PENDIENTE de pasos siguientes: cablear acciones de la card (3B), drag / click-to-
+// place / walk-in de un toque (4), foco de barbero, descansos (break_start/end), y el
+// retiro final de PanoramaTimeline. Los callbacks de interacción inertes (ver abajo).
 //
 // NOTA: los helpers de tiempo son un espejo de PanoramaTimeline/AvailabilityTimeline
 // (module-local, no exportados). Extraerlos a un util compartido es de un paso posterior.
@@ -154,6 +157,180 @@ function initials(name: string): string {
   return ((p[0]?.[0] ?? '') + (p[1]?.[0] ?? '')).toUpperCase() || '·';
 }
 
+// ─── Card de detalle (Paso 3A — VISUAL, sin mutar datos) ──────────────────────
+
+// Etiqueta completa del estado para el badge de la card.
+const STATE_LABEL: Record<BlockState, string> = {
+  conf: 'Confirmada', pending: 'Por confirmar', curso: 'En curso',
+  late: 'Atrasada', done: 'Terminada', noshow: 'No llegó', walk: 'Walk-in',
+};
+// Ring sutil de la card según estado (teal para confirmada/curso, ámbar pending,
+// rojo late/noshow, walk, neutro done). El border-left usa el color del bloque.
+const CARD_RING: Record<BlockState, string> = {
+  conf: 'ring-teal-border', curso: 'ring-teal-border', pending: 'ring-amber-border',
+  late: 'ring-red-border', noshow: 'ring-red-border', walk: 'ring-walk-border',
+  done: 'ring-past-line',
+};
+
+type ActionKey =
+  | 'mensaje' | 'mover' | 'cancelar' | 'confirmar'
+  | 'llego' | 'noLlego' | 'termino' | 'reagendar' | 'llamar';
+
+type ActionAccent = 'pos' | 'warn' | 'danger' | 'neutral';
+const ACTION: Record<ActionKey, { label: string; accent: ActionAccent }> = {
+  mensaje:   { label: 'Mensaje',   accent: 'neutral' },
+  mover:     { label: 'Mover',     accent: 'neutral' },
+  cancelar:  { label: 'Cancelar',  accent: 'danger' },
+  confirmar: { label: 'Confirmar', accent: 'pos' },
+  llego:     { label: 'Llegó',     accent: 'pos' },
+  noLlego:   { label: 'No llegó',  accent: 'warn' },
+  termino:   { label: 'Terminó',   accent: 'pos' },
+  reagendar: { label: 'Reagendar', accent: 'neutral' },
+  llamar:    { label: 'Llamar',    accent: 'pos' },
+};
+const ACCENT_CLS: Record<ActionAccent, string> = {
+  pos:     'border-teal-border text-teal-ink hover:bg-tint-1 hover:shadow-hero',
+  warn:    'border-amber-border text-amber hover:bg-amber-tint hover:shadow-hero',
+  danger:  'border-red-border text-red-ink hover:bg-red-tint hover:shadow-hero',
+  neutral: 'border-line text-ink-2 hover:bg-canvas hover:shadow-card',
+};
+
+/**
+ * Set de acciones según estado + momento (visual; el cableado a server actions es
+ * Paso 3B). Ventana anticipada: Llegó/No-llegó desde inicio − 10min ≤ ahora.
+ */
+function actionsFor(state: BlockState, apptStart: number, nowM: number | null): ActionKey[] {
+  if (state === 'done')    return ['reagendar', 'mensaje', 'llamar'];
+  if (state === 'noshow')  return ['reagendar', 'mensaje', 'llamar'];
+  if (state === 'walk')    return ['termino', 'mensaje', 'mover', 'cancelar'];
+  if (state === 'pending') return ['confirmar', 'mensaje', 'mover', 'cancelar'];
+  // conf / curso / late — ventana anticipada de 10 min activa Llegó/No-llegó.
+  const inWindow = nowM !== null && nowM >= apptStart - 10;
+  if (inWindow) return ['llego', 'noLlego', 'mensaje', 'cancelar'];
+  return ['mensaje', 'mover', 'cancelar'];
+}
+
+/** Íconos minimalistas por acción (SVG stroke, currentColor). */
+function ActionIcon({ k }: { k: ActionKey }) {
+  const p = { width: 17, height: 17, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+  switch (k) {
+    case 'mensaje':   return <svg {...p} aria-hidden><path d="M3 4.5h14v9H8l-4 3v-3H3z" /></svg>;
+    case 'mover':     return <svg {...p} aria-hidden><path d="M10 3v14M6 7l4-4 4 4M6 13l4 4 4-4" /></svg>;
+    case 'cancelar':  return <svg {...p} aria-hidden><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" /></svg>;
+    case 'confirmar': return <svg {...p} aria-hidden><path d="M4 10.5l3.5 3.5L16 6" /></svg>;
+    case 'llego':     return <svg {...p} aria-hidden><circle cx="8" cy="6.5" r="3" /><path d="M3 16c0-2.8 2.3-4.5 5-4.5.7 0 1.4.1 2 .3M12.5 14.5l2 2 3.5-4" /></svg>;
+    case 'noLlego':   return <svg {...p} aria-hidden><circle cx="8" cy="6.5" r="3" /><path d="M3 16c0-2.8 2.3-4.5 5-4.5M13 13l4 4M17 13l-4 4" /></svg>;
+    case 'termino':   return <svg {...p} aria-hidden><circle cx="10" cy="10" r="7" /><path d="M6.5 10l2.5 2.5 5-5" /></svg>;
+    case 'reagendar': return <svg {...p} aria-hidden><rect x="3" y="4.5" width="14" height="12.5" rx="2" /><path d="M3 8.5h14M7 3v3M13 3v3" /></svg>;
+    case 'llamar':    return <svg {...p} aria-hidden><path d="M4.5 3.5c0 7.5 4.5 12 12 12l-.2-3-3-1-1.8 1.8c-1.8-1-3.8-3-4.8-4.8L8.5 7.7l-1-3H4.5z" /></svg>;
+  }
+}
+
+const CARD_W = 288;
+const CARD_H_EST = 330;
+
+type Selection = { appt: DashboardAppointment; state: BlockState; rect: DOMRect };
+
+function DetailCard({
+  sel, timezone, nowMinutes, onClose,
+}: {
+  sel: Selection; timezone: string; nowMinutes: number | null; onClose: () => void;
+}) {
+  const { appt, state, rect } = sel;
+  const st = STATE_STYLE[state];
+  const apptStart = isoToLocalMinutes(appt.starts_at, timezone);
+  const apptEnd   = isoToLocalMinutes(appt.ends_at,   timezone);
+  const isWalk = appt.status === 'walkin' || appt.source === 'walkin';
+  const name = appt.customer?.name ?? (isWalk ? 'Walk-in (sin nombre)' : 'Sin cliente');
+  const dur = Math.max(0, apptEnd - apptStart);
+  const actions = actionsFor(state, apptStart, nowMinutes);
+
+  // Ancla espacial: al lado del bloque. Por defecto a la derecha; si sabemos el ancho
+  // del viewport y no cabe, se voltea a la izquierda. El clamp final a los bordes se
+  // hace en CSS con clamp()+vw/dvh (unidades reales aunque innerWidth JS sea 0 en
+  // algunos entornos headless), así la card nunca se sale de pantalla.
+  const gap = 10;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 0; // 0 = desconocido
+  let rawLeft = rect.right + gap;
+  if (vw > 0 && rawLeft + CARD_W > vw - 8) rawLeft = rect.left - CARD_W - gap;
+  const rawTop = rect.top;
+  const leftCss = `clamp(8px, ${Math.round(rawLeft)}px, calc(100vw - ${CARD_W + 8}px))`;
+  const topCss = `clamp(8px, ${Math.round(rawTop)}px, calc(100dvh - ${CARD_H_EST + 8}px))`;
+
+  const fmt = (m: number) => minutesToLabel(m);
+
+  return (
+    <div
+      role="dialog"
+      aria-label={`Detalle de cita de ${name}`}
+      className={`fixed z-50 overflow-hidden rounded-card border border-line bg-card shadow-hero ring-1 ${CARD_RING[state]}`}
+      style={{ left: leftCss, top: topCss, width: CARD_W, borderLeft: `4px solid ${st.bar}`, maxHeight: 'calc(100dvh - 24px)' }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start justify-between gap-2 px-4 pt-3.5">
+        <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-semibold ${st.bg} ${st.ink}`}>
+          {STATE_LABEL[state]}
+        </span>
+        <button
+          onClick={onClose}
+          aria-label="Cerrar"
+          className="grid h-6 w-6 place-items-center rounded-pill text-ink-2 transition hover:bg-canvas active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
+        >
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden>
+            <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="px-4 pb-1 pt-2">
+        <p className="truncate text-[17px] font-semibold text-ink">{name}</p>
+        <p className="mt-0.5 truncate text-[13px] text-ink-2">{appt.service.name}</p>
+      </div>
+
+      <dl className="space-y-1.5 px-4 py-3 text-[12.5px]">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-faint">Horario</dt>
+          <dd className="tabular-nums font-medium text-ink">{fmt(apptStart)}–{fmt(apptEnd)} · {dur} min</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-faint">Barbero</dt>
+          <dd className="truncate font-medium text-ink">{appt.staff.name}</dd>
+        </div>
+        {appt.customer?.phone && (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-faint">Teléfono</dt>
+            <dd className="tabular-nums font-medium text-ink">{appt.customer.phone}</dd>
+          </div>
+        )}
+        {appt.notes && (
+          <div className="flex items-start justify-between gap-3">
+            <dt className="shrink-0 text-faint">Nota</dt>
+            <dd className="text-right text-ink-2">{appt.notes}</dd>
+          </div>
+        )}
+      </dl>
+
+      {/* Acciones — VISUALES en Paso 3A (no mutan; cableado = Paso 3B) */}
+      <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-line bg-canvas px-4 py-3">
+        {actions.map((k) => (
+          <button
+            key={k}
+            type="button"
+            aria-label={ACTION[k].label}
+            onClick={() => { if (typeof console !== 'undefined') console.debug(`[card] acción "${k}" (visual, Paso 3A — sin efecto)`); }}
+            className="group flex flex-col items-center gap-1"
+          >
+            <span className={`grid h-10 w-10 place-items-center rounded-pill border bg-card transition active:scale-95 ${ACCENT_CLS[ACTION[k].accent]}`}>
+              <ActionIcon k={k} />
+            </span>
+            <span className="text-[10px] font-medium text-ink-2">{ACTION[k].label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AssistantVerticalCalendar({
@@ -170,6 +347,16 @@ export default function AssistantVerticalCalendar({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const didAutoScrollRef = useRef<string | null>(null);
+
+  // ── Cita seleccionada → card de detalle (Paso 3A). Local al calendario: la card
+  //    es una preocupación visual del calendario; no toca al contenedor. ──
+  const [selected, setSelected] = useState<Selection | null>(null);
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected]);
 
   // ── Solicitudes de gesto que el vertical aún NO honra (Paso 1): las acusamos y
   //    limpiamos de inmediato para no dejar al desk en un estado colgado (p.ej. el
@@ -254,7 +441,14 @@ export default function AssistantVerticalCalendar({
   const nowTop = nowMinutes !== null ? minutesToPx(nowMinutes) : null;
   const showNow = nowTop !== null && nowTop >= 0 && nowTop <= gridHeightPx;
 
+  // Selección efectiva: si la cita seleccionada sigue existiendo (tras poll/refresh)
+  // usamos su versión fresca; si desapareció, la card no se muestra. Derivado (no
+  // effect) → evita setState-en-effect y refresca los datos de la card.
+  const freshAppt = selected ? appointments.find((a) => a.id === selected.appt.id) : undefined;
+  const activeSel: Selection | null = selected && freshAppt ? { ...selected, appt: freshAppt } : null;
+
   return (
+    <>
     <div
       ref={scrollRef}
       className="overflow-auto bg-card"
@@ -287,10 +481,12 @@ export default function AssistantVerticalCalendar({
             ))}
             {showNow && (
               <div
-                className="absolute right-0 z-20 h-1.5 w-1.5 -translate-y-1/2 rounded-pill bg-red-ink"
+                className="absolute right-0.5 z-20 -translate-y-1/2 rounded-pill bg-red-ink px-1 py-px text-[9px] font-bold tabular-nums text-card shadow-card"
                 style={{ top: nowTop! }}
                 aria-hidden
-              />
+              >
+                {minutesToLabel(nowMinutes!)}
+              </div>
             )}
           </div>
         </div>
@@ -413,7 +609,19 @@ export default function AssistantVerticalCalendar({
                         state === 'late' ? 'animate-data-beat motion-reduce:animate-none' : ''
                       }`}
                       style={{ top, height, borderLeft: `3px solid ${st.bar}`, padding: '4px 8px' }}
-                      onClick={(e) => e.stopPropagation()}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Ver detalle de cita de ${name}`}
+                      onClick={(e) => {
+                        e.stopPropagation(); // no dispara el crear-en-hueco de la columna
+                        setSelected({ appt, state, rect: e.currentTarget.getBoundingClientRect() });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault(); e.stopPropagation();
+                          setSelected({ appt, state, rect: e.currentTarget.getBoundingClientRect() });
+                        }
+                      }}
                       title={`${time} · ${name} · ${appt.service.name}${word ? ` · ${word}` : ''}`}
                     >
                       {showName && (
@@ -439,13 +647,16 @@ export default function AssistantVerticalCalendar({
                   );
                 })}
 
-                {/* Línea "ahora" (horizontal, roja) */}
+                {/* Banda sutil del "ahora": franja tenue + hairline crisp (Paso 3A) */}
                 {showNow && (
                   <div
-                    className="pointer-events-none absolute left-0 right-0 z-10 h-0.5 bg-red-ink"
+                    className="pointer-events-none absolute left-0 right-0 z-10 flex h-3 -translate-y-1/2 items-center"
                     style={{ top: nowTop! }}
                     aria-hidden
-                  />
+                  >
+                    <div className="absolute inset-0 bg-red-ink/[0.06]" />
+                    <div className="relative h-px w-full bg-red-ink" />
+                  </div>
                 )}
               </div>
             </div>
@@ -453,5 +664,23 @@ export default function AssistantVerticalCalendar({
         })}
       </div>
     </div>
+
+    {/* Card de detalle — velo claro sutil (NO oscuro) + card flotante anclada */}
+    {activeSel && (
+      <>
+        <div
+          className="fixed inset-0 z-40 bg-canvas/50 backdrop-blur-[2px]"
+          onClick={() => setSelected(null)}
+          aria-hidden
+        />
+        <DetailCard
+          sel={activeSel}
+          timezone={timezone}
+          nowMinutes={nowMinutes}
+          onClose={() => setSelected(null)}
+        />
+      </>
+    )}
+    </>
   );
 }
