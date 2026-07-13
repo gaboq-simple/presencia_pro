@@ -99,6 +99,11 @@ const FALLBACK_END   = 20;     // hora de cierre default si no hay datos
 
 const PX_PER_MIN = HOUR_HEIGHT_PX / 60; // 60px/h = 1px/min
 
+// ── Drag para mover (Paso 4D) ──
+const DRAG_THRESHOLD_PX = 5;   // mover más que esto con el botón abajo → es drag (no click)
+const EDGE_ZONE_PX      = 44;  // px desde el borde sup/inf del scroll que dispara auto-scroll
+const AUTO_SCROLL_PX    = 12;  // px por frame del auto-scroll en el borde
+
 // Tono Zentriq por estado (Paso 1: base + mínimo para no regresar). El set fino de
 // 6 estados (curso/late/pending distinguidos) es del Paso 2. Espejo del STATE_STYLE
 // de PanoramaTimeline, sin los estados derivados del tiempo.
@@ -519,6 +524,19 @@ export default function AssistantVerticalCalendar({
   const [placeHover, setPlaceHover] = useState<{ staffId: string; min: number } | null>(null);
   const [placeConfirm, setPlaceConfirm] = useState<PlaceConfirm | null>(null);
 
+  // ── Drag para mover (Paso 4D) — forma alternativa de iniciar/dirigir el MISMO gesto
+  //    de 4B (reusa placing/placeConfirm/confirmPlacement/onPlace). El drag solo aporta
+  //    "arrastrar" en vez de "tocar-destino"; el reagendado y la validación son de 4B.
+  const dragRef = useRef<
+    { apptId: string; appt: DashboardAppointment; dur: number; startX: number; startY: number } | null
+  >(null);
+  const draggingRef = useRef(false);      // true una vez cruzado el umbral (es drag, no click)
+  const dragTargetRef = useRef<PlaceConfirm | null>(null); // último destino VÁLIDO bajo el cursor
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const autoScrollRaf = useRef<number | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null); // permite abortar el drag (Escape)
+  const [dragGhost, setDragGhost] = useState<{ x: number; y: number; name: string; bar: string } | null>(null);
+
   // Entrar al modo colocación con una cita (desde la card o desde la cola de acción).
   // Cierra la card y arranca limpio (sin destino ni confirmación previa).
   const startPlacing = useCallback((a: DashboardAppointment) => {
@@ -550,6 +568,9 @@ export default function AssistantVerticalCalendar({
     if (!selected && !placing) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // Drag en curso → abortar el gesto (quita listeners/ghost/auto-scroll) además de
+      // limpiar el modo colocación.
+      if (draggingRef.current) { dragCleanupRef.current?.(); draggingRef.current = false; dragRef.current = null; }
       if (placeConfirm) { setPlaceConfirm(null); return; }
       if (placing) { cancelPlacing(); return; }
       setSelected(null);
@@ -784,6 +805,117 @@ export default function AssistantVerticalCalendar({
     cancelPlacing();
   }, [placing, placeConfirm, onPlace, cancelPlacing]);
 
+  // ── Drag para mover (Paso 4D) — pointerdown sobre una cita arma un posible drag.
+  // Si el cursor cruza el umbral con el botón abajo → es drag: entra al MISMO modo
+  // colocación de 4B (startPlacing), un fantasma sigue el cursor y el wash marca el
+  // destino bajo él; al soltar en destino válido → confirmación (reusa placeConfirm).
+  // Si suelta sin cruzar el umbral → es click → el onClick del bloque abre la card.
+  const onApptPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>, appt: DashboardAppointment, barColor: string) => {
+      if (placing) return;                 // click-to-place (botón "Mover") activo → drag no interfiere
+      if (e.button !== 0) return;          // solo botón primario
+      const dur = Math.max(15, isoToLocalMinutes(appt.ends_at, timezone) - isoToLocalMinutes(appt.starts_at, timezone));
+      const name = appt.customer?.name?.trim() || 'la cita';
+      dragRef.current = { apptId: appt.id, appt, dur, startX: e.clientX, startY: e.clientY };
+      draggingRef.current = false;
+      dragTargetRef.current = null;
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+
+      // Resolver el destino bajo el cursor: qué columna (data-col-staff), qué minuto
+      // (mismo slotFromRelY del click-to-place) y si es válido (mismo isPlaceValid).
+      function resolve(cx: number, cy: number): (PlaceConfirm & { valid: boolean }) | null {
+        const el = document.elementFromPoint(cx, cy) as Element | null;
+        const colEl = el?.closest?.('[data-col-staff]') as HTMLElement | null;
+        if (!colEl) return null;
+        const staffId = colEl.getAttribute('data-col-staff')!;
+        const sObj = staff.find((x) => x.id === staffId);
+        if (!sObj) return null;
+        const av = sObj.availabilityToday;
+        const availStart = av ? timeToMinutes(av.start_time) : null;
+        const availEnd = av ? timeToMinutes(av.end_time) : null;
+        const rect = colEl.getBoundingClientRect();
+        const min = slotFromRelY(cy - rect.top);
+        const appts = appointments.filter((a) => a.staff.id === staffId && a.status !== 'cancelled');
+        const blocks = staffBlocks.filter((b) => b.staffId === staffId);
+        const valid = isPlaceValid(min, dur, availStart, availEnd, appts, blocks, appt.id);
+        return { staffId, staffName: sObj.name, min, valid };
+      }
+
+      function updateFromPointer(cx: number, cy: number) {
+        lastPointerRef.current = { x: cx, y: cy };
+        setDragGhost({ x: cx, y: cy, name, bar: barColor });
+        const t = resolve(cx, cy);
+        if (t && t.valid) {
+          dragTargetRef.current = { staffId: t.staffId, staffName: t.staffName, min: t.min };
+          setPlaceHover({ staffId: t.staffId, min: t.min });
+        } else {
+          dragTargetRef.current = null;
+          setPlaceHover(null);
+        }
+      }
+
+      // Auto-scroll cuando el cursor toca el borde sup/inf del área scrolleable — deja
+      // soltar en horas fuera de vista. Adaptación vertical del EDGE_ZONE del panorama.
+      function autoTick() {
+        const sc = scrollRef.current;
+        const p = lastPointerRef.current;
+        if (sc && p) {
+          const r = sc.getBoundingClientRect();
+          let dir = 0;
+          if (p.y < r.top + HEADER_HEIGHT_PX + EDGE_ZONE_PX) dir = -1;
+          else if (p.y > r.bottom - EDGE_ZONE_PX) dir = 1;
+          if (dir !== 0) {
+            const before = sc.scrollTop;
+            sc.scrollTop = Math.max(0, before + dir * AUTO_SCROLL_PX);
+            if (sc.scrollTop !== before) updateFromPointer(p.x, p.y); // el contenido se movió bajo el cursor
+          }
+        }
+        autoScrollRaf.current = requestAnimationFrame(autoTick);
+      }
+
+      function cleanup() {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        if (autoScrollRaf.current) { cancelAnimationFrame(autoScrollRaf.current); autoScrollRaf.current = null; }
+        setDragGhost(null);
+        dragCleanupRef.current = null;
+      }
+
+      function onMove(ev: PointerEvent) {
+        const d = dragRef.current;
+        if (!d) return;
+        lastPointerRef.current = { x: ev.clientX, y: ev.clientY };
+        if (!draggingRef.current) {
+          if (Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) < DRAG_THRESHOLD_PX) return; // aún es click potencial
+          draggingRef.current = true;
+          startPlacing(d.appt);                                   // reusa 4B: marca la cita + pausa polling
+          autoScrollRaf.current = requestAnimationFrame(autoTick);
+        }
+        updateFromPointer(ev.clientX, ev.clientY);
+      }
+
+      function onUp() {
+        const wasDragging = draggingRef.current;
+        cleanup();
+        draggingRef.current = false;
+        dragRef.current = null;
+        if (!wasDragging) return;                                 // no cruzó umbral → click → onClick abre la card
+        // Suprimir el click "fantasma" que el navegador dispara tras el pointerup del drag.
+        const killOnce = (ce: MouseEvent) => { ce.stopPropagation(); ce.preventDefault(); };
+        window.addEventListener('click', killOnce, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener('click', killOnce, true), 400);
+        const t = dragTargetRef.current;
+        if (t) setPlaceConfirm(t);                                // destino válido → confirmación (reusa 4B)
+        else cancelPlacing();                                     // soltó en inválido → cancela, la cita vuelve
+      }
+
+      dragCleanupRef.current = cleanup;
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [placing, timezone, staff, appointments, staffBlocks, isPlaceValid, slotFromRelY, startPlacing, cancelPlacing],
+  );
+
   if (staff.length === 0) {
     return (
       <div className="m-3 rounded-card border border-dashed border-line px-4 py-6 text-center">
@@ -901,21 +1033,24 @@ export default function AssistantVerticalCalendar({
               {/* Cuerpo — fuera de modo colocación: click crea walk-in. En modo
                   colocación: click = soltar la cita movida acá (los modos no se pisan). */}
               <div
+                data-col-staff={s.id}
                 role="button"
                 tabIndex={0}
                 aria-label={placing ? `Soltar la cita en ${s.name}` : `Crear cita para ${s.name}`}
                 className="relative cursor-pointer"
                 style={{ height: gridHeightPx }}
-                onClick={(e) =>
+                onClick={(e) => {
+                  if (draggingRef.current) return; // drag en curso → el pointerup lo resuelve
                   placing
                     ? handlePlaceClick(e, s.id, s.name, availStart, availEnd, barberAppts, barberBlocks)
-                    : handleColumnClick(e, s.id)
-                }
-                onMouseMove={(e) =>
+                    : handleColumnClick(e, s.id);
+                }}
+                onMouseMove={(e) => {
+                  if (draggingRef.current) return; // durante el drag manda el listener de pointer
                   placing
                     ? handlePlaceHover(e, s.id, availStart, availEnd, barberAppts, barberBlocks)
-                    : handleColumnHover(e, s.id, availStart, availEnd, barberAppts, barberBlocks)
-                }
+                    : handleColumnHover(e, s.id, availStart, availEnd, barberAppts, barberBlocks);
+                }}
                 onMouseLeave={() => {
                   if (placing) {
                     if (!placeConfirm) setPlaceHover((p) => (p && p.staffId === s.id ? null : p));
@@ -1064,10 +1199,12 @@ export default function AssistantVerticalCalendar({
                         borderLeft: `3px solid ${st.bar}`,
                         outline: isMoving ? '2px dashed var(--color-teal-ink)' : undefined,
                         outlineOffset: isMoving ? '-2px' : undefined,
+                        touchAction: 'none', // el drag (Paso 4D) es dueño del gesto sobre la cita en táctil
                       }}
                       role="button"
                       tabIndex={0}
                       aria-label={`Ver detalle de cita de ${name}`}
+                      onPointerDown={(e) => onApptPointerDown(e, appt, st.bar)}
                       onClick={(e) => {
                         if (placing) return; // en colocación el bloque no abre card; el
                                              // click cae en la columna (destino inválido → no-op)
@@ -1194,6 +1331,19 @@ export default function AssistantVerticalCalendar({
             </button>
           </>
         )}
+      </div>
+    )}
+
+    {/* Fantasma del drag (Paso 4D) — sigue al cursor mientras se arrastra la cita.
+        pointer-events-none para no interferir con elementFromPoint (resolución del
+        destino). La hora del destino va en el gutter (placeHover); acá solo el nombre. */}
+    {dragGhost && (
+      <div
+        className="pointer-events-none fixed z-[60] max-w-[200px] truncate rounded-[10px] border border-line bg-card px-2.5 py-1.5 text-[12px] font-semibold text-ink shadow-hero"
+        style={{ left: dragGhost.x + 12, top: dragGhost.y + 8, borderLeft: `3px solid ${dragGhost.bar}` }}
+        aria-hidden
+      >
+        {dragGhost.name}
       </div>
     )}
     </>
