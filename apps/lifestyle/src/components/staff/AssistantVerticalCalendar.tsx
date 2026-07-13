@@ -537,6 +537,12 @@ export default function AssistantVerticalCalendar({
   const dragCleanupRef = useRef<(() => void) | null>(null); // permite abortar el drag (Escape)
   const [dragGhost, setDragGhost] = useState<{ x: number; y: number; name: string; bar: string } | null>(null);
 
+  // ── Affordance de scroll horizontal (Paso 5A) — hay más barberos al costado que los
+  //    que caben. Detectado con scrollLeft/scrollWidth/clientWidth REALES del contenedor
+  //    (funcionan en headless, a diferencia de innerWidth). Dinámico: se recalcula al
+  //    scrollear/redimensionar/cambiar los barberos.
+  const [scrollEdges, setScrollEdges] = useState({ left: false, right: false });
+
   // Entrar al modo colocación con una cita (desde la card o desde la cola de acción).
   // Cierra la card y arranca limpio (sin destino ni confirmación previa).
   const startPlacing = useCallback((a: DashboardAppointment) => {
@@ -916,6 +922,29 @@ export default function AssistantVerticalCalendar({
     [placing, timezone, staff, appointments, staffBlocks, isPlaceValid, slotFromRelY, startPlacing, cancelPlacing],
   );
 
+  // ── Affordance de scroll horizontal (Paso 5A): recalcula qué borde tiene columnas
+  //    ocultas. Sin overflow (pocos barberos) → ambos false → sin fade fantasma.
+  const updateScrollEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setScrollEdges((prev) => {
+      const left = el.scrollLeft > 1;
+      const right = maxScroll > 1 && el.scrollLeft < maxScroll - 1;
+      return prev.left === left && prev.right === right ? prev : { left, right };
+    });
+  }, []);
+  // Recalcular al montar, al cambiar el nº de barberos / el alto del día, y ante resize
+  // del contenedor (ResizeObserver — no depende de window, sirve en headless).
+  useEffect(() => {
+    updateScrollEdges();
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => updateScrollEdges());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateScrollEdges, staff.length, gridHeightPx]);
+
   if (staff.length === 0) {
     return (
       <div className="m-3 rounded-card border border-dashed border-line px-4 py-6 text-center">
@@ -935,8 +964,13 @@ export default function AssistantVerticalCalendar({
 
   return (
     <>
+    {/* Wrapper `relative` para anclar los fades del affordance de scroll-X (Paso 5A)
+        FUERA del contenedor scrolleable — así se quedan pegados al borde visible y no
+        se desplazan con el scroll. */}
+    <div className="relative">
     <div
       ref={scrollRef}
+      onScroll={updateScrollEdges}
       className="overflow-auto bg-card"
       // El shell del desk es min-h-dvh (crece con el contenido), así que el calendario
       // se acota a sí mismo para poseer su scroll (sticky + auto-scroll funcionan) en
@@ -1263,6 +1297,27 @@ export default function AssistantVerticalCalendar({
           );
         })}
       </div>
+    </div>
+
+    {/* ── Affordance de scroll-X (Paso 5A): fades que insinúan "hay más barberos al
+        costado". Solo cuando hay overflow real hacia ese lado (scrollEdges). Fade del
+        color del calendario (card) → transparente; pointer-events-none (decorativo, no
+        bloquea clicks). El izquierdo arranca tras la columna de horas sticky (que ya tapa
+        ese borde). z alto para quedar sobre columnas/cabeceras. ── */}
+    {scrollEdges.right && (
+      <div
+        className="pointer-events-none absolute right-0 top-0 bottom-0 z-[35]"
+        style={{ width: 48, background: 'linear-gradient(to left, var(--color-card), transparent)' }}
+        aria-hidden
+      />
+    )}
+    {scrollEdges.left && (
+      <div
+        className="pointer-events-none absolute top-0 bottom-0 z-[35]"
+        style={{ left: TIME_COL_WIDTH_PX, width: 48, background: 'linear-gradient(to right, var(--color-card), transparent)' }}
+        aria-hidden
+      />
+    )}
     </div>
 
     {/* Card de detalle — velo claro sutil (NO oscuro) + card flotante anclada */}
