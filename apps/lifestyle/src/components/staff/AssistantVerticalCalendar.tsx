@@ -30,8 +30,12 @@
 //   desk (optimista+toast): No-llegó/Terminó/Confirmar/Llegó/Cancelar(+motivo);
 //   Mensaje=wa.me, Llamar=tel: (sin mutar). Mover/Reagendar quedan visuales (gesto=4).
 //   confirmAppointment y markArrived (arrived_at, guard de auto-cancel) son nuevas.
+// ALCANCE (Paso 4A): feedback de hora al hover sobre un hueco libre — franja del slot
+//   de 15 min (teal-tint punteado) + pastilla con la hora exacta que se agendaría
+//   (mismo cálculo `slotFromRelY` que el click). Solo en zona reservable (turno, sin
+//   cita ni bloqueo). No cambia la creación. Puro feedback previo.
 // PENDIENTE de pasos siguientes: drag / click-to-place / walk-in de un toque + Mover/
-//   Reagendar (4), foco de barbero, descansos (break_start/end), retiro de
+//   Reagendar (4B+), foco de barbero, descansos (break_start/end), retiro de
 //   PanoramaTimeline. Los callbacks de gesto (onPlace/reschedule) siguen inertes.
 //
 // NOTA: los helpers de tiempo son un espejo de PanoramaTimeline/AvailabilityTimeline
@@ -547,17 +551,62 @@ export default function AssistantVerticalCalendar({
     el.scrollTop = Math.max(0, HEADER_HEIGHT_PX + nowTop - el.clientHeight / 3);
   }, [dateTz, date, timezone, startMinutes, gridHeightPx]);
 
+  // Posición Y (px dentro del cuerpo) → minuto del slot, redondeado a 15 min y
+  // acotado al rango. FUENTE ÚNICA para el click Y el feedback de hover: garantiza
+  // que "lo que ves es lo que se agenda".
+  const slotFromRelY = useCallback(
+    (relY: number) => {
+      const m = startMinutes + Math.round((relY / gridHeightPx) * totalMinutes / 15) * 15;
+      return Math.max(startMinutes, Math.min(endMinutes - 15, m));
+    },
+    [startMinutes, endMinutes, totalMinutes, gridHeightPx],
+  );
+
   // ── Click en hueco: posición Y → hora (redondeo a 15 min) → onTapFreeSlot ──
   const handleColumnClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>, staffId: string) => {
       if (!onTapFreeSlot) return;
       const rect = e.currentTarget.getBoundingClientRect();
-      const relY = e.clientY - rect.top;
-      const clickedMin = startMinutes + Math.round((relY / gridHeightPx) * totalMinutes / 15) * 15;
-      const clamped = Math.max(startMinutes, Math.min(endMinutes - 15, clickedMin));
-      onTapFreeSlot(staffId, clamped);
+      onTapFreeSlot(staffId, slotFromRelY(e.clientY - rect.top));
     },
-    [onTapFreeSlot, startMinutes, endMinutes, totalMinutes, gridHeightPx],
+    [onTapFreeSlot, slotFromRelY],
+  );
+
+  // ── Feedback de hora al hover sobre un hueco LIBRE (Paso 4A) ──
+  // Muestra el slot de 15 min (redondeado, mismo cálculo que el click) donde caería
+  // el walk-in. Solo si el slot es realmente reservable: dentro del turno del barbero,
+  // sin cita ni bloqueo encima. Se apaga sobre cita/bloqueo/fuera-de-horario.
+  const [hoverSlot, setHoverSlot] = useState<{ staffId: string; min: number } | null>(null);
+  const handleColumnHover = useCallback(
+    (
+      e: React.MouseEvent<HTMLDivElement>,
+      staffId: string,
+      availStart: number | null,
+      availEnd: number | null,
+      appts: DashboardAppointment[],
+      blocks: PanoramaBlock[],
+    ) => {
+      if (!onTapFreeSlot) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const min = slotFromRelY(e.clientY - rect.top);
+      const slotEnd = min + 15;
+      const inHours = availStart !== null && availEnd !== null && min >= availStart && slotEnd <= availEnd;
+      const overlaps = (s: string, en: string) => {
+        const s0 = isoToLocalMinutes(s, timezone);
+        const e0 = isoToLocalMinutes(en, timezone);
+        return min < e0 && slotEnd > s0; // rangos se solapan
+      };
+      const free =
+        inHours &&
+        !appts.some((a) => overlaps(a.starts_at, a.ends_at)) &&
+        !blocks.some((b) => overlaps(b.startsAt, b.endsAt));
+      setHoverSlot((prev) =>
+        free
+          ? (prev && prev.staffId === staffId && prev.min === min ? prev : { staffId, min })
+          : (prev === null ? prev : null),
+      );
+    },
+    [onTapFreeSlot, slotFromRelY, timezone],
   );
 
   if (staff.length === 0) {
@@ -659,6 +708,8 @@ export default function AssistantVerticalCalendar({
                 className="relative cursor-pointer"
                 style={{ height: gridHeightPx }}
                 onClick={(e) => handleColumnClick(e, s.id)}
+                onMouseMove={(e) => handleColumnHover(e, s.id, availStart, availEnd, barberAppts, barberBlocks)}
+                onMouseLeave={() => setHoverSlot((p) => (p && p.staffId === s.id ? null : p))}
                 onKeyDown={(e) => {
                   if ((e.key === 'Enter' || e.key === ' ') && onTapFreeSlot) {
                     e.preventDefault();
@@ -706,6 +757,21 @@ export default function AssistantVerticalCalendar({
                     />
                   );
                 })}
+
+                {/* Feedback de hora al hover sobre un hueco libre (Paso 4A) — franja
+                    del slot de 15 min + pastilla con la hora exacta que se agendaría.
+                    pointer-events-none: no interfiere con el click de creación. */}
+                {hoverSlot && hoverSlot.staffId === s.id && (
+                  <div
+                    className="pointer-events-none absolute left-1 right-1 z-[6] rounded-[6px] border border-dashed border-teal-border bg-tint-1"
+                    style={{ top: minutesToPx(hoverSlot.min), height: 15 * PX_PER_MIN }}
+                    aria-hidden
+                  >
+                    <span className="absolute left-1 top-1/2 -translate-y-1/2 rounded-pill bg-teal-ink px-1.5 py-px text-[10px] font-bold tabular-nums text-card shadow-card">
+                      {minutesToLabel(hoverSlot.min)}
+                    </span>
+                  </div>
+                )}
 
                 {/* Bloques de cita — estado por color/tono + info completa + badge bot */}
                 {barberAppts.map((appt) => {
