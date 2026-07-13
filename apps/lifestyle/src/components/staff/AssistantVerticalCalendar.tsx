@@ -21,6 +21,11 @@
 // claro sutil, ring/border por estado, acciones por estado+momento con ventana
 // anticipada de 10min — SIN mutar datos, el cableado es Paso 3B) + banda sutil del
 // "ahora" (franja tenue + hairline + pastilla de hora en el gutter).
+// ALCANCE (Paso 3.5): pulido visual de la card al mock congelado (.fcard): ancho 360,
+//   animación de entrada, border-left del estado en la cabecera, badge con puntito,
+//   nombre 20px, sub "servicio · con barbero", filas con ícono+etiqueta 70px+valor,
+//   zona de acciones con degradado, y botones circulares 46px con glow (elevación +
+//   halo de color al hover). Fix del nombre "III" (customer con name vacío). Puro visual.
 // ALCANCE (Paso 3B): acciones de la card cableadas a server actions vía callbacks del
 //   desk (optimista+toast): No-llegó/Terminó/Confirmar/Llegó/Cancelar(+motivo);
 //   Mensaje=wa.me, Llamar=tel: (sin mutar). Mover/Reagendar quedan visuales (gesto=4).
@@ -198,12 +203,24 @@ const ACTION: Record<ActionKey, { label: string; accent: ActionAccent }> = {
   reagendar: { label: 'Reagendar', accent: 'neutral' },
   llamar:    { label: 'Llamar',    accent: 'pos' },
 };
+// Acabado "glow" del botón circular (mock .actbtn/.circ): al hover el círculo se eleva
+// (-translateY) y aparece un halo de color según la acción (0 0 0 4px wash + sombra de
+// color). El ícono lleva el color de acento en reposo. Washes mapeados a tokens Zentriq:
+// teal-wash→tint-1, amber-wash→amber-tint (exacto), danger-wash→red-tint, neutral→line-2.
 const ACCENT_CLS: Record<ActionAccent, string> = {
-  pos:     'border-teal-border text-teal-ink hover:bg-tint-1 hover:shadow-hero',
-  warn:    'border-amber-border text-amber hover:bg-amber-tint hover:shadow-hero',
-  danger:  'border-red-border text-red-ink hover:bg-red-tint hover:shadow-hero',
-  neutral: 'border-line text-ink-2 hover:bg-canvas hover:shadow-card',
+  pos:     'text-teal-ink card-glow-pos',
+  warn:    'text-amber card-glow-warn',
+  danger:  'text-red-ink card-glow-danger',
+  neutral: 'text-ink-2 card-glow-neutral',
 };
+
+// Íconos de fila (18px, faint) — clock / phone / note.
+function RowIcon({ k }: { k: 'clock' | 'phone' | 'note' }) {
+  const p = { width: 18, height: 18, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+  if (k === 'clock') return <svg {...p} aria-hidden><circle cx="10" cy="10" r="7" /><path d="M10 6v4l2.5 1.5" /></svg>;
+  if (k === 'phone') return <svg {...p} aria-hidden><path d="M4.5 3.5c0 7.5 4.5 12 12 12l-.2-3-3-1-1.8 1.8c-1.8-1-3.8-3-4.8-4.8L8.5 7.7l-1-3H4.5z" /></svg>;
+  return <svg {...p} aria-hidden><path d="M5 3.5h7l3 3v10H5zM12 3.5V6.5h3M7.5 10h5M7.5 13h5" /></svg>;
+}
 
 /**
  * Set de acciones según estado + momento (visual; el cableado a server actions es
@@ -222,7 +239,7 @@ function actionsFor(state: BlockState, apptStart: number, nowM: number | null): 
 
 /** Íconos minimalistas por acción (SVG stroke, currentColor). */
 function ActionIcon({ k }: { k: ActionKey }) {
-  const p = { width: 17, height: 17, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+  const p = { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
   switch (k) {
     case 'mensaje':   return <svg {...p} aria-hidden><path d="M3 4.5h14v9H8l-4 3v-3H3z" /></svg>;
     case 'mover':     return <svg {...p} aria-hidden><path d="M10 3v14M6 7l4-4 4 4M6 13l4 4 4-4" /></svg>;
@@ -236,8 +253,8 @@ function ActionIcon({ k }: { k: ActionKey }) {
   }
 }
 
-const CARD_W = 288;
-const CARD_H_EST = 330;
+const CARD_W = 360;
+const CARD_H_EST = 340;
 
 type Selection = { appt: DashboardAppointment; state: BlockState; rect: DOMRect };
 
@@ -257,7 +274,10 @@ function DetailCard({
   const apptStart = isoToLocalMinutes(appt.starts_at, timezone);
   const apptEnd   = isoToLocalMinutes(appt.ends_at,   timezone);
   const isWalk = appt.status === 'walkin' || appt.source === 'walkin';
-  const name = appt.customer?.name ?? (isWalk ? 'Walk-in (sin nombre)' : 'Sin cliente');
+  // `||` (no `??`) para tratar nombre vacío/espacios como ausente (fix del "III":
+  // customer con name '' caía en `'' ?? …` y renderizaba vacío/basura).
+  const custName = appt.customer?.name?.trim();
+  const name = custName || (isWalk ? 'Walk-in (sin nombre)' : 'Sin cliente');
   const dur = Math.max(0, apptEnd - apptStart);
   const actions = actionsFor(state, apptStart, nowMinutes);
 
@@ -285,13 +305,14 @@ function DetailCard({
     }
   }
 
-  // Contenido visual del botón (círculo + label), compartido por <button> y <a>.
+  // Contenido visual del botón (círculo 46px + label), compartido por <button> y <a>.
+  // Reposo: borde line + sombra sutil. Hover: elevación + halo de color (ACCENT_CLS).
   const chip = (k: ActionKey) => (
     <>
-      <span className={`grid h-10 w-10 place-items-center rounded-pill border bg-card transition active:scale-95 ${ACCENT_CLS[ACTION[k].accent]}`}>
+      <span className={`card-actbtn grid h-[46px] w-[46px] place-items-center rounded-pill border border-line bg-card transition duration-150 active:scale-95 ${ACCENT_CLS[ACTION[k].accent]}`}>
         <ActionIcon k={k} />
       </span>
-      <span className="text-[10px] font-medium text-ink-2">{ACTION[k].label}</span>
+      <span className="text-[11px] font-medium text-ink-2">{ACTION[k].label}</span>
     </>
   );
 
@@ -309,62 +330,59 @@ function DetailCard({
 
   const fmt = (m: number) => minutesToLabel(m);
 
+  // Filas de detalle (ícono + etiqueta 70px + valor). Barbero va en el subtítulo.
+  const rows: Array<{ icon: 'clock' | 'phone' | 'note'; label: string; value: string; mono?: boolean }> = [
+    { icon: 'clock', label: 'Horario', value: `${fmt(apptStart)}–${fmt(apptEnd)} · ${dur} min`, mono: true },
+  ];
+  if (appt.customer?.phone) rows.push({ icon: 'phone', label: 'Teléfono', value: appt.customer.phone, mono: true });
+  if (appt.notes) rows.push({ icon: 'note', label: 'Nota', value: appt.notes });
+
   return (
     <div
       role="dialog"
       aria-label={`Detalle de cita de ${name}`}
-      className={`fixed z-50 overflow-hidden rounded-card border border-line bg-card shadow-hero ring-1 ${CARD_RING[state]}`}
-      style={{ left: leftCss, top: topCss, width: CARD_W, borderLeft: `4px solid ${st.bar}`, maxHeight: 'calc(100dvh - 24px)' }}
+      className={`fixed z-50 animate-card-in overflow-hidden rounded-card border border-line bg-card shadow-hero ring-1 motion-reduce:animate-none ${CARD_RING[state]}`}
+      style={{ left: leftCss, top: topCss, width: CARD_W, maxHeight: 'calc(100dvh - 24px)' }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-start justify-between gap-2 px-4 pt-3.5">
-        <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-semibold ${st.bg} ${st.ink}`}>
-          {STATE_LABEL[state]}
-        </span>
+      {/* Cabecera — border-left del color del estado (identidad), badge, nombre, sub */}
+      <div className="relative pb-[14px] pl-5 pr-5 pt-[18px]" style={{ borderLeft: `4px solid ${st.bar}` }}>
         <button
           onClick={onClose}
           aria-label="Cerrar"
-          className="grid h-6 w-6 place-items-center rounded-pill text-ink-2 transition hover:bg-canvas active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
+          className="absolute right-3 top-3 grid h-6 w-6 place-items-center rounded-pill text-ink-2 transition hover:bg-canvas active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
         >
           <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden>
             <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />
           </svg>
         </button>
+        <span className={`mb-[9px] inline-flex items-center gap-1.5 rounded-pill px-2.5 py-[3px] text-[10.5px] font-semibold uppercase tracking-[0.04em] ${st.bg} ${st.ink}`}>
+          <span className="h-1.5 w-1.5 rounded-pill" style={{ background: st.bar }} aria-hidden />
+          {STATE_LABEL[state]}
+        </span>
+        <p className="truncate text-[20px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink">{name}</p>
+        <p className="mt-[3px] truncate text-[13px] text-ink-2">{appt.service.name} · con {appt.staff.name}</p>
       </div>
 
-      <div className="px-4 pb-1 pt-2">
-        <p className="truncate text-[17px] font-semibold text-ink">{name}</p>
-        <p className="mt-0.5 truncate text-[13px] text-ink-2">{appt.service.name}</p>
+      {/* Filas de detalle */}
+      <div className="pb-[14px] pl-5 pr-5 pt-[2px]">
+        {rows.map((r, i) => (
+          <div
+            key={r.label}
+            className={`flex items-center gap-2.5 py-[9px] text-[13.5px] ${i < rows.length - 1 ? 'border-b border-line' : ''}`}
+          >
+            <span className="shrink-0 text-faint"><RowIcon k={r.icon} /></span>
+            <span className="w-[70px] shrink-0 text-[12.5px] text-faint">{r.label}</span>
+            <span className={`min-w-0 flex-1 truncate font-medium text-ink ${r.mono ? 'tabular-nums' : ''}`}>{r.value}</span>
+          </div>
+        ))}
       </div>
-
-      <dl className="space-y-1.5 px-4 py-3 text-[12.5px]">
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-faint">Horario</dt>
-          <dd className="tabular-nums font-medium text-ink">{fmt(apptStart)}–{fmt(apptEnd)} · {dur} min</dd>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-faint">Barbero</dt>
-          <dd className="truncate font-medium text-ink">{appt.staff.name}</dd>
-        </div>
-        {appt.customer?.phone && (
-          <div className="flex items-center justify-between gap-3">
-            <dt className="text-faint">Teléfono</dt>
-            <dd className="tabular-nums font-medium text-ink">{appt.customer.phone}</dd>
-          </div>
-        )}
-        {appt.notes && (
-          <div className="flex items-start justify-between gap-3">
-            <dt className="shrink-0 text-faint">Nota</dt>
-            <dd className="text-right text-ink-2">{appt.notes}</dd>
-          </div>
-        )}
-      </dl>
 
       {/* Acciones — cableadas (Paso 3B). Mensaje/Llamar = links (sin mutar);
           Confirmar/Llegó/No-llegó/Terminó/Cancelar mutan vía el desk; Mover/Reagendar
           quedan visuales (gesto = Paso 4). Cancelar pide motivo antes de mutar. */}
       {cancelMode ? (
-        <div className="border-t border-line bg-canvas px-4 py-3">
+        <div className="border-t border-line bg-gradient-to-b from-canvas to-card px-5 pb-[18px] pt-[14px]">
           <label className="mb-1 block text-[11px] font-medium text-ink-2">Motivo de cancelación (opcional)</label>
           <input
             value={reason}
@@ -391,7 +409,7 @@ function DetailCard({
           </div>
         </div>
       ) : (
-        <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-line bg-canvas px-4 py-3">
+        <div className="flex justify-around border-t border-line bg-gradient-to-b from-canvas to-card px-5 pb-[18px] pt-[14px]">
           {actions.map((k) => {
             if (k === 'mensaje') {
               return waHref ? (
