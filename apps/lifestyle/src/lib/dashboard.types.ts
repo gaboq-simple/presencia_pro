@@ -118,6 +118,7 @@ export type DashboardAppointment = {
   adjusted_starts_at: string | null;   // nueva hora acordada si el cliente reportó retraso (S6-UI-02 PR-5)
   late_arrival_acknowledged: boolean;  // TRUE si el bot ya procesó un retraso reportado (S6-UI-02 PR-5)
   price_charged: number | null;        // precio SELLADO al completar (migración 049); null si aún no se completó
+  arrived_at: string | null;           // timestamp de llegada del cliente (botón "Llegó", Paso 3B); null = no marcado
 };
 
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
@@ -358,6 +359,7 @@ export async function getDayAppointments(
       adjusted_starts_at,
       late_arrival_acknowledged,
       price_charged,
+      arrived_at,
       staff:staff_id(id, name),
       service:service_id(id, name, duration_minutes, price, currency),
       customer:customer_id(id, name, phone),

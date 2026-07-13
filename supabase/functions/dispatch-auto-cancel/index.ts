@@ -405,6 +405,7 @@ Deno.serve(async (_req) => {
       )
     `)
     .eq('status', 'confirmed')
+    .is('arrived_at', null) // el cliente ya llegó (botón "Llegó") → no auto-cancelar
     .gte('starts_at', windowStart)
     .lte('starts_at', now.toISOString());
 

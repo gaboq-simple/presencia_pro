@@ -311,6 +311,78 @@ export async function noShowAppointment(appointmentId: string): Promise<{ error?
   if (error) throw new Error(`noShowAppointment failed: ${error.message}`);
 }
 
+// ─── Confirmar cita (pending → confirmed) ─────────────────────────────────────
+// Botón "Confirmar" de la card del asistente (Paso 3B). Espejo de completeAppointment
+// con guard atómico status='pending'.
+
+export async function confirmAppointment(appointmentId: string): Promise<{ error?: string } | void> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from('appointments')
+    .select('id, business_id, status')
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
+  if (existing.status === 'confirmed') return; // idempotente
+  if (existing.status !== 'pending') return { error: 'Solo se puede confirmar una cita pendiente' };
+
+  const { error } = await supabase
+    .from('appointments')
+    .update({
+      status:               'confirmed',
+      modified_by_staff_id: session.staff_id,
+      modified_at:          new Date().toISOString(),
+    })
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id)
+    .eq('status', 'pending'); // guard atómico contra carreras
+
+  if (error) throw new Error(`confirmAppointment failed: ${error.message}`);
+}
+
+// ─── Marcar llegada del cliente ("Llegó") ─────────────────────────────────────
+// Botón "Llegó" de la card (Paso 3B). Registra arrived_at = now; NO cambia status.
+// Protege la cita del auto-cancel: dispatch-auto-cancel (fetch) y el RPC
+// mark_appointment_no_show ignoran las citas con arrived_at IS NOT NULL.
+
+export async function markArrived(appointmentId: string): Promise<{ error?: string } | void> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from('appointments')
+    .select('id, business_id, status, arrived_at')
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id)
+    .maybeSingle();
+
+  if (fetchErr || !existing) return { error: 'Cita no encontrada' };
+  if (existing.arrived_at) return; // idempotente
+  if (['cancelled', 'completed', 'no_show'].includes(existing.status as string)) {
+    return { error: 'La cita ya está cerrada' };
+  }
+
+  const { error } = await supabase
+    .from('appointments')
+    .update({
+      arrived_at:           new Date().toISOString(),
+      modified_by_staff_id: session.staff_id,
+      modified_at:          new Date().toISOString(),
+    })
+    .eq('id', appointmentId)
+    .eq('business_id', session.business_id);
+
+  if (error) throw new Error(`markArrived failed: ${error.message}`);
+}
+
 // ─── Crear cita rápida ────────────────────────────────────────────────────────
 
 type CreateAppointmentInput = {
