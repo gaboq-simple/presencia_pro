@@ -21,9 +21,13 @@
 // claro sutil, ring/border por estado, acciones por estado+momento con ventana
 // anticipada de 10min — SIN mutar datos, el cableado es Paso 3B) + banda sutil del
 // "ahora" (franja tenue + hairline + pastilla de hora en el gutter).
-// PENDIENTE de pasos siguientes: cablear acciones de la card (3B), drag / click-to-
-// place / walk-in de un toque (4), foco de barbero, descansos (break_start/end), y el
-// retiro final de PanoramaTimeline. Los callbacks de interacción inertes (ver abajo).
+// ALCANCE (Paso 3B): acciones de la card cableadas a server actions vía callbacks del
+//   desk (optimista+toast): No-llegó/Terminó/Confirmar/Llegó/Cancelar(+motivo);
+//   Mensaje=wa.me, Llamar=tel: (sin mutar). Mover/Reagendar quedan visuales (gesto=4).
+//   confirmAppointment y markArrived (arrived_at, guard de auto-cancel) son nuevas.
+// PENDIENTE de pasos siguientes: drag / click-to-place / walk-in de un toque + Mover/
+//   Reagendar (4), foco de barbero, descansos (break_start/end), retiro de
+//   PanoramaTimeline. Los callbacks de gesto (onPlace/reschedule) siguen inertes.
 //
 // NOTA: los helpers de tiempo son un espejo de PanoramaTimeline/AvailabilityTimeline
 // (module-local, no exportados). Extraerlos a un util compartido es de un paso posterior.
@@ -54,6 +58,12 @@ type Props = {
   staffBlocks: PanoramaBlock[]; // bloqueos aprobados del día
   // Click-en-hueco → crear cita: el desk abre la hoja de walk-in pre-apuntada.
   onTapFreeSlot?: (staffId: string, startMin: number) => void;
+  // ── Acciones de la card de detalle (Paso 3B). El desk hace el optimista+toast. ──
+  onNoShow?: (id: string) => void;
+  onComplete?: (id: string) => void;
+  onConfirm?: (id: string) => void;
+  onArrived?: (id: string) => void;
+  onCancel?: (id: string, reason: string) => void;
   // ── Inertes en Paso 1 (drag / click-to-place / walk-in de un toque = pasos sig.) ──
   onPlace?: (move: MoveState, newStaffId: string, newStartMin: number, opts?: PlaceOpts) => void;
   walkinRequest?: WalkinRequest | null;
@@ -233,8 +243,14 @@ type Selection = { appt: DashboardAppointment; state: BlockState; rect: DOMRect 
 
 function DetailCard({
   sel, timezone, nowMinutes, onClose,
+  onNoShow, onComplete, onConfirm, onArrived, onCancel,
 }: {
   sel: Selection; timezone: string; nowMinutes: number | null; onClose: () => void;
+  onNoShow?: (id: string) => void;
+  onComplete?: (id: string) => void;
+  onConfirm?: (id: string) => void;
+  onArrived?: (id: string) => void;
+  onCancel?: (id: string, reason: string) => void;
 }) {
   const { appt, state, rect } = sel;
   const st = STATE_STYLE[state];
@@ -244,6 +260,40 @@ function DetailCard({
   const name = appt.customer?.name ?? (isWalk ? 'Walk-in (sin nombre)' : 'Sin cliente');
   const dur = Math.max(0, apptEnd - apptStart);
   const actions = actionsFor(state, apptStart, nowMinutes);
+
+  // Cancelar captura un motivo (se escribe a notes en cancelAppointment).
+  const [cancelMode, setCancelMode] = useState(false);
+  const [reason, setReason] = useState('');
+  // Links sin mutación: Mensaje = WhatsApp (wa.me), Llamar = tel:.
+  const phoneRaw = appt.customer?.phone ?? '';
+  const waHref = phoneRaw ? `https://wa.me/${phoneRaw.replace(/\D/g, '')}` : undefined;
+  const telHref = phoneRaw ? `tel:${phoneRaw}` : undefined;
+
+  // Despacha una acción mutante y cierra la card (el desk hace optimista+toast).
+  function run(k: ActionKey) {
+    switch (k) {
+      case 'noLlego':   onNoShow?.(appt.id);  onClose(); break;
+      case 'termino':   onComplete?.(appt.id); onClose(); break;
+      case 'confirmar': onConfirm?.(appt.id);  onClose(); break;
+      case 'llego':     onArrived?.(appt.id);  onClose(); break;
+      case 'cancelar':  setCancelMode(true); break; // pide motivo antes de mutar
+      case 'mover': case 'reagendar':
+        // TODO (Paso 4): entrar al gesto click-to-place del calendario vertical.
+        if (typeof console !== 'undefined') console.debug(`[card] "${k}" → reagendar (Paso 4, aún no cableado)`);
+        break;
+      default: break; // mensaje/llamar se renderizan como <a>
+    }
+  }
+
+  // Contenido visual del botón (círculo + label), compartido por <button> y <a>.
+  const chip = (k: ActionKey) => (
+    <>
+      <span className={`grid h-10 w-10 place-items-center rounded-pill border bg-card transition active:scale-95 ${ACCENT_CLS[ACTION[k].accent]}`}>
+        <ActionIcon k={k} />
+      </span>
+      <span className="text-[10px] font-medium text-ink-2">{ACTION[k].label}</span>
+    </>
+  );
 
   // Ancla espacial: al lado del bloque. Por defecto a la derecha; si sabemos el ancho
   // del viewport y no cabe, se voltea a la izquierda. El clamp final a los bordes se
@@ -310,23 +360,80 @@ function DetailCard({
         )}
       </dl>
 
-      {/* Acciones — VISUALES en Paso 3A (no mutan; cableado = Paso 3B) */}
-      <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-line bg-canvas px-4 py-3">
-        {actions.map((k) => (
-          <button
-            key={k}
-            type="button"
-            aria-label={ACTION[k].label}
-            onClick={() => { if (typeof console !== 'undefined') console.debug(`[card] acción "${k}" (visual, Paso 3A — sin efecto)`); }}
-            className="group flex flex-col items-center gap-1"
-          >
-            <span className={`grid h-10 w-10 place-items-center rounded-pill border bg-card transition active:scale-95 ${ACCENT_CLS[ACTION[k].accent]}`}>
-              <ActionIcon k={k} />
-            </span>
-            <span className="text-[10px] font-medium text-ink-2">{ACTION[k].label}</span>
-          </button>
-        ))}
-      </div>
+      {/* Acciones — cableadas (Paso 3B). Mensaje/Llamar = links (sin mutar);
+          Confirmar/Llegó/No-llegó/Terminó/Cancelar mutan vía el desk; Mover/Reagendar
+          quedan visuales (gesto = Paso 4). Cancelar pide motivo antes de mutar. */}
+      {cancelMode ? (
+        <div className="border-t border-line bg-canvas px-4 py-3">
+          <label className="mb-1 block text-[11px] font-medium text-ink-2">Motivo de cancelación (opcional)</label>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ej. el cliente pidió cancelar"
+            autoFocus
+            className="w-full rounded-[10px] border border-line bg-card px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-border"
+          />
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => { onCancel?.(appt.id, reason.trim()); onClose(); }}
+              className="flex-1 rounded-pill border border-red-border bg-red-tint px-3 py-1.5 text-[12px] font-semibold text-red-ink transition hover:shadow-hero active:scale-95"
+            >
+              Cancelar cita
+            </button>
+            <button
+              type="button"
+              onClick={() => setCancelMode(false)}
+              className="rounded-pill border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition hover:bg-card active:scale-95"
+            >
+              Volver
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-line bg-canvas px-4 py-3">
+          {actions.map((k) => {
+            if (k === 'mensaje') {
+              return waHref ? (
+                <a key={k} href={waHref} target="_blank" rel="noopener noreferrer"
+                   aria-label="Mensaje por WhatsApp" className="group flex flex-col items-center gap-1">
+                  {chip(k)}
+                </a>
+              ) : (
+                <button key={k} type="button" disabled title="Sin teléfono"
+                        aria-label="Mensaje (sin teléfono)" className="flex flex-col items-center gap-1 opacity-40">
+                  {chip(k)}
+                </button>
+              );
+            }
+            if (k === 'llamar') {
+              return telHref ? (
+                <a key={k} href={telHref} aria-label="Llamar" className="group flex flex-col items-center gap-1">
+                  {chip(k)}
+                </a>
+              ) : (
+                <button key={k} type="button" disabled title="Sin teléfono"
+                        aria-label="Llamar (sin teléfono)" className="flex flex-col items-center gap-1 opacity-40">
+                  {chip(k)}
+                </button>
+              );
+            }
+            const isTodo = k === 'mover' || k === 'reagendar';
+            return (
+              <button
+                key={k}
+                type="button"
+                aria-label={ACTION[k].label + (isTodo ? ' (próximamente)' : '')}
+                title={isTodo ? 'Reagendar llega en el próximo paso' : undefined}
+                onClick={() => run(k)}
+                className={`group flex flex-col items-center gap-1 ${isTodo ? 'opacity-60' : ''}`}
+              >
+                {chip(k)}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -344,6 +451,11 @@ export default function AssistantVerticalCalendar({
   onWalkinConsumed,
   rescheduleRequest,
   onRescheduleConsumed,
+  onNoShow,
+  onComplete,
+  onConfirm,
+  onArrived,
+  onCancel,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const didAutoScrollRef = useRef<string | null>(null);
@@ -678,6 +790,11 @@ export default function AssistantVerticalCalendar({
           timezone={timezone}
           nowMinutes={nowMinutes}
           onClose={() => setSelected(null)}
+          onNoShow={onNoShow}
+          onComplete={onComplete}
+          onConfirm={onConfirm}
+          onArrived={onArrived}
+          onCancel={onCancel}
         />
       </>
     )}

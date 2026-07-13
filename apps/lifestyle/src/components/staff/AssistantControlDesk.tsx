@@ -28,6 +28,10 @@ import {
   refreshAssistantAppointments,
   createAssistantAppointment,
   noShowAppointment,
+  completeAppointment,
+  cancelAppointment,
+  confirmAppointment,
+  markArrived,
   getActiveConversations,
 } from '@/app/staff/assistant-actions';
 import ConversationList from './ConversationList';
@@ -736,6 +740,53 @@ export default function AssistantControlDesk({
     }
   }
 
+  // Acciones de la card de detalle (Paso 3B) — mismo patrón que handleNoShow:
+  // optimista + revert + toast + router.refresh. Genérico para no repetir 4 veces.
+  async function mutateAppt(
+    apptId: string,
+    optimistic: (a: DashboardAppointment) => DashboardAppointment,
+    action: (id: string) => Promise<{ error?: string } | void>,
+    okMsg: (a: DashboardAppointment) => string,
+  ) {
+    const snapshot = appointments;
+    const appt = snapshot.find((a) => a.id === apptId);
+    if (!appt) return;
+    setHighlightId(null);
+    setAppointments((cur) => cur.map((a) => (a.id === apptId ? optimistic(a) : a)));
+    mutatingRef.current = true;
+    try {
+      const res = await action(apptId);
+      if (res?.error) {
+        setAppointments(snapshot); // revert — rechazo esperado (gate/no encontrada)
+        setToast({ msg: res.error, kind: 'err' });
+        return;
+      }
+      setToast({ msg: okMsg(appt), kind: 'ok' });
+      router.refresh();
+    } catch {
+      setAppointments(snapshot); // revert — fallo de sistema
+      setToast({ msg: 'No se pudo completar la acción', kind: 'err' });
+    } finally {
+      mutatingRef.current = false;
+    }
+  }
+
+  const handleComplete = (id: string) =>
+    mutateAppt(id, (a) => ({ ...a, status: 'completed' }), completeAppointment,
+      (a) => `${a.customer?.name ?? 'Cliente'} — cita completada`);
+
+  const handleConfirm = (id: string) =>
+    mutateAppt(id, (a) => ({ ...a, status: 'confirmed' }), confirmAppointment,
+      (a) => `Cita de ${a.customer?.name ?? 'cliente'} confirmada`);
+
+  const handleArrived = (id: string) =>
+    mutateAppt(id, (a) => ({ ...a, arrived_at: new Date().toISOString() }), markArrived,
+      (a) => `${a.customer?.name ?? 'Cliente'} — llegada registrada`);
+
+  const handleCancelAppt = (id: string, reason: string) =>
+    mutateAppt(id, (a) => ({ ...a, status: 'cancelled' }), (i) => cancelAppointment(i, reason),
+      (a) => `Cita de ${a.customer?.name ?? 'cliente'} cancelada`);
+
   return (
     <div className="min-h-dvh bg-canvas bg-grid text-ink">
       <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col gap-3 p-3 sm:p-4">
@@ -876,6 +927,11 @@ export default function AssistantControlDesk({
                   highlightApptId={highlightId}
                   onInteractingChange={(active) => { interactingRef.current = active; }}
                   onTapFreeSlot={handleTapFreeSlot}
+                  onNoShow={handleNoShow}
+                  onComplete={handleComplete}
+                  onConfirm={handleConfirm}
+                  onArrived={handleArrived}
+                  onCancel={handleCancelAppt}
                 />
               ) : (
                 <PanoramaTimeline
