@@ -102,9 +102,30 @@
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.4; }
 }
+/* Entrada suave de la card de detalle (Paso 3.5) — se eleva del calendario. */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
 @theme {
   --animate-data-beat: data-beat 1.8s ease-in-out infinite;
+  --animate-card-in: card-in 0.22s cubic-bezier(0.2, 0.8, 0.25, 1);
 }
+
+/* Botón circular de acción de la card (Paso 3.5, mock .circ): sombra sutil en reposo;
+ * al hover se eleva y aparece un halo de color según la acción. Se define en CSS plano
+ * (no utilidades arbitrarias) porque Tailwind v4 no genera bien los box-shadow con
+ * rgba(comas) inline. Washes mapeados a tokens Zentriq. */
+.card-actbtn { box-shadow: 0 1px 3px rgba(18, 33, 29, 0.06); }
+.card-actbtn:hover { transform: translateY(-2px); }
+.card-glow-pos:hover     { border-color: var(--color-teal-border);
+  box-shadow: 0 0 0 4px var(--color-tint-1),  0 7px 18px -5px rgba(1, 130, 113, 0.22); }
+.card-glow-warn:hover    { border-color: var(--color-amber-border);
+  box-shadow: 0 0 0 4px var(--color-amber-tint), 0 7px 18px -5px rgba(180, 83, 9, 0.20); }
+.card-glow-danger:hover  { border-color: var(--color-red-border);
+  box-shadow: 0 0 0 4px var(--color-red-tint), 0 7px 18px -5px rgba(162, 59, 54, 0.18); }
+.card-glow-neutral:hover { border-color: var(--color-faint);
+  box-shadow: 0 0 0 4px var(--color-line-2), 0 7px 18px -5px rgba(18, 32, 30, 0.12); }
 
 /*
  * Accesibilidad — prefers-reduced-motion (S6-UI-02 PR-6, corrección de spec).
