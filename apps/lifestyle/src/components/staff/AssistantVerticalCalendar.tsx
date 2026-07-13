@@ -30,10 +30,12 @@
 //   desk (optimista+toast): No-llegó/Terminó/Confirmar/Llegó/Cancelar(+motivo);
 //   Mensaje=wa.me, Llamar=tel: (sin mutar). Mover/Reagendar quedan visuales (gesto=4).
 //   confirmAppointment y markArrived (arrived_at, guard de auto-cancel) son nuevas.
-// ALCANCE (Paso 4A): feedback de hora al hover sobre un hueco libre — franja del slot
-//   de 15 min (teal-tint punteado) + pastilla con la hora exacta que se agendaría
-//   (mismo cálculo `slotFromRelY` que el click). Solo en zona reservable (turno, sin
-//   cita ni bloqueo). No cambia la creación. Puro feedback previo.
+// ALCANCE (Paso 4A): feedback de hora al hover sobre un hueco libre (mismo cálculo
+//   `slotFromRelY` que el click). Solo en zona reservable. No cambia la creación.
+// ALCANCE (Paso 4A.2): reestilo sereno del feedback (quitar el "andamio"): wash suave
+//   con forma de cita-fantasma (tint-1 + acento teal, sin borde punteado ni pastilla),
+//   alto = duración por defecto del walk-in acotada al hueco real; la hora se integra
+//   en el gutter (pastilla teal en la regla de tiempo). Solo estilo, el cálculo igual.
 // PENDIENTE de pasos siguientes: drag / click-to-place / walk-in de un toque + Mover/
 //   Reagendar (4B+), foco de barbero, descansos (break_start/end), retiro de
 //   PanoramaTimeline. Los callbacks de gesto (onPlace/reschedule) siguen inertes.
@@ -67,6 +69,9 @@ type Props = {
   staffBlocks: PanoramaBlock[]; // bloqueos aprobados del día
   // Click-en-hueco → crear cita: el desk abre la hoja de walk-in pre-apuntada.
   onTapFreeSlot?: (staffId: string, startMin: number) => void;
+  // Duración por defecto del walk-in (min) — para dimensionar el wash del feedback al
+  // tamaño real que tendría la cita. El desk usa services[0].duration_minutes ?? 30.
+  walkinDefaultMin?: number;
   // ── Acciones de la card de detalle (Paso 3B). El desk hace el optimista+toast. ──
   onNoShow?: (id: string) => void;
   onComplete?: (id: string) => void;
@@ -469,6 +474,7 @@ export default function AssistantVerticalCalendar({
   staff,
   staffBlocks,
   onTapFreeSlot,
+  walkinDefaultMin = 30,
   walkinRequest,
   onWalkinConsumed,
   rescheduleRequest,
@@ -667,6 +673,17 @@ export default function AssistantVerticalCalendar({
                 {minutesToLabel(nowMinutes!)}
               </div>
             )}
+            {/* Hora del hueco al hover, en la regla de tiempo (Paso 4A.2): se siente
+                parte del gutter, no un cartel flotante. Teal, alineada con el wash. */}
+            {hoverSlot && (
+              <div
+                className="absolute right-0.5 z-20 -translate-y-1/2 rounded-pill bg-teal-ink px-1 py-px text-[9px] font-bold tabular-nums text-card shadow-card"
+                style={{ top: minutesToPx(hoverSlot.min) }}
+                aria-hidden
+              >
+                {minutesToLabel(hoverSlot.min)}
+              </div>
+            )}
           </div>
         </div>
 
@@ -758,20 +775,35 @@ export default function AssistantVerticalCalendar({
                   );
                 })}
 
-                {/* Feedback de hora al hover sobre un hueco libre (Paso 4A) — franja
-                    del slot de 15 min + pastilla con la hora exacta que se agendaría.
-                    pointer-events-none: no interfiere con el click de creación. */}
-                {hoverSlot && hoverSlot.staffId === s.id && (
-                  <div
-                    className="pointer-events-none absolute left-1 right-1 z-[6] rounded-[6px] border border-dashed border-teal-border bg-tint-1"
-                    style={{ top: minutesToPx(hoverSlot.min), height: 15 * PX_PER_MIN }}
-                    aria-hidden
-                  >
-                    <span className="absolute left-1 top-1/2 -translate-y-1/2 rounded-pill bg-teal-ink px-1.5 py-px text-[10px] font-bold tabular-nums text-card shadow-card">
-                      {minutesToLabel(hoverSlot.min)}
-                    </span>
-                  </div>
-                )}
+                {/* Feedback del hueco al hover (Paso 4A.2) — wash sereno con forma de
+                    cita-fantasma (tint-1 + acento teal a la izquierda, sin bordes duros
+                    ni pastilla): "acá caería, a esta hora". Alto = duración por defecto
+                    del walk-in, acotada al hueco real (hasta la próxima cita/bloqueo/
+                    cierre). La hora va en el gutter. pointer-events-none. */}
+                {hoverSlot && hoverSlot.staffId === s.id && (() => {
+                  const slotMin = hoverSlot.min;
+                  let limit = Math.min(endMinutes, availEnd ?? endMinutes);
+                  for (const a of barberAppts) {
+                    const s0 = isoToLocalMinutes(a.starts_at, timezone);
+                    if (s0 > slotMin && s0 < limit) limit = s0;
+                  }
+                  for (const b of barberBlocks) {
+                    const s0 = isoToLocalMinutes(b.startsAt, timezone);
+                    if (s0 > slotMin && s0 < limit) limit = s0;
+                  }
+                  const washMin = Math.max(15, Math.min(walkinDefaultMin, limit - slotMin));
+                  return (
+                    <div
+                      className="pointer-events-none absolute left-1 right-1 z-[6] rounded-[10px] bg-tint-1"
+                      style={{
+                        top: minutesToPx(slotMin),
+                        height: washMin * PX_PER_MIN,
+                        borderLeft: '2px solid var(--color-teal-border)',
+                      }}
+                      aria-hidden
+                    />
+                  );
+                })()}
 
                 {/* Bloques de cita — estado por color/tono + info completa + badge bot */}
                 {barberAppts.map((appt) => {
