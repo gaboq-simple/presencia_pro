@@ -927,6 +927,7 @@ export default function AssistantControlDesk({
                   highlightApptId={highlightId}
                   onInteractingChange={(active) => { interactingRef.current = active; }}
                   onTapFreeSlot={handleTapFreeSlot}
+                  walkinDefaultMin={services[0]?.duration_minutes ?? 30}
                   onNoShow={handleNoShow}
                   onComplete={handleComplete}
                   onConfirm={handleConfirm}
