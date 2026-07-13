@@ -276,8 +276,11 @@ type RawMetricsRow = {
  * Usa el offset real de la tz en ese instante (México es UTC-6 fijo; maneja DST
  * donde aplique, salvo el borde exacto de una transición a medianoche — irrelevante
  * para límites de día en producción).
+ *
+ * Exportado (S6-DATA-01): `rescheduleAppointment` lo usa para interpretar la
+ * hora-de-pared que recibe como hora del NEGOCIO (no del servidor Vercel=UTC).
  */
-function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: string): Date {
+export function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: string): Date {
   const asIfUtc = new Date(`${dateStr}T${timeStr}Z`).getTime();
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,

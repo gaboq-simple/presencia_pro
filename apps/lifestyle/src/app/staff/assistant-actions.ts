@@ -7,8 +7,8 @@
 'use server';
 
 import { createClient } from '@supabase/supabase-js';
-import { getCurrentSession } from '@/lib/auth';
-import { getDayAppointments, queryStaffBlocksForDay } from '@/lib/dashboard.types';
+import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
+import { getDayAppointments, queryStaffBlocksForDay, zonedWallTimeToUtc } from '@/lib/dashboard.types';
 import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
@@ -625,11 +625,14 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
     return { error: 'Solo se pueden reagendar citas pendientes o confirmadas' };
   }
 
-  // Calcular nuevo rango — usar hora local que mandó el cliente
-  const [hh, mm] = input.newStartTime.split(':').map(Number);
-  const startDate = new Date(`${input.newDate}T00:00:00`);
-  startDate.setHours(hh ?? 0, mm ?? 0, 0, 0);
-  const endDate = new Date(startDate.getTime() + appt.service.duration_minutes * 60_000);
+  // Calcular nuevo rango — la hora que mandó el cliente es hora-de-pared del NEGOCIO
+  // (todos los call-sites pasan hora local del negocio: el gesto del asistente, el
+  // deshacer, y el input de la vista del barbero). Se interpreta en la tz del negocio
+  // y se convierte a UTC. ANTES: `new Date('YYYY-MM-DDT00:00:00').setHours(...)` usaba
+  // la tz del SERVIDOR (Vercel=UTC) → en prod la cita aterrizaba corrida ~6h (S6-DATA-01).
+  const timezone     = await getBusinessTimezone(session.business_id);
+  const startDate    = zonedWallTimeToUtc(input.newDate, `${input.newStartTime}:00`, timezone);
+  const endDate      = new Date(startDate.getTime() + appt.service.duration_minutes * 60_000);
 
   const newStaffId   = input.newStaffId ?? appt.staff_id;
   const newStartsAt  = startDate.toISOString();
