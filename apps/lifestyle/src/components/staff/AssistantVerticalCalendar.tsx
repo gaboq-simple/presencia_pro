@@ -267,9 +267,22 @@ const CARD_H_EST = 340;
 
 type Selection = { appt: DashboardAppointment; state: BlockState; rect: DOMRect };
 
+// ─── Modo colocación (Paso 4B — gesto click-to-place para Mover/Reagendar) ────
+// La cita "levantada" que sigue al cursor. `staffId`/`staffName` = barbero ORIGINAL
+// (para marcar el bloque en movimiento y detectar cambio de columna). `dur` dimensiona
+// el wash al tamaño real de ESTA cita (no el default del walk-in). `startMin` es su
+// hora original (referencia). El destino se resuelve al hover; se congela al confirmar.
+type Placing = {
+  apptId: string; staffId: string; staffName: string;
+  dur: number; name: string; service: string; startMin: number;
+};
+// Destino elegido, en espera de confirmación ("¿Mover a las HH:MM?"). El wash queda
+// congelado acá hasta Confirmar/Cancelar (mover MUTA datos → siempre confirma).
+type PlaceConfirm = { staffId: string; staffName: string; min: number };
+
 function DetailCard({
   sel, timezone, nowMinutes, onClose,
-  onNoShow, onComplete, onConfirm, onArrived, onCancel,
+  onNoShow, onComplete, onConfirm, onArrived, onCancel, onMove,
 }: {
   sel: Selection; timezone: string; nowMinutes: number | null; onClose: () => void;
   onNoShow?: (id: string) => void;
@@ -277,6 +290,7 @@ function DetailCard({
   onConfirm?: (id: string) => void;
   onArrived?: (id: string) => void;
   onCancel?: (id: string, reason: string) => void;
+  onMove?: (appt: DashboardAppointment) => void; // Paso 4B: entra al gesto click-to-place
 }) {
   const { appt, state, rect } = sel;
   const st = STATE_STYLE[state];
@@ -307,9 +321,8 @@ function DetailCard({
       case 'llego':     onArrived?.(appt.id);  onClose(); break;
       case 'cancelar':  setCancelMode(true); break; // pide motivo antes de mutar
       case 'mover': case 'reagendar':
-        // TODO (Paso 4): entrar al gesto click-to-place del calendario vertical.
-        if (typeof console !== 'undefined') console.debug(`[card] "${k}" → reagendar (Paso 4, aún no cableado)`);
-        break;
+        // Paso 4B: la card se cierra y entra el modo colocación para ESTA cita.
+        onMove?.(appt); break;
       default: break; // mensaje/llamar se renderizan como <a>
     }
   }
@@ -445,15 +458,13 @@ function DetailCard({
                 </button>
               );
             }
-            const isTodo = k === 'mover' || k === 'reagendar';
             return (
               <button
                 key={k}
                 type="button"
-                aria-label={ACTION[k].label + (isTodo ? ' (próximamente)' : '')}
-                title={isTodo ? 'Reagendar llega en el próximo paso' : undefined}
+                aria-label={ACTION[k].label}
                 onClick={() => run(k)}
-                className={`group flex flex-col items-center gap-1 ${isTodo ? 'opacity-60' : ''}`}
+                className="group flex flex-col items-center gap-1"
               >
                 {chip(k)}
               </button>
@@ -475,10 +486,12 @@ export default function AssistantVerticalCalendar({
   staffBlocks,
   onTapFreeSlot,
   walkinDefaultMin = 30,
+  onPlace,
   walkinRequest,
   onWalkinConsumed,
   rescheduleRequest,
   onRescheduleConsumed,
+  onInteractingChange,
   onNoShow,
   onComplete,
   onConfirm,
@@ -491,22 +504,72 @@ export default function AssistantVerticalCalendar({
   // ── Cita seleccionada → card de detalle (Paso 3A). Local al calendario: la card
   //    es una preocupación visual del calendario; no toca al contenedor. ──
   const [selected, setSelected] = useState<Selection | null>(null);
+
+  // ── Modo colocación (Paso 4B) — la cita levantada + destino en hover + confirmación.
+  const [placing, setPlacing] = useState<Placing | null>(null);
+  const [placeHover, setPlaceHover] = useState<{ staffId: string; min: number } | null>(null);
+  const [placeConfirm, setPlaceConfirm] = useState<PlaceConfirm | null>(null);
+
+  // Entrar al modo colocación con una cita (desde la card o desde la cola de acción).
+  // Cierra la card y arranca limpio (sin destino ni confirmación previa).
+  const startPlacing = useCallback((a: DashboardAppointment) => {
+    const s = isoToLocalMinutes(a.starts_at, timezone);
+    const e = isoToLocalMinutes(a.ends_at, timezone);
+    setSelected(null);
+    setPlaceHover(null);
+    setPlaceConfirm(null);
+    setPlacing({
+      apptId: a.id,
+      staffId: a.staff.id,
+      staffName: a.staff.name,
+      dur: Math.max(15, e - s),
+      name: a.customer?.name?.trim() || 'la cita',
+      service: a.service?.name ?? '',
+      startMin: s,
+    });
+  }, [timezone]);
+
+  const cancelPlacing = useCallback(() => {
+    setPlacing(null);
+    setPlaceHover(null);
+    setPlaceConfirm(null);
+  }, []);
+
+  // Esc: con confirmación pendiente → vuelve al hover; colocando → cancela el modo;
+  // si no → cierra la card de detalle.
   useEffect(() => {
-    if (!selected) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null); };
+    if (!selected && !placing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (placeConfirm) { setPlaceConfirm(null); return; }
+      if (placing) { cancelPlacing(); return; }
+      setSelected(null);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selected]);
+  }, [selected, placing, placeConfirm, cancelPlacing]);
 
-  // ── Solicitudes de gesto que el vertical aún NO honra (Paso 1): las acusamos y
-  //    limpiamos de inmediato para no dejar al desk en un estado colgado (p.ej. el
-  //    botón "+ Walk-in" deshabilitado para siempre). El gesto real llega después.
+  // Pausar el polling del desk mientras se coloca (no regenerar el calendario a mitad
+  // del gesto) — mismo contrato que usaba el panorama vía onInteractingChange.
+  useEffect(() => {
+    onInteractingChange?.(placing !== null);
+  }, [placing, onInteractingChange]);
+
+  // Walk-in: el vertical no implementa el drag del walk-in (usa onTapFreeSlot) → acusamos
+  // y limpiamos para no dejar el botón "+ Walk-in" colgado.
   useEffect(() => {
     if (walkinRequest) onWalkinConsumed?.();
   }, [walkinRequest, onWalkinConsumed]);
+
+  // "Mover" desde la cola de acción → RescheduleRequest. Lo honramos entrando al MISMO
+  // modo colocación (cita fresca por id) y lo acusamos (one-shot, como el panorama).
   useEffect(() => {
-    if (rescheduleRequest) onRescheduleConsumed?.();
-  }, [rescheduleRequest, onRescheduleConsumed]);
+    if (!rescheduleRequest) return;
+    const a = appointments.find((x) => x.id === rescheduleRequest.apptId);
+    if (a) startPlacing(a);
+    onRescheduleConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rescheduleRequest]);
 
   // ── Hora actual (poll 60s) — mismo patrón TZ-aware que el panorama ──
   const [nowMinutes, setNowMinutes] = useState<number | null>(null);
@@ -615,6 +678,103 @@ export default function AssistantVerticalCalendar({
     [onTapFreeSlot, slotFromRelY, timezone],
   );
 
+  // ── Colocación: validez del destino (Paso 4B) ──
+  // La action NO valida horario → lo gatea la UI (honesto, como el cap del walk-in):
+  // dentro del turno del barbero destino, sin pisar cita (excluyendo la que se mueve)
+  // ni bloqueo, y no en el pasado (solo hoy). El solape SÍ lo valida la action; acá lo
+  // prevenimos para no ofrecer un destino que el server rechazaría.
+  const isPlaceValid = useCallback(
+    (
+      min: number,
+      dur: number,
+      availStart: number | null,
+      availEnd: number | null,
+      appts: DashboardAppointment[],
+      blocks: PanoramaBlock[],
+      excludeId: string,
+    ) => {
+      if (availStart === null || availEnd === null) return false;
+      const end = min + dur;
+      if (min < availStart || end > availEnd) return false;
+      const floor = isToday(date, timezone) && nowMinutes !== null ? nowMinutes : -Infinity;
+      if (min < floor) return false;
+      const ov = (s: string, en: string) => {
+        const s0 = isoToLocalMinutes(s, timezone);
+        const e0 = isoToLocalMinutes(en, timezone);
+        return min < e0 && end > s0;
+      };
+      if (appts.some((a) => a.id !== excludeId && ov(a.starts_at, a.ends_at))) return false;
+      if (blocks.some((b) => ov(b.startsAt, b.endsAt))) return false;
+      return true;
+    },
+    [date, timezone, nowMinutes],
+  );
+
+  // Hover en modo colocación → el wash sigue el cursor solo en destinos válidos (en
+  // inválidos se apaga: feedback honesto). Congelado mientras se confirma un destino.
+  const handlePlaceHover = useCallback(
+    (
+      e: React.MouseEvent<HTMLDivElement>,
+      staffId: string,
+      availStart: number | null,
+      availEnd: number | null,
+      appts: DashboardAppointment[],
+      blocks: PanoramaBlock[],
+    ) => {
+      if (!placing || placeConfirm) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const min = slotFromRelY(e.clientY - rect.top);
+      const valid = isPlaceValid(min, placing.dur, availStart, availEnd, appts, blocks, placing.apptId);
+      setPlaceHover((prev) =>
+        valid
+          ? (prev && prev.staffId === staffId && prev.min === min ? prev : { staffId, min })
+          : (prev === null ? prev : null),
+      );
+    },
+    [placing, placeConfirm, slotFromRelY, isPlaceValid],
+  );
+
+  // Click en modo colocación → si el destino es válido, pide confirmación (mover MUTA);
+  // si es inválido, no hace nada (el wash tampoco estaba ahí).
+  const handlePlaceClick = useCallback(
+    (
+      e: React.MouseEvent<HTMLDivElement>,
+      staffId: string,
+      staffName: string,
+      availStart: number | null,
+      availEnd: number | null,
+      appts: DashboardAppointment[],
+      blocks: PanoramaBlock[],
+    ) => {
+      if (!placing) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const min = slotFromRelY(e.clientY - rect.top);
+      if (!isPlaceValid(min, placing.dur, availStart, availEnd, appts, blocks, placing.apptId)) return;
+      setPlaceHover({ staffId, min });
+      setPlaceConfirm({ staffId, staffName, min });
+    },
+    [placing, slotFromRelY, isPlaceValid],
+  );
+
+  // Confirmar → despacha al drop del desk (handlePlace → handleReschedule: optimista +
+  // revert + toast + Deshacer). newStaffId puede diferir del original (mover de columna).
+  const confirmPlacement = useCallback(() => {
+    if (!placing || !placeConfirm || !onPlace) { cancelPlacing(); return; }
+    onPlace(
+      {
+        kind: 'reschedule',
+        apptId: placing.apptId,
+        fromLaneId: placing.staffId,
+        dur: placing.dur,
+        name: placing.name,
+        service: placing.service,
+      },
+      placeConfirm.staffId,
+      placeConfirm.min,
+    );
+    cancelPlacing();
+  }, [placing, placeConfirm, onPlace, cancelPlacing]);
+
   if (staff.length === 0) {
     return (
       <div className="m-3 rounded-card border border-dashed border-line px-4 py-6 text-center">
@@ -674,14 +834,26 @@ export default function AssistantVerticalCalendar({
               </div>
             )}
             {/* Hora del hueco al hover, en la regla de tiempo (Paso 4A.2): se siente
-                parte del gutter, no un cartel flotante. Teal, alineada con el wash. */}
-            {hoverSlot && (
+                parte del gutter, no un cartel flotante. Teal, alineada con el wash.
+                Se apaga en modo colocación (ahí manda la hora del destino de la cita). */}
+            {!placing && hoverSlot && (
               <div
                 className="absolute right-0.5 z-20 -translate-y-1/2 rounded-pill bg-teal-ink px-1 py-px text-[9px] font-bold tabular-nums text-card shadow-card"
                 style={{ top: minutesToPx(hoverSlot.min) }}
                 aria-hidden
               >
                 {minutesToLabel(hoverSlot.min)}
+              </div>
+            )}
+            {/* Hora del destino en modo colocación (Paso 4B) — misma pastilla del gutter,
+                a la altura donde caería la cita movida. */}
+            {placing && placeHover && (
+              <div
+                className="absolute right-0.5 z-20 -translate-y-1/2 rounded-pill bg-teal-ink px-1 py-px text-[9px] font-bold tabular-nums text-card shadow-card"
+                style={{ top: minutesToPx(placeHover.min) }}
+                aria-hidden
+              >
+                {minutesToLabel(placeHover.min)}
               </div>
             )}
           </div>
@@ -717,18 +889,33 @@ export default function AssistantVerticalCalendar({
                 </span>
               </div>
 
-              {/* Cuerpo (clickable → crear cita) */}
+              {/* Cuerpo — fuera de modo colocación: click crea walk-in. En modo
+                  colocación: click = soltar la cita movida acá (los modos no se pisan). */}
               <div
                 role="button"
                 tabIndex={0}
-                aria-label={`Crear cita para ${s.name}`}
+                aria-label={placing ? `Soltar la cita en ${s.name}` : `Crear cita para ${s.name}`}
                 className="relative cursor-pointer"
                 style={{ height: gridHeightPx }}
-                onClick={(e) => handleColumnClick(e, s.id)}
-                onMouseMove={(e) => handleColumnHover(e, s.id, availStart, availEnd, barberAppts, barberBlocks)}
-                onMouseLeave={() => setHoverSlot((p) => (p && p.staffId === s.id ? null : p))}
+                onClick={(e) =>
+                  placing
+                    ? handlePlaceClick(e, s.id, s.name, availStart, availEnd, barberAppts, barberBlocks)
+                    : handleColumnClick(e, s.id)
+                }
+                onMouseMove={(e) =>
+                  placing
+                    ? handlePlaceHover(e, s.id, availStart, availEnd, barberAppts, barberBlocks)
+                    : handleColumnHover(e, s.id, availStart, availEnd, barberAppts, barberBlocks)
+                }
+                onMouseLeave={() => {
+                  if (placing) {
+                    if (!placeConfirm) setPlaceHover((p) => (p && p.staffId === s.id ? null : p));
+                    return;
+                  }
+                  setHoverSlot((p) => (p && p.staffId === s.id ? null : p));
+                }}
                 onKeyDown={(e) => {
-                  if ((e.key === 'Enter' || e.key === ' ') && onTapFreeSlot) {
+                  if ((e.key === 'Enter' || e.key === ' ') && onTapFreeSlot && !placing) {
                     e.preventDefault();
                     onTapFreeSlot(s.id, startMinutes + Math.floor(totalMinutes / 2));
                   }
@@ -780,7 +967,7 @@ export default function AssistantVerticalCalendar({
                     ni pastilla): "acá caería, a esta hora". Alto = duración por defecto
                     del walk-in, acotada al hueco real (hasta la próxima cita/bloqueo/
                     cierre). La hora va en el gutter. pointer-events-none. */}
-                {hoverSlot && hoverSlot.staffId === s.id && (() => {
+                {!placing && hoverSlot && hoverSlot.staffId === s.id && (() => {
                   const slotMin = hoverSlot.min;
                   let limit = Math.min(endMinutes, availEnd ?? endMinutes);
                   for (const a of barberAppts) {
@@ -804,6 +991,24 @@ export default function AssistantVerticalCalendar({
                     />
                   );
                 })()}
+
+                {/* Wash del destino en modo colocación (Paso 4B) — mismo lenguaje sereno
+                    que el hueco (tint-1 + acento teal), pero con el ALTO REAL de la cita
+                    que se mueve. Marco punteado para leerlo como "destino" (aún no está
+                    ahí). Solo en destinos válidos (isPlaceValid ya lo garantizó). */}
+                {placing && placeHover && placeHover.staffId === s.id && (
+                  <div
+                    className="pointer-events-none absolute left-1 right-1 z-[7] rounded-[10px] bg-tint-1"
+                    style={{
+                      top: minutesToPx(placeHover.min),
+                      height: placing.dur * PX_PER_MIN,
+                      borderLeft: '2px solid var(--color-teal-border)',
+                      outline: '1.5px dashed var(--color-teal-border)',
+                      outlineOffset: '-1.5px',
+                    }}
+                    aria-hidden
+                  />
+                )}
 
                 {/* Bloques de cita — estado por color/tono + info completa + badge bot */}
                 {barberAppts.map((appt) => {
@@ -829,6 +1034,9 @@ export default function AssistantVerticalCalendar({
                   const showName    = height >= 14;
                   const showMeta    = height >= 26;
                   const showService = height >= 42;
+                  // La cita levantada (en movimiento): halo teal punteado (no opacity) +
+                  // pastilla "moviendo". El resto del calendario queda como está.
+                  const isMoving = placing?.apptId === appt.id;
 
                   return (
                     <div
@@ -836,22 +1044,34 @@ export default function AssistantVerticalCalendar({
                       className={`absolute left-1 right-1 overflow-hidden rounded-[10px] border border-line shadow-card ${st.bg} ${
                         state === 'late' ? 'animate-data-beat motion-reduce:animate-none' : ''
                       }`}
-                      style={{ top, height, borderLeft: `3px solid ${st.bar}`, padding: '4px 8px' }}
+                      style={{
+                        top, height, padding: '4px 8px',
+                        borderLeft: `3px solid ${st.bar}`,
+                        outline: isMoving ? '2px dashed var(--color-teal-ink)' : undefined,
+                        outlineOffset: isMoving ? '-2px' : undefined,
+                      }}
                       role="button"
                       tabIndex={0}
                       aria-label={`Ver detalle de cita de ${name}`}
                       onClick={(e) => {
+                        if (placing) return; // en colocación el bloque no abre card; el
+                                             // click cae en la columna (destino inválido → no-op)
                         e.stopPropagation(); // no dispara el crear-en-hueco de la columna
                         setSelected({ appt, state, rect: e.currentTarget.getBoundingClientRect() });
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
+                        if ((e.key === 'Enter' || e.key === ' ') && !placing) {
                           e.preventDefault(); e.stopPropagation();
                           setSelected({ appt, state, rect: e.currentTarget.getBoundingClientRect() });
                         }
                       }}
                       title={`${time} · ${name} · ${appt.service.name}${word ? ` · ${word}` : ''}`}
                     >
+                      {isMoving && (
+                        <span className="absolute right-1 top-1 z-[1] rounded-pill bg-teal-ink px-1 py-px text-[8px] font-bold uppercase tracking-wide text-card">
+                          moviendo
+                        </span>
+                      )}
                       {showName && (
                         <>
                           {showMeta && (
@@ -911,8 +1131,55 @@ export default function AssistantVerticalCalendar({
           onConfirm={onConfirm}
           onArrived={onArrived}
           onCancel={onCancel}
+          onMove={startPlacing}
         />
       </>
+    )}
+
+    {/* ── Modo colocación (Paso 4B): barra "Moviendo" / confirmación del destino ── */}
+    {placing && (
+      <div
+        role="status"
+        className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-pill border border-teal-border bg-tint-1 px-4 py-2 text-sm font-semibold text-teal-ink shadow-hero"
+      >
+        {placeConfirm ? (
+          <>
+            <span>
+              ¿Mover a {placing.name} a las{' '}
+              <span className="tabular-nums">{minutesToLabel(placeConfirm.min)}</span>
+              {placeConfirm.staffId !== placing.staffId ? ` · con ${placeConfirm.staffName}` : ''}?
+            </span>
+            <button
+              type="button"
+              onClick={confirmPlacement}
+              className="-my-0.5 rounded-pill bg-teal px-3 py-0.5 text-xs font-bold text-card transition hover:opacity-90 active:scale-95"
+            >
+              Confirmar
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlaceConfirm(null)}
+              className="-my-0.5 rounded-pill border border-current px-2.5 py-0.5 text-xs font-bold transition hover:bg-card/40"
+            >
+              Cancelar
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-pill bg-teal-ink animate-data-beat motion-reduce:animate-none" aria-hidden />
+              Moviendo a {placing.name} · tocá el nuevo horario
+            </span>
+            <button
+              type="button"
+              onClick={cancelPlacing}
+              className="-my-0.5 rounded-pill border border-current px-2.5 py-0.5 text-xs font-bold transition hover:bg-card/40"
+            >
+              Cancelar
+            </button>
+          </>
+        )}
+      </div>
     )}
     </>
   );
