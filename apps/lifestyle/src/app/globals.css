@@ -127,6 +127,21 @@
 .card-glow-neutral:hover { border-color: var(--color-faint);
   box-shadow: 0 0 0 4px var(--color-line-2), 0 7px 18px -5px rgba(18, 32, 30, 0.12); }
 
+/* Hover que infla los bloques de cita del calendario del asistente (Paso 4C): al pasar
+ * el cursor la cita se eleva sutilmente + glow del color de su estado — mismo lenguaje
+ * que el glow de la card (arriba). CSS plano porque Tailwind v4 no genera box-shadow con
+ * rgba(comas) inline. El halo (anillo tint del estado) + la sombra difusa del color son
+ * los valores del mock congelado. `z-index:3` en hover deja la cita sobre las vecinas
+ * (queda bajo la banda del "ahora" z-10 y los washes de gesto, a propósito). El
+ * prefers-reduced-motion global de abajo lo aplica al instante (sin la transición). */
+.appt-hover { transition: transform .16s cubic-bezier(0.2, 0.8, 0.25, 1), box-shadow .16s; }
+.appt-hover:hover { transform: translateY(-2px); z-index: 3; }
+.appt-glow-teal:hover  { box-shadow: 0 0 0 3px var(--color-tint-1),     0 10px 24px rgba(1, 130, 113, 0.16); }
+.appt-glow-amber:hover { box-shadow: 0 0 0 3px var(--color-amber-tint), 0 10px 24px rgba(180, 83, 9, 0.18); }
+.appt-glow-walk:hover  { box-shadow: 0 0 0 3px var(--color-walk-tint),  0 10px 24px rgba(91, 76, 196, 0.18); }
+.appt-glow-done:hover  { box-shadow: 0 0 0 3px rgba(18, 32, 30, 0.14),  0 8px 20px rgba(22, 24, 28, 0.10); }
+.appt-glow-red:hover   { box-shadow: 0 0 0 3px var(--color-red-tint),   0 10px 24px rgba(162, 59, 54, 0.16); }
+
 /*
  * Accesibilidad — prefers-reduced-motion (S6-UI-02 PR-6, corrección de spec).
  * Neutraliza globalmente animaciones/transiciones para quien lo pide. Más robusto

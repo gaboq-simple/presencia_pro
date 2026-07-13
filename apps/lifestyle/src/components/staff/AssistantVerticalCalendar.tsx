@@ -123,6 +123,15 @@ const STATE_WORD: Partial<Record<BlockState, string>> = {
   curso: 'En curso', late: 'Atrasado', noshow: 'No llegó', pending: 'Por confirmar',
 };
 
+// Clase de glow al hover por estado (Paso 4C) — la definición vive en globals.css
+// (`.appt-glow-*`, CSS plano; Tailwind v4 no genera box-shadow con rgba inline). Mapea
+// cada estado a su color: conf/curso→teal, pending→amber, walk→violet, done→apagado,
+// noshow/late→rojo. Se combina con `.appt-hover` (elevación + z-index).
+const GLOW_CLASS: Record<BlockState, string> = {
+  conf: 'appt-glow-teal', curso: 'appt-glow-teal', pending: 'appt-glow-amber',
+  walk: 'appt-glow-walk', done: 'appt-glow-done', noshow: 'appt-glow-red', late: 'appt-glow-red',
+};
+
 /**
  * Estado del bloque combinando status + momento (mismo criterio que PanoramaTimeline
  * :298-305, con `pending` insertado). `startM`/`endM` = min-desde-medianoche (tz negocio).
@@ -1043,6 +1052,12 @@ export default function AssistantVerticalCalendar({
                       key={appt.id}
                       className={`absolute left-1 right-1 overflow-hidden rounded-[10px] border border-line shadow-card ${st.bg} ${
                         state === 'late' ? 'animate-data-beat motion-reduce:animate-none' : ''
+                      } ${
+                        // Hover-que-infla (Paso 4C): SOLO fuera del modo colocación — durante
+                        // el gesto de mover la cita levantada tiene su propio marcado y las
+                        // demás no deben inflarse. Con card abierta el velo (z-40) ya tapa el
+                        // calendario, así que el hover no dispara detrás → sin conflicto.
+                        !placing ? `appt-hover ${GLOW_CLASS[state]}` : ''
                       }`}
                       style={{
                         top, height, padding: '4px 8px',
