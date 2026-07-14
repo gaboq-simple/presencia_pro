@@ -29,6 +29,7 @@ import ServicesManagementPanel from './ServicesManagementPanel';
 import InactiveClientsPanel from './InactiveClientsPanel';
 import ReportsConfigPanel  from './ReportsConfigPanel';
 import ReviewConfigPanel   from './ReviewConfigPanel';
+import BusinessHoursPanel  from './BusinessHoursPanel';
 import WaitlistPanel       from './WaitlistPanel';
 import BranchSelector      from './BranchSelector';
 
@@ -231,6 +232,9 @@ export default function DashboardLayout({
 
         {/* Lista de espera */}
         <WaitlistPanel />
+
+        {/* Horario del negocio — de cara al público (landing + away-message) */}
+        <BusinessHoursPanel />
 
         {/* Configuración de reportes semanales */}
         <ReportsConfigPanel />
