@@ -139,25 +139,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'PIN incorrecto' }, { status: 401 });
   }
 
-  // Solo barberos pueden entrar por PIN — admin y assistant usan token
-  if (staffRecord.role !== 'barber') {
+  // Barbero y asistente entran por PIN (cada uno con identidad individual — el
+  // asistente por PIN reemplaza al assistant_token compartido). Admin usa token.
+  if (staffRecord.role !== 'barber' && staffRecord.role !== 'assistant') {
     return NextResponse.json({ error: 'PIN incorrecto' }, { status: 401 });
   }
+  const role = staffRecord.role as 'barber' | 'assistant';
 
-  // 3. Crear sesión firmada
+  // 3. Crear sesión firmada — staff_id real ⇒ el audit firma con esta identidad.
   const payload = makeSessionPayload({
     type: 'staff',
     business_id: staffRecord.business_id,
-    role: 'barber',
+    role,
     staff_id: staffRecord.id,
   });
 
   const cookieValue = await signSession(payload);
   const isProd = process.env['NODE_ENV'] === 'production';
 
-  // 4. Setear cookie y retornar datos para el redirect
+  // 4. Setear cookie y retornar datos para el redirect (el cliente rutea por rol)
   const response = NextResponse.json({
-    role: 'barber',
+    role,
     staff_name: staffRecord.name,
     business_id: staffRecord.business_id,
   });

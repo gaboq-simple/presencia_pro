@@ -42,7 +42,7 @@ export type SessionPayload =
   | {
       type: 'staff';
       business_id: string;
-      role: 'barber';
+      role: 'barber' | 'assistant';
       staff_id: string;
       exp: number;
     };

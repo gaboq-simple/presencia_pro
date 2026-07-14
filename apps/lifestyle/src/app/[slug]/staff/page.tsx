@@ -43,10 +43,11 @@ export default async function SlugStaffPage({
   const business = await getBusinessBySlug(slug);
   if (!business) notFound();
 
-  // Ya hay sesión de ESTE negocio → no re-tipear el PIN, ir directo a /staff.
+  // Ya hay sesión de ESTE negocio → no re-tipear el PIN. Rutear por rol:
+  // barbero a su vista (/staff), asistente/dueño a la mesa de control (/dashboard).
   const session = await getCurrentSession();
   if (session && session.type === 'business' && session.business_id === business.id) {
-    redirect('/staff');
+    redirect(session.role === 'barber' ? '/staff' : '/dashboard');
   }
 
   return <PinForm businessSlug={slug} businessName={business.name} />;
