@@ -28,6 +28,7 @@ import {
   getPendingBlockRequests,
   getActiveStaffWithPhoto,
   getAllStaffForManagement,
+  getServicesForManagement,
   toDateStr,
 } from '@/lib/dashboard.types';
 import { getCurrentSession, getBusinessName, getOrganizationBranches } from '@/lib/auth';
@@ -178,13 +179,14 @@ export default async function DashboardPage({
   // 3. Nombre del negocio para vista owner/admin
   const businessName = await getBusinessName(businessId);
 
-  // 4. Fetch en paralelo — citas del día + staff activo + solicitudes + fotos + gestión
-  const [appointments, staffList, pendingBlockRequests, staffForPhotos, staffForManagement] = await Promise.all([
+  // 4. Fetch en paralelo — citas del día + staff activo + solicitudes + fotos + gestión + catálogo
+  const [appointments, staffList, pendingBlockRequests, staffForPhotos, staffForManagement, servicesForManagement] = await Promise.all([
     getDayAppointments(businessId, date),
     getActiveStaffWithAvailability(businessId, dayOfWeek),
     getPendingBlockRequests(businessId),
     getActiveStaffWithPhoto(businessId),
     getAllStaffForManagement(businessId),
+    getServicesForManagement(businessId),
   ]);
 
   // 5. Ingresos del día — función pura sobre datos ya cargados
@@ -212,6 +214,7 @@ export default async function DashboardPage({
       pendingBlockRequests={pendingBlockRequests}
       staffForPhotos={staffForPhotos}
       staffForManagement={staffForManagement}
+      servicesForManagement={servicesForManagement}
       branches={branches.length > 1 ? branches : undefined}
       organizationId={organizationId}
     />

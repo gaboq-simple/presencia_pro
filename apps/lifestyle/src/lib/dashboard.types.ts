@@ -1058,6 +1058,65 @@ export async function getAllStaffForManagement(
   return (data ?? []) as AdminStaffManagementRow[];
 }
 
+// ─── Servicios para panel de gestión (todos — incluyendo inactivos) ───────────
+
+export type AdminServiceRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  price_min: number | null;
+  price_max: number | null;
+  price_note: string | null;
+  currency: string;
+  duration_minutes: number;
+  active: boolean;
+  /** Citas futuras (pending|confirmed, starts_at > ahora) que referencian el servicio. */
+  upcomingCount: number;
+};
+
+/**
+ * Retorna TODOS los servicios del negocio (activos e inactivos), con el conteo
+ * de citas futuras por servicio (para la advertencia al desactivar). Activos
+ * primero, luego por nombre. Solo desde Server Components del dashboard del dueño.
+ */
+export async function getServicesForManagement(
+  businessId: string,
+): Promise<AdminServiceRow[]> {
+  const supabase = getServiceClient();
+
+  const { data, error } = await supabase
+    .from('services')
+    .select('id, name, description, price, price_min, price_max, price_note, currency, duration_minutes, active')
+    .eq('business_id', businessId)
+    .order('active', { ascending: false })
+    .order('name');
+
+  if (error) throw new Error(`getServicesForManagement failed: ${error.message}`);
+
+  const services = (data ?? []) as Array<Omit<AdminServiceRow, 'upcomingCount'>>;
+
+  // Conteo de citas futuras por servicio — solo agendables (pending|confirmed) y
+  // con starts_at en el futuro. Las citas pasadas no importan para la advertencia.
+  const nowIso = new Date().toISOString();
+  const { data: apptRows, error: apptError } = await supabase
+    .from('appointments')
+    .select('service_id')
+    .eq('business_id', businessId)
+    .gt('starts_at', nowIso)
+    .in('status', ['pending', 'confirmed']);
+
+  if (apptError) throw new Error(`getServicesForManagement (conteo) failed: ${apptError.message}`);
+
+  const counts = new Map<string, number>();
+  for (const row of (apptRows ?? []) as Array<{ service_id: string | null }>) {
+    if (!row.service_id) continue;
+    counts.set(row.service_id, (counts.get(row.service_id) ?? 0) + 1);
+  }
+
+  return services.map((s) => ({ ...s, upcomingCount: counts.get(s.id) ?? 0 }));
+}
+
 // ─── Query: staff activo con photo_url (para el gestor de fotos) ──────────────
 
 /**
