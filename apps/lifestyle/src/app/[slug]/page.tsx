@@ -217,16 +217,23 @@ async function getActiveServices(businessId: string): Promise<SiteServiceRow[]> 
 
 async function getActiveStaff(businessId: string): Promise<SiteStaffRow[]> {
   const supabase = getServiceClient();
+  // Equipo público = quien ATIENDE clientes, definido por dato (≥1 servicio mapeado
+  // en staff_services), no por role. Un dueño role='admin' que corta aparece; el
+  // asistente/recepción (sin servicios) queda fuera. El nested embed va en la misma
+  // query — Server Component sin cache, pero es un solo round-trip a tablas chicas.
   const { data, error } = await supabase
     .from('staff')
-    .select('id, name, role, active, photo_url')
+    .select('id, name, role, active, photo_url, services:staff_services(service_id)')
     .eq('business_id', businessId)
     .eq('active', true)
-    .in('role', ['barber', 'assistant'])
     .order('name');
 
   if (error) throw new Error(`getActiveStaff failed: ${error.message}`);
-  return (data ?? []) as SiteStaffRow[];
+
+  type Row = SiteStaffRow & { services: Array<{ service_id: string }> };
+  return ((data ?? []) as unknown as Row[])
+    .filter((r) => (r.services?.length ?? 0) > 0)
+    .map(({ services: _services, ...rest }) => rest);
 }
 
 // ─── generateMetadata ─────────────────────────────────────────────────────────

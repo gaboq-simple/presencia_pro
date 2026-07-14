@@ -515,7 +515,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices }: P
               </button>
             </div>
 
-            <StaffCreateForm onCreated={handleCreated} onCancel={() => setShowCreate(false)} />
+            <StaffCreateForm onCreated={handleCreated} onCancel={() => setShowCreate(false)} services={activeServices} />
           </div>
         </div>
       )}
