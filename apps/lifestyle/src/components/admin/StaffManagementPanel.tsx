@@ -20,6 +20,7 @@ import { useState, useRef, useCallback } from 'react';
 import type { AdminStaffManagementRow, StaffAvailabilitySlot } from '@/lib/dashboard.types';
 import StaffScheduleEditor from './StaffScheduleEditor';
 import QuickDayOff from './QuickDayOff';
+import StaffCreateForm, { type StaffCreateResult } from './StaffCreateForm';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,9 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
   const [modal, setModal]                     = useState<ModalState>(null);
   const [scheduleLoadingId, setScheduleLoadingId] = useState<string | null>(null);
   const [scheduleError, setScheduleError]         = useState<{ id: string; msg: string } | null>(null);
+
+  const [showCreate, setShowCreate]   = useState(false);
+  const [createdInfo, setCreatedInfo] = useState<{ name: string; role: string; pin: string | null } | null>(null);
 
   // ── Toggle active ─────────────────────────────────────────────────────────
 
@@ -184,10 +188,38 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
     setScheduleError(null);
   }
 
+  // ── Alta de staff nuevo ─────────────────────────────────────────────────────
+
+  function handleCreated(created: StaffCreateResult) {
+    const row: AdminStaffManagementRow = {
+      id:        created.id,
+      name:      created.name,
+      role:      created.role,
+      photo_url: created.photo_url,
+      active:    created.active,
+      pin:       created.pin,
+    };
+    // Prepend + re-ordenar por nombre (mismo orden que la query server).
+    setStaff((prev) => [...prev, row].sort((a, b) => a.name.localeCompare(b.name, 'es')));
+    setShowCreate(false);
+    setCreatedInfo({ name: created.name, role: created.role, pin: created.pin });
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <>
+      {/* Botón alta */}
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+        >
+          + Nuevo barbero
+        </button>
+      </div>
+
       <div className="space-y-2">
         {staff.map((member) => {
           const isLoading    = loadingId === member.id;
@@ -384,6 +416,84 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
                 onCancel={closeModal}
               />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de alta ─────────────────────────────────────────────────────── */}
+      {showCreate && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreate(false); }}
+        >
+          <div
+            className="w-full max-w-md overflow-y-auto rounded-t-2xl bg-white px-5 pb-8 pt-5 shadow-xl sm:rounded-2xl"
+            style={{ maxHeight: '90vh' }}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-900">Nuevo barbero</h2>
+              <button
+                type="button"
+                onClick={() => setShowCreate(false)}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Cerrar"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                  <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                </svg>
+              </button>
+            </div>
+
+            <StaffCreateForm onCreated={handleCreated} onCancel={() => setShowCreate(false)} />
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN generado (mostrar al dueño) ───────────────────────────────────── */}
+      {createdInfo && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          onClick={(e) => { if (e.target === e.currentTarget) setCreatedInfo(null); }}
+        >
+          <div className="w-full max-w-sm rounded-t-2xl bg-white px-5 pb-6 pt-5 text-center shadow-xl sm:rounded-2xl">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="mx-auto h-8 w-8 text-gray-800" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            <h2 className="mt-2 text-sm font-semibold text-gray-900">
+              {createdInfo.name} quedó dado de alta
+            </h2>
+
+            {createdInfo.pin ? (
+              <>
+                <p className="mt-2 text-xs text-gray-600">
+                  {createdInfo.role === 'barber'
+                    ? 'Este es su PIN para entrar al panel. Dáselo — lo necesita para iniciar sesión.'
+                    : 'Se le generó un PIN (los barberos entran con PIN; asistente/admin usan su enlace de acceso).'}
+                </p>
+                <div className="mt-3 flex items-center justify-center gap-2">
+                  <span className="rounded-lg bg-gray-100 px-4 py-2 font-mono text-2xl font-bold tracking-widest text-gray-900 tabular-nums">
+                    {createdInfo.pin}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { if (createdInfo.pin) void navigator.clipboard?.writeText(createdInfo.pin); }}
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                  >
+                    Copiar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-gray-600">Ya aparece en la lista de staff.</p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setCreatedInfo(null)}
+              className="mt-5 w-full rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white"
+            >
+              Entendido
+            </button>
           </div>
         </div>
       )}
