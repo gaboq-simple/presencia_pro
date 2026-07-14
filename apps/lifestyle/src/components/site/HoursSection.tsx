@@ -85,7 +85,7 @@ export function HoursSection({ officeHours }: HoursSectionProps) {
                   )}
                 </span>
                 <span className="hours-row__time">
-                  {slot.open} – {slot.close}
+                  {slot.start} – {slot.end}
                 </span>
               </li>
             );
