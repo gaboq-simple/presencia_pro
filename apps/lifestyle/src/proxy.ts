@@ -57,17 +57,9 @@ async function findTokenResult(
     }
   }
 
-  // 2. businesses.assistant_token → sucursal directa (asistente)
-  const assistantRes = await fetch(
-    `${url}/rest/v1/businesses?select=id&assistant_token=eq.${encodeURIComponent(token)}&active=eq.true&limit=1`,
-    { headers },
-  );
-  if (assistantRes.ok) {
-    const rows = (await assistantRes.json()) as { id: string }[];
-    if (rows.length > 0 && rows[0]) {
-      return { kind: 'business', id: rows[0].id, role: 'assistant' };
-    }
-  }
+  // 2. (RETIRADO) businesses.assistant_token ya NO otorga sesión: el asistente
+  //    entra por PIN (identidad individual, ver /api/auth/pin). La columna sigue
+  //    en la DB (migración de borrado aparte); acá solo dejamos de aceptarla.
 
   // 3. organizations.access_token → grupo de sucursales (dueño multi-sucursal)
   const orgRes = await fetch(

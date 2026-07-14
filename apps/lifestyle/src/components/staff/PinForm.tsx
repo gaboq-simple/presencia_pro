@@ -63,8 +63,11 @@ export default function PinForm({
         return;
       }
 
-      // PIN correcto — la cookie ya fue seteada por el server
-      router.push('/staff');
+      // PIN correcto — la cookie ya fue seteada por el server.
+      // Rutear por rol: el barbero a su vista (/staff), el asistente a la mesa
+      // de control (/dashboard).
+      const body = (await res.json().catch(() => ({}))) as { role?: string };
+      router.push(body.role === 'assistant' ? '/dashboard' : '/staff');
       router.refresh();
     } catch {
       setError('Error de conexión. Intenta de nuevo.');
@@ -150,7 +153,7 @@ export default function PinForm({
               />
             </svg>
           </div>
-          <h1 className="text-lg font-semibold text-gray-900">Acceso barbero</h1>
+          <h1 className="text-lg font-semibold text-gray-900">Acceso con PIN</h1>
           <p className="mt-1 text-sm font-medium text-gray-700">{businessName}</p>
           <p className="mt-0.5 text-sm text-gray-500">Ingresa tu PIN de 4 digitos</p>
         </div>
