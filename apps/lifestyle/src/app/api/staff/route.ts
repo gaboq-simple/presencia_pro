@@ -21,6 +21,7 @@
 // Retorna: el staff creado + su PIN (para mostrárselo al dueño).
 
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
@@ -43,6 +44,11 @@ const BodySchema = z.object({
   phone:       z.string().trim().max(40, 'Teléfono demasiado largo').nullable().optional(),
   whatsapp_id: z.string().trim().max(40).nullable().optional(),
   photo_url:   z.string().url('photo_url debe ser una URL válida').nullable().optional(),
+  // Servicios que hace (staff_services). Obligatorio ≥1 para 'barber' (el alta ya no
+  // deja barberos huérfanos sin servicios — invisibles en mesa/landing por el nuevo
+  // discriminador). Opcional para assistant/admin (un asistente no atiende; un admin
+  // que corta puede recibir servicios acá para aparecer como agendable desde el alta).
+  service_ids: z.array(z.string().uuid('service_id inválido')).max(100, 'Demasiados servicios').optional(),
 });
 
 // ─── PIN único por negocio ──────────────────────────────────────────────────
@@ -110,6 +116,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const d = parsed.data;
   const supabase = getServiceClient();
 
+  // 2b. Servicios que hará el staff. Validamos ANTES de insertar el staff para que,
+  //     una vez creada la fila, el único motivo de fallo del mapeo sea un error
+  //     transitorio de DB (no un dato inválido) → el rollback compensatorio es raro.
+  const requestedServiceIds = [...new Set(d.service_ids ?? [])]; // dedup (PK compuesta)
+
+  // Regla: 'barber' DEBE tener ≥1 servicio (no se crean barberos sin servicios).
+  if (d.role === 'barber' && requestedServiceIds.length === 0) {
+    return NextResponse.json(
+      { error: 'Un barbero necesita al menos un servicio. Seleccioná uno o creá un servicio primero.' },
+      { status: 400 },
+    );
+  }
+
+  // Pertenencia: cada service_id debe ser un servicio ACTIVO de ESTE negocio
+  // (mismo criterio que PATCH /api/staff/[id]/services).
+  if (requestedServiceIds.length > 0) {
+    const { data: activeRows, error: svcError } = await supabase
+      .from('services')
+      .select('id')
+      .eq('business_id', businessId)
+      .eq('active', true);
+
+    if (svcError) {
+      return NextResponse.json({ error: 'Error al validar servicios' }, { status: 500 });
+    }
+
+    const activeIds = new Set(((activeRows ?? []) as Array<{ id: string }>).map((r) => r.id));
+    for (const sid of requestedServiceIds) {
+      if (!activeIds.has(sid)) {
+        return NextResponse.json(
+          { error: 'Uno o más servicios no pertenecen al negocio' },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
   // 3. Insertar con PIN único — reintentar si una carrera provoca colisión (23505).
   type CreatedStaff = {
     id: string; name: string; role: string; phone: string;
@@ -155,8 +198,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'No se pudo generar un PIN único, intenta de nuevo' }, { status: 409 });
   }
 
-  // 4. Invalidar cache del engine (incluye staff activo)
+  // 3b. Mapear servicios (staff_services). Ya validados arriba, así que un fallo acá
+  //     es transitorio. Atomicidad: sin transacción cross-tabla en el cliente JS →
+  //     rollback compensatorio. Si el mapeo falla, BORRAMOS el staff recién creado
+  //     (no tiene dependientes aún) para no dejar un barbero huérfano sin servicios,
+  //     que es exactamente el estado que este alta elimina por construcción.
+  if (requestedServiceIds.length > 0) {
+    const { error: mapError } = await supabase
+      .from('staff_services')
+      .insert(requestedServiceIds.map((sid) => ({ staff_id: created.id, service_id: sid })));
+
+    if (mapError) {
+      const { error: cleanupError } = await supabase.from('staff').delete().eq('id', created.id);
+      if (cleanupError) {
+        // Doble fallo (mapeo + limpieza): queda un staff huérfano. Log fuerte para
+        // reconciliación manual — no debería ocurrir salvo caída de DB entre pasos.
+        console.error(JSON.stringify({
+          ts:          new Date().toISOString(),
+          route:       'POST /api/staff',
+          event:       'orphan_staff_cleanup_failed',
+          business_id: businessId,
+          staff_id:    created.id,
+          map_error:   mapError.message,
+          cleanup_err: cleanupError.message,
+        }));
+      }
+      return NextResponse.json({ error: 'Error al asignar los servicios, intenta de nuevo' }, { status: 500 });
+    }
+  }
+
+  // 4. Invalidar AMBAS caches — el alta ahora toca el catálogo (staff_services alimenta
+  //    getStaffForService del engine + el /api/catalog cacheado por tag).
   invalidateBusinessCache(businessId);
+  revalidateTag(`catalog-${businessId}`, 'max');
 
   return NextResponse.json(created, { status: 201 });
 }

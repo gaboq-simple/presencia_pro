@@ -141,12 +141,16 @@ export default async function DashboardPage({
       getDayAppointments(businessId, date, timezone),
       queryStaffBlocksForDay(activeStaffIds, timezone, date),
     ]);
+    // Discriminador de agendabilidad (candidato a): "atiende clientes" = tiene ≥1
+    // servicio mapeado (staff_services), NO role==='barber'. Así un dueño role='admin'
+    // que corta pelo entra como columna agendable, y el asistente (sin servicios) queda
+    // fuera. Coherente con el engine, que ya gatea por staff_services (getStaffForService).
     const staffOptions = allStaff
-      .filter((s) => s.role === 'barber')
+      .filter((s) => s.hasServices)
       .map((s) => ({ id: s.id, name: s.name }));
     // Disponibilidad del panorama: incluye breaks (para validar dónde cabe un reacomodo).
     const staffWithAvailability = allStaff
-      .filter((s) => s.role === 'barber')
+      .filter((s) => s.hasServices)
       .map((s) => ({
         id: s.id,
         name: s.name,

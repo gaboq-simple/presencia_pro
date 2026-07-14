@@ -73,14 +73,16 @@ export default async function StaffGestionPage({
     getStaffBlocksForDay(date),
   ]);
 
-  // Solo barberos para el formulario de nueva cita
+  // Quién atiende clientes = tiene ≥1 servicio mapeado (staff_services), NO el rol.
+  // Mismo discriminador de agendabilidad que la mesa del asistente (dashboard/page.tsx)
+  // y la landing — un admin que corta entra, el asistente sin servicios no.
   const staffOptions = allStaff
-    .filter((s) => s.role === 'barber')
+    .filter((s) => s.hasServices)
     .map((s) => ({ id: s.id, name: s.name }));
 
-  // Barberos con disponibilidad para el timeline
+  // Con disponibilidad para el timeline
   const staffWithAvailability = allStaff
-    .filter((s) => s.role === 'barber')
+    .filter((s) => s.hasServices)
     .map((s) => ({
       id: s.id,
       name: s.name,

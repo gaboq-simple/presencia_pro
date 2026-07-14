@@ -137,6 +137,7 @@ export type DashboardStaff = {
   name: string;
   role: StaffRole;
   availabilityToday: StaffAvailabilitySlot | null;  // null = sin horario hoy
+  hasServices: boolean;  // ≥1 fila en staff_services = "atiende clientes" (discriminador de agendabilidad)
 };
 
 // ─── Ingresos del día ─────────────────────────────────────────────────────────
@@ -257,6 +258,7 @@ type RawStaffRow = {
   name: string;
   role: string;
   availability: StaffAvailabilitySlot[];
+  services: Array<{ service_id: string }>;
 };
 
 // Shape interno del select de métricas
@@ -398,7 +400,8 @@ export async function getActiveStaffWithAvailability(
       id,
       name,
       role,
-      availability:staff_availability(day_of_week, start_time, end_time, break_start, break_end, is_active)
+      availability:staff_availability(day_of_week, start_time, end_time, break_start, break_end, is_active),
+      services:staff_services(service_id)
     `)
     .eq('business_id', businessId)
     .eq('active', true)
@@ -415,6 +418,9 @@ export async function getActiveStaffWithAvailability(
     // Solo días activos cuentan como "trabaja hoy" (is_active default true).
     availabilityToday:
       s.availability.find((a) => a.day_of_week === dayOfWeek && a.is_active !== false) ?? null,
+    // Discriminador de agendabilidad: ≥1 servicio mapeado = "atiende clientes".
+    // El nested embed viene en la misma query — sin round-trip extra.
+    hasServices: (s.services?.length ?? 0) > 0,
   }));
 }
 
