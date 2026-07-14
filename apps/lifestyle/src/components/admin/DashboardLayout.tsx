@@ -16,6 +16,7 @@ import type {
   BlockRequestWithStaff,
   AdminStaffPhotoRow,
   AdminStaffManagementRow,
+  AdminServiceRow,
 } from '@/lib/dashboard.types';
 import { toDateStr } from '@/lib/dashboard.types';
 import DashboardRealtimeProvider from './DashboardRealtimeProvider';
@@ -24,6 +25,7 @@ import StaffMetricsPanel from './StaffMetricsPanel';
 import BlockRequestsInbox from './BlockRequestsInbox';
 import StaffPhotoManager from './StaffPhotoManager';
 import StaffManagementPanel from './StaffManagementPanel';
+import ServicesManagementPanel from './ServicesManagementPanel';
 import InactiveClientsPanel from './InactiveClientsPanel';
 import ReportsConfigPanel  from './ReportsConfigPanel';
 import ReviewConfigPanel   from './ReviewConfigPanel';
@@ -44,6 +46,7 @@ type Props = {
   pendingBlockRequests: BlockRequestWithStaff[];
   staffForPhotos: AdminStaffPhotoRow[];
   staffForManagement: AdminStaffManagementRow[];
+  servicesForManagement: AdminServiceRow[];
   /** Lista de sucursales — solo presente en sesiones de organización con >1 sucursal */
   branches?: Branch[];
   /** ID de la organización — presente solo en sesiones de organización */
@@ -88,6 +91,7 @@ export default function DashboardLayout({
   pendingBlockRequests,
   staffForPhotos,
   staffForManagement,
+  servicesForManagement,
   branches,
   organizationId,
 }: Props) {
@@ -233,6 +237,16 @@ export default function DashboardLayout({
 
         {/* Configuración de reseñas automáticas */}
         <ReviewConfigPanel />
+
+        {/* Catálogo de servicios — crear/editar/activar */}
+        <details className="rounded-lg border border-gray-200">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-gray-900 hover:bg-gray-50">
+            Catálogo de servicios
+          </summary>
+          <div className="border-t border-gray-200 px-4 py-4">
+            <ServicesManagementPanel initialServices={servicesForManagement} />
+          </div>
+        </details>
 
         {/* Gestión de staff — activo/inactivo + PIN */}
         <details className="rounded-lg border border-gray-200">
