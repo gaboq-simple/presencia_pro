@@ -12,7 +12,7 @@
 
 export type SitePalette = 'obsidian' | 'humo' | 'cuero' | 'bronce' | 'blanco' | 'arena';
 
-export type OfficeHours = Record<string, { open: string; close: string }>;
+export type OfficeHours = Record<string, { start: string; end: string }>;
 
 export type SiteBusinessRow = {
   id: string;
