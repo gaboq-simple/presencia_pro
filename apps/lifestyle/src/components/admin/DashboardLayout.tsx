@@ -254,7 +254,12 @@ export default function DashboardLayout({
             Gestión de staff
           </summary>
           <div className="border-t border-gray-200 px-4 py-4">
-            <StaffManagementPanel initialStaff={staffForManagement} />
+            <StaffManagementPanel
+              initialStaff={staffForManagement}
+              activeServices={servicesForManagement
+                .filter((s) => s.active)
+                .map((s) => ({ id: s.id, name: s.name, price: s.price, currency: s.currency }))}
+            />
           </div>
         </details>
 

@@ -21,11 +21,14 @@ import type { AdminStaffManagementRow, StaffAvailabilitySlot } from '@/lib/dashb
 import StaffScheduleEditor from './StaffScheduleEditor';
 import QuickDayOff from './QuickDayOff';
 import StaffCreateForm, { type StaffCreateResult } from './StaffCreateForm';
+import StaffServicesEditor, { type ServiceOption } from './StaffServicesEditor';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 type Props = {
   initialStaff: AdminStaffManagementRow[];
+  /** Servicios activos del negocio — para el editor de "qué servicios hace" el barbero. */
+  activeServices: ServiceOption[];
 };
 
 // ─── Modal state ──────────────────────────────────────────────────────────────
@@ -33,6 +36,7 @@ type Props = {
 type ModalState =
   | { type: 'schedule'; staffId: string; staffName: string; availability: StaffAvailabilitySlot[] }
   | { type: 'dayoff';   staffId: string; staffName: string }
+  | { type: 'services'; staffId: string; staffName: string; currentIds: string[] }
   | null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,7 +58,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function StaffManagementPanel({ initialStaff }: Props) {
+export default function StaffManagementPanel({ initialStaff, activeServices }: Props) {
   const [staff, setStaff] = useState<AdminStaffManagementRow[]>(initialStaff);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [pinEditId, setPinEditId]   = useState<string | null>(null);
@@ -68,6 +72,9 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
 
   const [showCreate, setShowCreate]   = useState(false);
   const [createdInfo, setCreatedInfo] = useState<{ name: string; role: string; pin: string | null } | null>(null);
+
+  const [svcLoadingId, setSvcLoadingId] = useState<string | null>(null);
+  const [svcError, setSvcError]         = useState<{ id: string; msg: string } | null>(null);
 
   // ── Toggle active ─────────────────────────────────────────────────────────
 
@@ -181,11 +188,37 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
     }
   }, []);
 
+  // ── Abrir editor de servicios (qué hace el barbero) ────────────────────────
+
+  const openServicesEditor = useCallback(async (member: AdminStaffManagementRow) => {
+    setSvcLoadingId(member.id);
+    setSvcError(null);
+
+    try {
+      const res = await fetch(`/api/staff/${member.id}/services`, {
+        credentials: 'same-origin',
+      });
+
+      if (!res.ok) {
+        setSvcError({ id: member.id, msg: 'Error al cargar servicios' });
+        return;
+      }
+
+      const { service_ids } = await res.json() as { service_ids: string[] };
+      setModal({ type: 'services', staffId: member.id, staffName: member.name, currentIds: service_ids });
+    } catch {
+      setSvcError({ id: member.id, msg: 'Error de red al cargar servicios' });
+    } finally {
+      setSvcLoadingId(null);
+    }
+  }, []);
+
   // ── Cerrar modal ──────────────────────────────────────────────────────────
 
   function closeModal() {
     setModal(null);
     setScheduleError(null);
+    setSvcError(null);
   }
 
   // ── Alta de staff nuevo ─────────────────────────────────────────────────────
@@ -227,6 +260,8 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
           const showPin      = member.role === 'barber';
           const isLoadingSched = scheduleLoadingId === member.id;
           const schedErr = scheduleError?.id === member.id ? scheduleError.msg : null;
+          const isLoadingSvc = svcLoadingId === member.id;
+          const svcErr = svcError?.id === member.id ? svcError.msg : null;
 
           return (
             <div
@@ -347,9 +382,33 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
                     </svg>
                     Dia libre
                   </button>
+                  {showPin && (
+                    <>
+                      <span className="text-gray-200" aria-hidden>|</span>
+                      <button
+                        onClick={() => void openServicesEditor(member)}
+                        disabled={isLoadingSvc || !!modal}
+                        className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 disabled:opacity-40"
+                      >
+                        {isLoadingSvc ? (
+                          <span className="text-[11px] text-gray-400">Cargando...</span>
+                        ) : (
+                          <>
+                            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                              <path fillRule="evenodd" d="M8 1.5a2 2 0 100 4 2 2 0 000-4zM4 3.5a2 2 0 11-4 0 2 2 0 014 0zm12 0a2 2 0 11-4 0 2 2 0 014 0zM8 10.5a2 2 0 100 4 2 2 0 000-4zm-6 2a2 2 0 11-4 0 2 2 0 014 0zm14 0a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                            Servicios
+                          </>
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
                 {schedErr && (
                   <p className="mt-0.5 text-[10px] text-red-500">{schedErr}</p>
+                )}
+                {svcErr && (
+                  <p className="mt-0.5 text-[10px] text-red-500">{svcErr}</p>
                 )}
               </div>
 
@@ -384,7 +443,9 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
             {/* Header */}
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-900">
-                {modal.type === 'schedule' ? 'Editar horario' : 'Marcar dia libre'}
+                {modal.type === 'schedule' ? 'Editar horario'
+                  : modal.type === 'services' ? 'Servicios que hace'
+                  : 'Marcar dia libre'}
               </h2>
               <button
                 type="button"
@@ -412,6 +473,16 @@ export default function StaffManagementPanel({ initialStaff }: Props) {
               <QuickDayOff
                 staffId={modal.staffId}
                 staffName={modal.staffName}
+                onSaved={closeModal}
+                onCancel={closeModal}
+              />
+            )}
+            {modal.type === 'services' && (
+              <StaffServicesEditor
+                staffId={modal.staffId}
+                staffName={modal.staffName}
+                services={activeServices}
+                initialIds={modal.currentIds}
                 onSaved={closeModal}
                 onCancel={closeModal}
               />
