@@ -179,7 +179,7 @@ async function checkSlugExists(
 
 // ─── Dry-run printer ──────────────────────────────────────────────────────────
 
-function printDryRun(config: Config, accessToken: string, assistantToken: string, pins: string[]): void {
+function printDryRun(config: Config, accessToken: string, pins: string[]): void {
   const DIVIDER = '─'.repeat(60);
 
   console.log('\n' + DIVIDER);
@@ -205,7 +205,7 @@ function printDryRun(config: Config, accessToken: string, assistantToken: string
   console.log(`  whatsapp_number:        '' (placeholder — Fase 2)`);
   console.log(`  whatsapp_phone_number_id: '' (placeholder — Fase 2)`);
   console.log(`  access_token:           ${accessToken.slice(0, 8)}... (32 chars)`);
-  console.log(`  assistant_token:        ${assistantToken.slice(0, 8)}... (32 chars)`);
+  console.log(`  assistant_token:        null (el asistente entra por PIN)`);
   if (config.business.office_hours) {
     console.log(`  office_hours:           ${JSON.stringify(convertOfficeHours(config.business.office_hours))}`);
   }
@@ -343,7 +343,6 @@ async function insertAll(
   supabase: SupabaseClient,
   config: Config,
   accessToken: string,
-  assistantToken: string,
   pins: string[],
   existingBusinessId: string | null,
 ): Promise<InsertResult> {
@@ -395,7 +394,9 @@ async function insertAll(
     whatsapp_phone_number_id:  '',
     // Tokens de acceso generados
     access_token:              accessToken,
-    assistant_token:           assistantToken,
+    // El asistente entra por PIN (no por token). La columna es nullable+UNIQUE →
+    // null (no ''): '' colisionaría con el UNIQUE entre negocios.
+    assistant_token:           null,
     // Multi-sucursal: FK a organizations (null si standalone)
     organization_id:           organization?.id ?? null,
     // Datos Fase 2
@@ -606,7 +607,6 @@ function printSummary(
   result: InsertResult,
   config: Config,
   accessToken: string,
-  assistantToken: string,
 ): void {
   const DIVIDER = '═'.repeat(60);
 
@@ -631,11 +631,8 @@ function printSummary(
   console.log(`access_token:   ${accessToken}`);
   console.log(`  → URL: /dashboard?token=${accessToken}`);
 
-  console.log('\n── Accesos del asistente ──────────────────────────────');
-  console.log(`assistant_token: ${assistantToken}`);
-  console.log(`  → URL: /dashboard?token=${assistantToken}&role=assistant`);
-
   console.log('\n── Staff y PINs ────────────────────────────────────────');
+  console.log(`  Todos (barberos y asistente) entran en /${config.business.slug}/staff con su PIN:`);
   for (const row of result.staffRows) {
     console.log(`  ${row.name.padEnd(25)} PIN: ${row.pin}   ID: ${row.id}`);
   }
@@ -664,7 +661,6 @@ function generateChecklist(
   result: InsertResult,
   config: Config,
   accessToken: string,
-  assistantToken: string,
 ): void {
   const timestamp = new Date().toISOString();
   const slug      = config.business.slug;
@@ -731,8 +727,8 @@ function generateChecklist(
     `- Edge Function: \`dispatch-weekly-report\` → schedule: \`0 10 * * 1\``,
     ``,
     `### 4. Entregar credenciales al cliente`,
-    `- URL admin:  \`${appUrl}/dashboard?token=${accessToken}\``,
-    `- URL staff:  \`${appUrl}/dashboard?token=${assistantToken}\``,
+    `- URL admin (dueño):  \`${appUrl}/dashboard?token=${accessToken}\``,
+    `- URL staff (barberos y asistente):  \`${appUrl}/${slug}/staff\` → cada uno entra con su PIN`,
     `- PINs:`,
     staffLines,
     `- ⚠️ Guardar en 1Password antes de enviar al cliente`,
@@ -818,14 +814,15 @@ async function main(): Promise<void> {
 
   // ── Generar tokens y PINs ─────────────────────────────────────────────────
 
-  const accessToken    = generateToken();
-  const assistantToken = generateToken();
-  const pins           = generateUniquePins(config.staff.length);
+  // El asistente ya NO usa assistant_token: entra por PIN (igual que los
+  // barberos) vía /[slug]/staff. No se genera ni se inserta el token.
+  const accessToken = generateToken();
+  const pins        = generateUniquePins(config.staff.length);
 
   // ── Dry-run ───────────────────────────────────────────────────────────────
 
   if (flags.dryRun) {
-    printDryRun(config, accessToken, assistantToken, pins);
+    printDryRun(config, accessToken, pins);
     process.exit(0);
   }
 
@@ -849,7 +846,6 @@ async function main(): Promise<void> {
     supabase,
     config,
     accessToken,
-    assistantToken,
     pins,
     existingId,
   );
@@ -860,11 +856,11 @@ async function main(): Promise<void> {
 
   // ── Resumen ───────────────────────────────────────────────────────────────
 
-  printSummary(insertResult, config, accessToken, assistantToken);
+  printSummary(insertResult, config, accessToken);
 
   // ── Generar checklist ─────────────────────────────────────────────────────
 
-  generateChecklist(insertResult, config, accessToken, assistantToken);
+  generateChecklist(insertResult, config, accessToken);
 }
 
 main().catch((err: unknown) => {
