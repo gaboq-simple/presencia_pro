@@ -10,7 +10,7 @@
 // Respuesta con un solo business_id → PeriodMetrics (retrocompatible).
 // Respuesta con múltiples business_ids → ConsolidatedSummaryResponse.
 //
-// Auth: requiere sesión activa (ls_session o Supabase Auth) con role owner/assistant/admin.
+// Auth: requiere sesión activa (ls_session o Supabase Auth) con role owner/admin.
 // Todos los business_ids se validan contra la sesión — nunca se aceptan sin verificación.
 
 import { NextResponse } from 'next/server';
@@ -157,8 +157,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Solo owner / assistant / admin pueden ver métricas
-  const ALLOWED = ['owner', 'assistant', 'admin'] as const;
+  // Solo owner / admin pueden ver métricas (incluyen revenue del negocio).
+  // El asistente y el barbero NO ven el dinero — igual que staff-metrics/usage.
+  const ALLOWED = ['owner', 'admin'] as const;
   if (!ALLOWED.includes(session.role as typeof ALLOWED[number])) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
