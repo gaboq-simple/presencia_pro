@@ -17,6 +17,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { logManagementAudit } from '@/lib/managementAudit';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -109,18 +110,21 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   if (parsed.data.review_requests_enabled !== undefined) updates['review_requests_enabled'] = parsed.data.review_requests_enabled;
   if (parsed.data.review_url              !== undefined) updates['review_url']              = parsed.data.review_url;
 
+  const CONFIG_FIELDS = 'report_enabled, report_whatsapp, review_requests_enabled, review_url';
+
   try {
     const supabase = getServiceClient();
 
-    // Validar: review_requests_enabled=true requiere review_url
-    if (updates['review_requests_enabled'] === true && !updates['review_url']) {
-      const { data: current } = await supabase
-        .from('businesses')
-        .select('review_url')
-        .eq('id', auth.businessId)
-        .maybeSingle();
+    // Estado previo — sirve para la validación de review_url Y como `before` del audit.
+    const { data: before } = await supabase
+      .from('businesses')
+      .select(CONFIG_FIELDS)
+      .eq('id', auth.businessId)
+      .maybeSingle();
 
-      const currentUrl = (current as { review_url: string | null } | null)?.review_url;
+    // Validar: review_requests_enabled=true requiere review_url (nueva o ya guardada)
+    if (updates['review_requests_enabled'] === true && !updates['review_url']) {
+      const currentUrl = (before as { review_url: string | null } | null)?.review_url;
       if (!currentUrl) {
         return NextResponse.json(
           { error: 'review_url es obligatorio para activar las reseñas automáticas' },
@@ -133,11 +137,25 @@ export async function PATCH(request: Request): Promise<NextResponse> {
       .from('businesses')
       .update(updates)
       .eq('id', auth.businessId)
-      .select('report_enabled, report_whatsapp, review_requests_enabled, review_url')
+      .select(CONFIG_FIELDS)
       .maybeSingle();
 
     if (error) throw new Error(error.message);
     if (!data) return NextResponse.json({ error: 'Business not found' }, { status: 404 });
+
+    // Auditoría (best-effort). PATCH por campo → UNA fila 'updated' con changed_fields.
+    // report_whatsapp (teléfono del PROPIO dueño, no de un cliente) se guarda ENTERO —
+    // sin maskPhone: es su dato de contacto, no PII de tercero.
+    await logManagementAudit(supabase, {
+      entity:        'businesses',
+      entityId:      auth.businessId,
+      action:        'updated',
+      businessId:    auth.businessId,
+      actorStaffId:  auth.staffId,
+      oldData:       (before as Record<string, unknown> | null) ?? null,
+      newData:       data as Record<string, unknown>,
+      changedFields: Object.keys(updates),
+    });
 
     return NextResponse.json(data);
   } catch (err) {
