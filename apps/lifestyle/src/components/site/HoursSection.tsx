@@ -6,7 +6,7 @@ import type { OfficeHours } from '@/lib/dashboard.types';
 import { RevealObserver } from './RevealObserver';
 
 type HoursSectionProps = {
-  officeHours: OfficeHours;
+  officeHours: OfficeHours | null;
 };
 
 const DAY_LABELS: Record<string, string> = {
@@ -29,7 +29,10 @@ function getTodayDayOfWeek(): number {
 }
 
 export function HoursSection({ officeHours }: HoursSectionProps) {
-  const isEmpty = Object.keys(officeHours).length === 0;
+  // office_hours es opcional en el onboarding → puede llegar NULL. Sin esta guarda,
+  // Object.keys(null) tira TypeError y revienta TODA la landing (no solo esta sección).
+  // NULL/vacío → mismo fallback "Contáctanos" de siempre.
+  const isEmpty = !officeHours || Object.keys(officeHours).length === 0;
   const todayDow = getTodayDayOfWeek();
 
   return (
