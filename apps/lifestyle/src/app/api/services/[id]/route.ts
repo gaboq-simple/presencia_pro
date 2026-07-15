@@ -22,6 +22,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { logManagementAudit } from '@/lib/managementAudit';
 import { ServiceUpdateSchema } from '../schema';
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -87,11 +88,12 @@ export async function PATCH(
     );
   }
 
-  // 4. Verificar que el servicio pertenece al negocio de la sesión
+  // 4. Verificar que el servicio pertenece al negocio de la sesión. El select se
+  //    ensancha a los campos auditables → sirve de `before` sin query extra.
   const supabase = getServiceClient();
   const { data: existing, error: fetchError } = await supabase
     .from('services')
-    .select('id, business_id')
+    .select('id, business_id, name, description, price, price_min, price_max, price_note, currency, duration_minutes, active')
     .eq('id', serviceId)
     .eq('business_id', businessId)
     .maybeSingle();
@@ -118,7 +120,25 @@ export async function PATCH(
     return NextResponse.json({ error: 'Error al actualizar el servicio' }, { status: 500 });
   }
 
-  // 6. Invalidar AMBAS caches del catálogo
+  // 6. Auditoría (best-effort). La acción distingue el toggle de active del edit
+  //    normal: active=false → deactivated, active=true → reactivated, resto → updated.
+  const changedFields = Object.keys(updates);
+  const action =
+    updates['active'] === false ? 'deactivated'
+    : updates['active'] === true ? 'reactivated'
+    : 'updated';
+  await logManagementAudit(supabase, {
+    entity:        'services',
+    entityId:      serviceId,
+    action,
+    businessId,
+    actorStaffId:  session.staff_id,
+    oldData:       existing,
+    newData:       updated,
+    changedFields,
+  });
+
+  // 7. Invalidar AMBAS caches del catálogo
   invalidateBusinessCache(businessId);
   revalidateTag(`catalog-${businessId}`, 'max');
 

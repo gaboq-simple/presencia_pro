@@ -23,6 +23,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { logManagementAudit } from '@/lib/managementAudit';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ const BodySchema = z.object({
 // ─── Guard común ──────────────────────────────────────────────────────────────
 
 type Guarded =
-  | { ok: true; businessId: string; staffId: string }
+  | { ok: true; businessId: string; staffId: string; actorStaffId: string | null }
   | { ok: false; res: NextResponse };
 
 async function guard(rawId: string): Promise<Guarded> {
@@ -74,7 +75,7 @@ async function guard(rawId: string): Promise<Guarded> {
     return { ok: false, res: NextResponse.json({ error: 'Staff no encontrado' }, { status: 404 }) };
   }
 
-  return { ok: true, businessId: session.business_id, staffId: parsedId.data };
+  return { ok: true, businessId: session.business_id, staffId: parsedId.data, actorStaffId: session.staff_id };
 }
 
 // ─── GET ──────────────────────────────────────────────────────────────────────
@@ -151,6 +152,14 @@ export async function PATCH(
     }
   }
 
+  // `before` del audit: el mapeo actual COMPLETO del barbero (incluye mapeos a
+  // servicios inactivos, que el replace-all preserva). Una query extra chica.
+  const { data: beforeRows } = await supabase
+    .from('staff_services')
+    .select('service_id')
+    .eq('staff_id', staffId);
+  const beforeIds = ((beforeRows ?? []) as Array<{ service_id: string }>).map((r) => r.service_id);
+
   // Replace-all acotado a servicios activos: borra los mapeos del barbero a
   // servicios activos e inserta el set nuevo. Los mapeos a servicios inactivos
   // (si los hubiera) quedan intactos.
@@ -175,6 +184,19 @@ export async function PATCH(
       return NextResponse.json({ error: 'Error al guardar el mapeo' }, { status: 500 });
     }
   }
+
+  // Auditoría (best-effort): UNA fila con los sets before/after (no N por mapeo). El
+  // `after` = mapeos inactivos preservados (before − activos) + el set nuevo pedido.
+  const afterIds = [...beforeIds.filter((id) => !activeIds.has(id)), ...requestedIds];
+  await logManagementAudit(supabase, {
+    entity:       'staff_services',
+    entityId:     staffId,               // el barbero cuyos servicios cambiaron
+    action:       'services_changed',
+    businessId,
+    actorStaffId: g.actorStaffId,
+    oldData:      { service_ids: beforeIds },
+    newData:      { service_ids: afterIds },
+  });
 
   // Invalidar AMBAS caches — el mapeo alimenta getStaffForService del bot.
   invalidateBusinessCache(businessId);
