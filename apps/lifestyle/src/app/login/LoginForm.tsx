@@ -18,6 +18,12 @@ export default function LoginForm({ businessName }: { businessName: string | nul
     setError(null);
     setLoading(true);
 
+    // Limpiar cualquier sesión previa ANTES de loguear. `getCurrentSession` prioriza
+    // ls_session (PIN/token) sobre Supabase Auth: si esta compu tiene una ls_session
+    // vieja, taparía el login por email del dueño y lo trataría como el usuario
+    // anterior. /api/auth/logout borra ls_session + cierra la sesión sb previa.
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+
     const { error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
