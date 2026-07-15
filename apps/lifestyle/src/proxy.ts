@@ -24,44 +24,30 @@ import {
 // ─── Supabase REST token lookup (Edge-compatible) ─────────────────────────────
 
 type TokenResult =
-  | { kind: 'business'; id: string; role: 'owner' | 'assistant' }
   | { kind: 'organization'; organization_id: string; business_ids: string[] }
   | null;
 
-async function findTokenResult(
-  token: string,
-  roleHint: string | null,
-): Promise<TokenResult> {
+async function findTokenResult(token: string): Promise<TokenResult> {
   const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
   const key = process.env['SUPABASE_SERVICE_ROLE_KEY'];
   if (!url || !key) return null;
 
   const headers = { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' };
-  const isAssistantHint = roleHint === 'assistant';
 
-  // TODO (A-1 — tokens sin expiración): access_token y assistant_token son
-  // strings estáticos sin fecha de expiración en la DB. Si se filtran (logs,
-  // historial del navegador, pantalla compartida) el acceso es permanente hasta
-  // rotación manual. Solución: agregar `token_expires_at TIMESTAMPTZ` en
-  // businesses, validarlo aquí, y rotar automáticamente cada 90 días.
+  // TODO (A-1 — tokens sin expiración): organizations.access_token es un string
+  // estático sin fecha de expiración en la DB. Si se filtra (logs, historial del
+  // navegador, pantalla compartida) el acceso es permanente hasta rotación manual.
+  // Solución: agregar `token_expires_at TIMESTAMPTZ` en organizations y rotar.
 
-  // 1. businesses.access_token → sucursal directa (dueño o asistente)
-  const ownerRes = await fetch(
-    `${url}/rest/v1/businesses?select=id&access_token=eq.${encodeURIComponent(token)}&active=eq.true&limit=1`,
-    { headers },
-  );
-  if (ownerRes.ok) {
-    const rows = (await ownerRes.json()) as { id: string }[];
-    if (rows.length > 0 && rows[0]) {
-      return { kind: 'business', id: rows[0].id, role: isAssistantHint ? 'assistant' : 'owner' };
-    }
-  }
+  // 1. (RETIRADO) businesses.access_token ya NO otorga sesión: el DUEÑO entra por
+  //    email+contraseña (Supabase Auth — ver /login + auth.ts, staff_id real que
+  //    firma el audit). Con esto muere también el hint ?role=assistant, que dejaba
+  //    al token del dueño operar la mesa de control con staff_id=null (filas
+  //    'unknown' en appointment_audit). La columna sigue en la DB (borrado aparte).
+  // 2. (RETIRADO) businesses.assistant_token: el asistente entra por PIN.
 
-  // 2. (RETIRADO) businesses.assistant_token ya NO otorga sesión: el asistente
-  //    entra por PIN (identidad individual, ver /api/auth/pin). La columna sigue
-  //    en la DB (migración de borrado aparte); acá solo dejamos de aceptarla.
-
-  // 3. organizations.access_token → grupo de sucursales (dueño multi-sucursal)
+  // 3. organizations.access_token → grupo de sucursales (dueño multi-sucursal).
+  //    ÚNICO mecanismo de token que queda; independiente de businesses.
   const orgRes = await fetch(
     `${url}/rest/v1/organizations?select=id&access_token=eq.${encodeURIComponent(token)}&limit=1`,
     { headers },
@@ -93,19 +79,22 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const isProd = process.env['NODE_ENV'] === 'production';
   const { pathname } = request.nextUrl;
 
-  // ── 1. ?token= in URL (access link flow) — checked FIRST so a fresh token
-  //    always overrides any existing cookie (e.g. a stale barber session).
+  // ── 1. ?token= in URL — SOLO organización (dueño multi-sucursal). El token de
+  //    sucursal (businesses.access_token) fue retirado: el dueño entra por email.
+  //    El hint ?role= murió con él (ya no se lee) → no hay forma de pedir una
+  //    sesión de asistente por token. Un token de sucursal viejo ya no matchea y
+  //    cae al /login de abajo.
   if (pathname.startsWith('/dashboard')) {
     const token = request.nextUrl.searchParams.get('token');
     if (token) {
-      const roleParam = request.nextUrl.searchParams.get('role');
-      const result = await findTokenResult(token, roleParam);
+      const result = await findTokenResult(token);
       if (result) {
-        const partialPayload =
-          result.kind === 'organization'
-            ? ({ type: 'organization', organization_id: result.organization_id, business_ids: result.business_ids, role: 'owner' } as const)
-            : ({ type: 'business', business_id: result.id, role: result.role } as const);
-        const payload = makeSessionPayload(partialPayload);
+        const payload = makeSessionPayload({
+          type: 'organization',
+          organization_id: result.organization_id,
+          business_ids: result.business_ids,
+          role: 'owner',
+        } as const);
         const cookieValue = await signSession(payload);
         const redirectUrl = new URL('/dashboard', request.url);
         const response = NextResponse.redirect(redirectUrl);

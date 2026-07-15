@@ -251,7 +251,7 @@ async function checkSlugExists(
 
 // ─── Dry-run printer ──────────────────────────────────────────────────────────
 
-function printDryRun(config: Config, accessToken: string, pins: string[]): void {
+function printDryRun(config: Config, pins: string[]): void {
   const DIVIDER = '─'.repeat(60);
 
   console.log('\n' + DIVIDER);
@@ -276,7 +276,7 @@ function printDryRun(config: Config, accessToken: string, pins: string[]): void 
   console.log(`  bot_name:               ${config.bot.assistant_name}`);
   console.log(`  whatsapp_number:        '' (placeholder — Fase 2)`);
   console.log(`  whatsapp_phone_number_id: '' (placeholder — Fase 2)`);
-  console.log(`  access_token:           ${accessToken.slice(0, 8)}... (32 chars)`);
+  console.log(`  access_token:           null (retirado — el dueño entra por email)`);
   console.log(`  assistant_token:        null (el asistente entra por PIN)`);
   if (config.business.office_hours) {
     console.log(`  office_hours:           ${JSON.stringify(convertOfficeHours(config.business.office_hours))}`);
@@ -424,7 +424,6 @@ async function upsertOrganization(
 async function insertAll(
   supabase: SupabaseClient,
   config: Config,
-  accessToken: string,
   pins: string[],
   existingBusinessId: string | null,
   force: boolean,
@@ -475,10 +474,11 @@ async function insertAll(
     // Placeholders Fase 1 — se actualizan al conectar WhatsApp
     whatsapp_number:           '',
     whatsapp_phone_number_id:  '',
-    // Tokens de acceso generados
-    access_token:              accessToken,
-    // El asistente entra por PIN (no por token). La columna es nullable+UNIQUE →
-    // null (no ''): '' colisionaría con el UNIQUE entre negocios.
+    // Tokens de login RETIRADOS: el dueño entra por email+contraseña (Supabase Auth,
+    // ver el usuario de Auth que se crea para el admin con email), el asistente y los
+    // barberos por PIN. Ambas columnas son nullable+UNIQUE → null (no ''): '' rompería
+    // el UNIQUE entre negocios. La columna sigue en la DB (borrado en migración aparte).
+    access_token:              null,
     assistant_token:           null,
     // Multi-sucursal: FK a organizations (null si standalone)
     organization_id:           organization?.id ?? null,
@@ -707,7 +707,6 @@ async function verifyInsert(supabase: SupabaseClient, businessId: string, config
 function printSummary(
   result: InsertResult,
   config: Config,
-  accessToken: string,
 ): void {
   const DIVIDER = '═'.repeat(60);
 
@@ -728,13 +727,9 @@ function printSummary(
     console.log(`  → URL (todas las sucursales): /dashboard?token=${org.access_token}`);
   }
 
-  console.log('\n── Accesos del encargado de esta sucursal ─────────────');
-  console.log(`access_token:   ${accessToken}`);
-  console.log(`  → URL: /dashboard?token=${accessToken}`);
-
   if (result.owners.length) {
     const appUrl = process.env['NEXT_PUBLIC_APP_URL'] ?? '';
-    console.log('\n── Login del dueño (email + contraseña) ───────────────');
+    console.log('\n── Login del dueño (email + contraseña) — ÚNICO acceso del dueño ──');
     for (const o of result.owners) {
       const verb = o.action === 'reset' ? '↻ contraseña RESETEADA (--force)' : '✓ usuario creado';
       console.log(`  ${o.name}  [${verb}]`);
@@ -745,6 +740,11 @@ function printSummary(
     }
     console.log('  ⚠️  Sin recuperación por email (no hay SMTP): GUARDÁ estas credenciales');
     console.log('     en 1Password antes de enviarlas. Reset solo re-corriendo con --force.');
+  } else {
+    console.log('\n🚨 ── SIN ACCESO DE DUEÑO ─────────────────────────────');
+    console.log('  Ningún staff role=\'admin\' con email → NADIE puede entrar al dashboard.');
+    console.log('  El access_token fue retirado: ya NO hay puerta alternativa por token.');
+    console.log('  Agregá email a un admin en el config y re-corré con --force.');
   }
 
   console.log('\n── Staff y PINs ────────────────────────────────────────');
@@ -776,7 +776,6 @@ function printSummary(
 function generateChecklist(
   result: InsertResult,
   config: Config,
-  accessToken: string,
 ): void {
   const timestamp = new Date().toISOString();
   const slug      = config.business.slug;
@@ -815,7 +814,9 @@ function generateChecklist(
     `- [x] Business creado: \`business_id=${result.businessId}\``,
     `- [x] Staff creados: ${result.staffRows.length} miembro(s) de staff`,
     `- [x] Services creados: ${result.serviceCount} servicio(s)`,
-    `- [x] Access tokens generados`,
+    ...(result.owners.length
+      ? [`- [x] Login del dueño (usuario de Auth + email) creado`]
+      : [`- [ ] ⚠️ Login del dueño NO creado (ningún admin con email)`]),
     ``,
     `## ⚠️ Pasos manuales pendientes`,
     ``,
@@ -852,9 +853,8 @@ function generateChecklist(
           `  - ⚠️ Sin recuperación por email (no hay SMTP): guardar sí o sí. Reset = re-correr con \`--force\`.`,
         ]
       : [
-          `- ⚠️ Ningún admin con email en el config → el dueño NO puede entrar por \`/login\`. Agregá \`email\` a un staff \`role='admin'\` y re-corré con \`--force\`.`,
+          `- 🚨 SIN ACCESO DE DUEÑO: ningún admin con email → nadie puede entrar al dashboard. El access_token fue retirado (no hay puerta por token). Agregá \`email\` a un staff \`role='admin'\` y re-corré con \`--force\`.`,
         ]),
-    `- URL admin (token, legacy):  \`${appUrl}/dashboard?token=${accessToken}\``,
     `- URL staff (barberos y asistente):  \`${appUrl}/${slug}/staff\` → cada uno entra con su PIN`,
     `- PINs:`,
     staffLines,
@@ -939,17 +939,18 @@ async function main(): Promise<void> {
   const warnings = buildWarnings(config);
   warnings.forEach((w) => console.log(w));
 
-  // ── Generar tokens y PINs ─────────────────────────────────────────────────
+  // ── Generar PINs ──────────────────────────────────────────────────────────
 
-  // El asistente ya NO usa assistant_token: entra por PIN (igual que los
-  // barberos) vía /[slug]/staff. No se genera ni se inserta el token.
-  const accessToken = generateToken();
-  const pins        = generateUniquePins(config.staff.length);
+  // Tokens de login RETIRADOS: el dueño entra por email+contraseña (Supabase Auth),
+  // el asistente y los barberos por PIN. No se genera ni se inserta access_token/
+  // assistant_token de businesses. (El token de organizations se genera aparte en
+  // upsertOrganization — otro mecanismo, intacto.)
+  const pins = generateUniquePins(config.staff.length);
 
   // ── Dry-run ───────────────────────────────────────────────────────────────
 
   if (flags.dryRun) {
-    printDryRun(config, accessToken, pins);
+    printDryRun(config, pins);
     process.exit(0);
   }
 
@@ -972,7 +973,6 @@ async function main(): Promise<void> {
   const insertResult = await insertAll(
     supabase,
     config,
-    accessToken,
     pins,
     existingId,
     flags.force,
@@ -984,11 +984,11 @@ async function main(): Promise<void> {
 
   // ── Resumen ───────────────────────────────────────────────────────────────
 
-  printSummary(insertResult, config, accessToken);
+  printSummary(insertResult, config);
 
   // ── Generar checklist ─────────────────────────────────────────────────────
 
-  generateChecklist(insertResult, config, accessToken);
+  generateChecklist(insertResult, config);
 }
 
 main().catch((err: unknown) => {
