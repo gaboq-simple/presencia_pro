@@ -21,6 +21,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { logManagementAudit } from '@/lib/managementAudit';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -104,6 +105,15 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 
   try {
     const supabase = getServiceClient();
+
+    // `before` del audit: el office_hours actual (replace-all → una query previa chica).
+    const { data: before } = await supabase
+      .from('businesses')
+      .select('office_hours')
+      .eq('id', auth.businessId)
+      .maybeSingle();
+    const oldHours = (before as { office_hours: unknown } | null)?.office_hours ?? null;
+
     const { data, error } = await supabase
       .from('businesses')
       .update({ office_hours: parsed.data.office_hours })
@@ -113,6 +123,19 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 
     if (error) throw new Error(error.message);
     if (!data) return NextResponse.json({ error: 'Business not found' }, { status: 404 });
+
+    // Auditoría (best-effort — no tumba la edición si falla). Replace-all del objeto
+    // de 7 claves → UNA fila 'updated' con before/after = office_hours viejo y nuevo.
+    await logManagementAudit(supabase, {
+      entity:        'businesses',
+      entityId:      auth.businessId,
+      action:        'updated',
+      businessId:    auth.businessId,
+      actorStaffId:  auth.staffId,
+      oldData:       { office_hours: oldHours },
+      newData:       { office_hours: (data as { office_hours: unknown }).office_hours },
+      changedFields: ['office_hours'],
+    });
 
     // La landing pública es dinámica (sin cache primitives), pero revalidamos su
     // path por robustez — si alguna vez entrara al Full Route Cache, igual refresca.

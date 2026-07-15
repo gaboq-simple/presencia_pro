@@ -13,7 +13,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type ManagementEntity = 'services' | 'staff' | 'staff_services';
+export type ManagementEntity = 'services' | 'staff' | 'staff_services' | 'businesses';
 export type ManagementAction =
   | 'created'
   | 'updated'
