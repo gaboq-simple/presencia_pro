@@ -99,6 +99,11 @@ export const StaffMemberSchema = z.object({
   photo_url:    z.string().url().nullable().optional(),
   availability: StaffAvailabilityMapSchema.optional(),
   services:     z.array(z.string().min(1)).optional().default([]),
+  // Login del dueño (Diseño B): las entradas con role='admin' y email reciben un
+  // usuario de Supabase Auth (contraseña generada por el script) + auth_id enganchado
+  // → entran por /login con email+contraseña y sus acciones firman el audit con su
+  // staff_id real. Opcional: un barbero/asistente sin email entra por PIN, como hoy.
+  email:        z.string().email().optional(),
 });
 
 export const ServiceSchema = z.object({

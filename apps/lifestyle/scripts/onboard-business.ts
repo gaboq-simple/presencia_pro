@@ -127,6 +127,78 @@ function generateToken(): string {
   return crypto.randomBytes(16).toString('hex');
 }
 
+/** Contraseña generada para el usuario Auth del dueño (~24 chars base64url, alta entropía). */
+function generatePassword(): string {
+  return crypto.randomBytes(18).toString('base64url');
+}
+
+// ─── Supabase Auth (admin API) para el login del dueño ─────────────────────────
+
+/** Busca un usuario de Auth por email, paginando listUsers. null si no existe. */
+async function findAuthUserByEmail(
+  supabase: SupabaseClient,
+  email: string,
+): Promise<{ id: string } | null> {
+  const target = email.trim().toLowerCase();
+  for (let page = 1; page <= 100; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) {
+      console.error(`❌ Error consultando usuarios de Auth: ${error.message}`);
+      process.exit(1);
+    }
+    const users = data?.users ?? [];
+    const found = users.find((u) => (u.email ?? '').toLowerCase() === target);
+    if (found) return { id: found.id };
+    if (users.length < 200) break; // última página
+  }
+  return null;
+}
+
+/**
+ * Garantiza un usuario de Auth para `email` y devuelve su id + la contraseña a
+ * entregar. Semántica alineada con --force (igual que el resto del script):
+ *   · email nuevo            → createUser (email_confirm:true) con contraseña generada.
+ *   · email ya existe, !force → ABORTA (no pisar la contraseña de un dueño vivo).
+ *   · email ya existe, force  → resetea la contraseña (updateUserById) e informa.
+ */
+async function ensureAuthUser(
+  supabase: SupabaseClient,
+  email: string,
+  force: boolean,
+): Promise<{ userId: string; password: string; action: 'created' | 'reset' }> {
+  const password = generatePassword();
+
+  const { data, error } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true, // sin SMTP: el usuario queda confirmado sin mail de verificación
+  });
+
+  if (!error && data?.user) {
+    return { userId: data.user.id, password, action: 'created' };
+  }
+
+  // Falló: ¿es porque el email ya tiene usuario?
+  const existing = await findAuthUserByEmail(supabase, email);
+  if (existing) {
+    if (!force) {
+      console.error(`❌ El email "${email}" ya tiene un usuario de Auth.`);
+      console.error('   Corré con --force si querés RESETEAR su contraseña (imprime la nueva).');
+      process.exit(1);
+    }
+    const { error: updError } = await supabase.auth.admin.updateUserById(existing.id, { password });
+    if (updError) {
+      console.error(`❌ Error reseteando la contraseña de "${email}": ${updError.message}`);
+      process.exit(1);
+    }
+    return { userId: existing.id, password, action: 'reset' };
+  }
+
+  // Otro error (no duplicado) → abortar con el mensaje real.
+  console.error(`❌ Error creando usuario de Auth para "${email}": ${error?.message ?? 'desconocido'}`);
+  process.exit(1);
+}
+
 /** Valida que todos los service IDs referenciados en staff.services existen en services[]. */
 function validateServiceReferences(config: Config): void {
   const serviceIds = new Set(config.services.map((s) => s.id));
@@ -212,7 +284,10 @@ function printDryRun(config: Config, accessToken: string, pins: string[]): void 
 
   console.log('\n[staff]');
   config.staff.forEach((member, i) => {
-    console.log(`  [${i}] name: ${member.name}  role: ${member.role}  pin: ${pins[i]}`);
+    const login = member.role === 'admin' && member.email
+      ? `  login: email (${member.email}) → usuario de Auth + auth_id`
+      : '';
+    console.log(`  [${i}] name: ${member.name}  role: ${member.role}  pin: ${pins[i]}${login}`);
   });
 
   console.log('\n[staff_availability]');
@@ -280,6 +355,11 @@ function buildWarnings(config: Config): string[] {
   const warnings: string[] = [];
   if (!config.whatsapp)      warnings.push('⚠️  Sección whatsapp ausente — Fase 2 pendiente.');
   if (!config.owner_contact) warnings.push('⚠️  Sección owner_contact ausente.');
+  // Login del dueño (Diseño B): sin un admin con email, nadie puede entrar por
+  // email+contraseña — el negocio queda sin dueño con acceso al dashboard.
+  if (!config.staff.some((s) => s.role === 'admin' && s.email)) {
+    warnings.push('⚠️  Ningún staff con role=\'admin\' y email — el negocio queda SIN dueño que pueda entrar por /login (email+contraseña). Agregá email a un admin.');
+  }
   return warnings;
 }
 
@@ -290,6 +370,8 @@ type InsertResult = {
   staffRows:      Array<{ name: string; id: string; pin: string }>;
   serviceCount:   number;
   organization?:  { id: string; name: string; access_token: string; isNew: boolean };
+  // Dueños/admins que entran por email (Diseño B): credenciales a entregar.
+  owners:         Array<{ name: string; email: string; password: string; staffId: string; action: 'created' | 'reset' }>;
 };
 
 async function upsertOrganization(
@@ -345,6 +427,7 @@ async function insertAll(
   accessToken: string,
   pins: string[],
   existingBusinessId: string | null,
+  force: boolean,
 ): Promise<InsertResult> {
 
   // ── 0. organization (si aplica) ──────────────────────────────────────────────
@@ -484,6 +567,7 @@ async function insertAll(
   // ── 3. staff ─────────────────────────────────────────────────────────────────
 
   const staffRows: InsertResult['staffRows'] = [];
+  const owners: InsertResult['owners'] = [];
 
   for (let i = 0; i < config.staff.length; i++) {
     const member = config.staff[i]!;
@@ -492,6 +576,16 @@ async function insertAll(
     // F-06: advertir si staff no tiene teléfono/whatsapp_id
     if (!member.phone) {
       console.warn(`  ⚠️  Staff '${member.name}' sin teléfono/WhatsApp — no recibirá notificaciones del sistema.`);
+    }
+
+    // Login del dueño (Diseño B): admin + email → usuario de Auth + auth_id.
+    // Se crea ANTES del INSERT del staff para enganchar auth_id en la misma fila.
+    let authId: string | null = null;
+    let ownerCred: { password: string; action: 'created' | 'reset' } | null = null;
+    if (member.role === 'admin' && member.email) {
+      const r = await ensureAuthUser(supabase, member.email, force);
+      authId = r.userId;
+      ownerCred = { password: r.password, action: r.action };
     }
 
     const { data, error } = await supabase
@@ -504,6 +598,7 @@ async function insertAll(
         pin,
         phone:       member.phone ?? '',
         whatsapp_id: member.whatsapp_id ?? '',
+        auth_id:     authId,
         active:      true,
       })
       .select('id')
@@ -516,6 +611,9 @@ async function insertAll(
 
     const staffId = (data as { id: string }).id;
     staffRows.push({ name: member.name, id: staffId, pin });
+    if (ownerCred && member.email) {
+      owners.push({ name: member.name, email: member.email, password: ownerCred.password, staffId, action: ownerCred.action });
+    }
 
     // ── 4. staff_availability ─────────────────────────────────────────────────
 
@@ -562,8 +660,11 @@ async function insertAll(
   }
 
   console.log(`  ✓ ${config.staff.length} miembro(s) de staff insertado(s) con disponibilidad y servicios`);
+  if (owners.length) {
+    console.log(`  ✓ ${owners.length} dueño(s)/admin(s) con login por email (usuario de Auth + auth_id)`);
+  }
 
-  return { businessId, staffRows, serviceCount: config.services.length, organization };
+  return { businessId, staffRows, serviceCount: config.services.length, organization, owners };
 }
 
 // ─── Post-insert verification ─────────────────────────────────────────────────
@@ -630,6 +731,21 @@ function printSummary(
   console.log('\n── Accesos del encargado de esta sucursal ─────────────');
   console.log(`access_token:   ${accessToken}`);
   console.log(`  → URL: /dashboard?token=${accessToken}`);
+
+  if (result.owners.length) {
+    const appUrl = process.env['NEXT_PUBLIC_APP_URL'] ?? '';
+    console.log('\n── Login del dueño (email + contraseña) ───────────────');
+    for (const o of result.owners) {
+      const verb = o.action === 'reset' ? '↻ contraseña RESETEADA (--force)' : '✓ usuario creado';
+      console.log(`  ${o.name}  [${verb}]`);
+      console.log(`    email:      ${o.email}`);
+      console.log(`    contraseña: ${o.password}`);
+      console.log(`    → URL: ${appUrl}/login`);
+      console.log(`    staff_id:   ${o.staffId}`);
+    }
+    console.log('  ⚠️  Sin recuperación por email (no hay SMTP): GUARDÁ estas credenciales');
+    console.log('     en 1Password antes de enviarlas. Reset solo re-corriendo con --force.');
+  }
 
   console.log('\n── Staff y PINs ────────────────────────────────────────');
   console.log(`  Todos (barberos y asistente) entran en /${config.business.slug}/staff con su PIN:`);
@@ -727,7 +843,18 @@ function generateChecklist(
     `- Edge Function: \`dispatch-weekly-report\` → schedule: \`0 10 * * 1\``,
     ``,
     `### 4. Entregar credenciales al cliente`,
-    `- URL admin (dueño):  \`${appUrl}/dashboard?token=${accessToken}\``,
+    ...(result.owners.length
+      ? [
+          `- **Login del dueño (email + contraseña) → \`${appUrl}/login\`:**`,
+          ...result.owners.map((o) =>
+            `  - ${o.name}: \`${o.email}\` / \`${o.password}\`${o.action === 'reset' ? ' _(contraseña reseteada con --force)_' : ''}`,
+          ),
+          `  - ⚠️ Sin recuperación por email (no hay SMTP): guardar sí o sí. Reset = re-correr con \`--force\`.`,
+        ]
+      : [
+          `- ⚠️ Ningún admin con email en el config → el dueño NO puede entrar por \`/login\`. Agregá \`email\` a un staff \`role='admin'\` y re-corré con \`--force\`.`,
+        ]),
+    `- URL admin (token, legacy):  \`${appUrl}/dashboard?token=${accessToken}\``,
     `- URL staff (barberos y asistente):  \`${appUrl}/${slug}/staff\` → cada uno entra con su PIN`,
     `- PINs:`,
     staffLines,
@@ -848,6 +975,7 @@ async function main(): Promise<void> {
     accessToken,
     pins,
     existingId,
+    flags.force,
   );
 
   // ── Verificación post-insert ──────────────────────────────────────────────

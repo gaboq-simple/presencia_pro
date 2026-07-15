@@ -121,9 +121,10 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   if (lsCookie) {
     const session = await verifySession(lsCookie);
     if (session) {
-      if (pathname === '/login') {
-        return NextResponse.redirect(new URL('/dashboard', request.url));
-      }
+      // /login queda SIEMPRE accesible — NO auto-redirigimos a /dashboard. Sin esto,
+      // una compu con una ls_session vieja (PIN/token) rebotaba al dueño a /dashboard
+      // con la identidad equivocada y nunca veía el formulario para entrar por email.
+      // LoginForm limpia la ls_session vieja al enviar (POST /api/auth/logout).
       return NextResponse.next({ request });
     }
   }
@@ -149,9 +150,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (pathname === '/login' && user) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
-  }
+  // /login queda accesible aun con sesión de Supabase activa (permite re-loguearse
+  // o cambiar de cuenta). No auto-redirigimos a /dashboard — es una conveniencia,
+  // no seguridad, y chocaba con el re-login del dueño.
 
   // Guard: redirect unauthenticated users away from protected routes.
   // /[slug] is intentionally NOT in this list — it is public.
