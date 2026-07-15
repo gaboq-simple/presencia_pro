@@ -26,6 +26,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { logManagementAudit } from '@/lib/managementAudit';
 import { ServiceCreateSchema } from './schema';
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -102,7 +103,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Error al crear el servicio' }, { status: 500 });
   }
 
-  // 4. Invalidar AMBAS caches del catálogo
+  // 4. Auditoría (best-effort — no tumba la creación si falla)
+  await logManagementAudit(supabase, {
+    entity:       'services',
+    entityId:     created.id,
+    action:       'created',
+    businessId,
+    actorStaffId: session.staff_id,
+    newData:      created,
+  });
+
+  // 5. Invalidar AMBAS caches del catálogo
   invalidateBusinessCache(businessId);
   revalidateTag(`catalog-${businessId}`, 'max');
 

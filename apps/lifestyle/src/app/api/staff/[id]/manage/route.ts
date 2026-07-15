@@ -15,6 +15,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { logManagementAudit } from '@/lib/managementAudit';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -121,6 +122,24 @@ export async function PATCH(
   if (updateError || !updated) {
     return NextResponse.json({ error: 'Error al actualizar staff' }, { status: 500 });
   }
+
+  // Auditoría (best-effort). El PIN NUNCA va en old/new_data (el helper lo saca igual):
+  // un cambio de PIN se registra como el hecho 'pin' en changed_fields, sin el valor.
+  // La acción distingue el toggle de active del cambio de PIN suelto.
+  const changedFields = Object.keys(updates); // 'active' y/o 'pin'
+  const action =
+    active === undefined ? 'updated'          // solo cambió el PIN
+    : active ? 'reactivated' : 'deactivated';
+  await logManagementAudit(supabase, {
+    entity:        'staff',
+    entityId:      staffId,
+    action,
+    businessId,
+    actorStaffId:  session.staff_id,
+    oldData:       { active: existing.active },
+    newData:       { active: updated.active },
+    changedFields,
+  });
 
   // Invalidar cache del bot — el staff activo puede haber cambiado
   invalidateBusinessCache(businessId);

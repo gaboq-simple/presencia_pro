@@ -26,6 +26,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { logManagementAudit } from '@/lib/managementAudit';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -226,6 +227,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Error al asignar los servicios, intenta de nuevo' }, { status: 500 });
     }
   }
+
+  // 3c. Auditoría (best-effort). El alta = staff + mapeo es UNA acción del dueño →
+  //     UNA fila 'created' con los servicios mapeados en new_data (el PIN lo saca el
+  //     helper). No dos filas: el dueño lo piensa como un solo gesto.
+  await logManagementAudit(supabase, {
+    entity:       'staff',
+    entityId:     created.id,
+    action:       'created',
+    businessId,
+    actorStaffId: session.staff_id,
+    newData: {
+      name:        created.name,
+      role:        created.role,
+      phone:       created.phone,
+      whatsapp_id: created.whatsapp_id,
+      photo_url:   created.photo_url,
+      active:      created.active,
+      service_ids: requestedServiceIds,
+    },
+  });
 
   // 4. Invalidar AMBAS caches — el alta ahora toca el catálogo (staff_services alimenta
   //    getStaffForService del engine + el /api/catalog cacheado por tag).
