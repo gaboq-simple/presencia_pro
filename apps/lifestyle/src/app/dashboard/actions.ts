@@ -7,6 +7,7 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { tenantDb } from '@/lib/tenantDb';
 
 function getServiceClient() {
   const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
@@ -32,6 +33,7 @@ export async function updateAppointmentStatus(
 
   // 2. Verificar rol admin y obtener business_id
   const supabase = getServiceClient();
+  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global): el business_id SALE de acá, no se puede scopear por él.
   const { data: staffRecord, error: staffError } = await supabase
     .from('staff')
     .select('role, business_id')
@@ -43,12 +45,11 @@ export async function updateAppointmentStatus(
     throw new Error('Forbidden');
   }
 
-  // 3. Actualizar — el filtro por business_id garantiza aislamiento
-  const { error } = await supabase
-    .from('appointments')
+  // 3. Actualizar — el helper inyecta .eq('business_id') → aislamiento garantizado
+  const { error } = await tenantDb(supabase, staffRecord.business_id as string)
+    .table('appointments')
     .update({ status })
-    .eq('id', appointmentId)
-    .eq('business_id', staffRecord.business_id as string);
+    .eq('id', appointmentId);
 
   if (error) throw new Error(`updateAppointmentStatus failed: ${error.message}`);
 

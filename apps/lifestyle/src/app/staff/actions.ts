@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createAuthClient } from '@/lib/supabase/server';
 import { getCurrentSession } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import type { DayAppointmentForStaff, ServiceRef, CustomerRef } from '@/lib/dashboard.types';
 
 function getServiceClient() {
@@ -36,11 +37,12 @@ export async function updateAppointmentStatusAsBarber(
   } = await authClient.auth.getUser();
   if (!user) throw new Error('Unauthorized');
 
-  // 2. Obtener registro de staff — staffId siempre del servidor
+  // 2. Obtener registro de staff — staffId y businessId siempre del servidor
   const supabase = getServiceClient();
+  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global): el business_id SALE de acá, no se puede scopear por él.
   const { data: staffRecord, error: staffError } = await supabase
     .from('staff')
-    .select('id, role')
+    .select('id, role, business_id')
     .eq('auth_id', user.id)
     .eq('active', true)
     .maybeSingle();
@@ -50,11 +52,13 @@ export async function updateAppointmentStatusAsBarber(
     throw new Error('Forbidden');
   }
 
-  const staffId = staffRecord.id as string;
+  const staffId    = staffRecord.id as string;
+  const businessId = staffRecord.business_id as string;
+  const db         = tenantDb(supabase, businessId);
 
-  // 3. Verificar que la cita pertenece al barbero autenticado
-  const { data: appt, error: apptError } = await supabase
-    .from('appointments')
+  // 3. Verificar que la cita pertenece al barbero autenticado (y a su negocio)
+  const { data: appt, error: apptError } = await db
+    .table('appointments')
     .select('id, staff_id')
     .eq('id', appointmentId)
     .maybeSingle();
@@ -62,9 +66,9 @@ export async function updateAppointmentStatusAsBarber(
   if (apptError || !appt) throw new Error('Appointment not found');
   if (appt.staff_id !== staffId) throw new Error('Forbidden');
 
-  // 4. Actualizar — doble filtro: id + staff_id para integridad
-  const { error } = await supabase
-    .from('appointments')
+  // 4. Actualizar — doble filtro: id + staff_id para integridad (business_id lo inyecta el helper)
+  const { error } = await db
+    .table('appointments')
     .update({ status })
     .eq('id', appointmentId)
     .eq('staff_id', staffId);
@@ -123,8 +127,8 @@ export async function getBarberWeekAppointments(
   // 3. Query — todos los appointments del barbero en esa semana
   const supabase = getServiceClient();
 
-  const { data, error } = await supabase
-    .from('appointments')
+  const { data, error } = await tenantDb(supabase, session.business_id)
+    .table('appointments')
     .select(`
       id,
       starts_at,
