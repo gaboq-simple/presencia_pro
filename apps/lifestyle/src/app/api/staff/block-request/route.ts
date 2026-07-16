@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { tenantDb } from '@/lib/tenantDb';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import type { MetaWhatsAppCredentials } from '@presenciapro/engine/notifications';
 
@@ -50,6 +51,7 @@ type BlockRequestRow = {
 
 async function getAuthenticatedStaff(userId: string) {
   const supabase = getAdminClient();
+  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global); el business_id sale de acá, no se conoce antes
   const { data, error } = await supabase
     .from('staff')
     .select('id, name, business_id, role')
@@ -92,10 +94,9 @@ async function notifyAdminUrgent(
 ): Promise<void> {
   const supabase = getAdminClient();
 
-  const { data: adminStaffData } = await supabase
-    .from('staff')
+  const { data: adminStaffData } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('whatsapp_id')
-    .eq('business_id', businessId)
     .eq('role', 'admin')
     .eq('active', true)
     .not('whatsapp_id', 'is', null)
@@ -236,10 +237,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // Admin: todas las solicitudes pendientes del negocio (bandeja de aprobaciones)
   if (staff.role === 'admin') {
     // Obtener staff_ids del negocio
-    const { data: staffData, error: staffError } = await supabase
-      .from('staff')
+    const { data: staffData, error: staffError } = await tenantDb(supabase, staff.business_id)
+      .table('staff')
       .select('id')
-      .eq('business_id', staff.business_id)
       .eq('active', true);
 
     if (staffError) {

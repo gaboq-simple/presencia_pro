@@ -18,6 +18,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import type { InactiveClient, InactiveClientTier } from '@/lib/dashboard.types';
 
 // ─── Validación de input ──────────────────────────────────────────────────────
@@ -116,10 +117,10 @@ export async function GET(request: Request): Promise<NextResponse> {
     const now = new Date();
 
     // 6. Clientes con last_visit anterior al corte
-    const { data: custData, error: custError } = await supabase
-      .from('customers')
+    const db = tenantDb(supabase, businessId);
+    const { data: custData, error: custError } = await db
+      .table('customers')
       .select('id, name, phone, visit_count, last_visit')
-      .eq('business_id', businessId)
       .not('last_visit', 'is', null)
       .lt('last_visit', cutoffIso)
       .order('last_visit', { ascending: true });   // más antiguos primero
@@ -138,10 +139,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     //    Una query por negocio — filtramos por customer_ids en memoria.
     //    Usamos max(starts_at) implícitamente ordenando DESC y tomando la primera
     //    aparición de cada customer_id.
-    const { data: apptData, error: apptError } = await supabase
-      .from('appointments')
+    const { data: apptData, error: apptError } = await db
+      .table('appointments')
       .select('customer_id, service:service_id(name), staff:staff_id(name)')
-      .eq('business_id', businessId)
       .in('customer_id', customerIds)
       .eq('status', 'completed')
       .order('starts_at', { ascending: false });

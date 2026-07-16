@@ -47,6 +47,7 @@ function fetchActiveServices(businessId: string): Promise<ServiceRow[]> {
     async () => {
       const supabase = getServiceClient();
 
+      // eslint-disable-next-line no-restricted-syntax -- catálogo PÚBLICO por diseño: el businessId del query es intencional (lo usan el form del asistente y la mesa). Expone solo servicios activos — exactamente los mismos que muestra la landing pública /[slug]. No hay sesión por diseño; el UUID no es enumerable.
       const { data, error } = await supabase
         .from('services')
         .select('id, name, description, duration_minutes, price, currency')

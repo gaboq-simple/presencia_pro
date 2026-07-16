@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -58,11 +59,10 @@ async function getTargetStaff(
   businessId: string,
 ): Promise<TargetStaffRow | null> {
   const supabase = getAdminClient();
-  const { data, error } = await supabase
-    .from('staff')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id, business_id')
     .eq('id', staffId)
-    .eq('business_id', businessId)
     .maybeSingle();
 
   if (error || !data) return null;
@@ -148,8 +148,8 @@ export async function POST(
     .getPublicUrl(storagePath);
 
   // 11. Actualizar staff.photo_url
-  const { error: updateError } = await supabase
-    .from('staff')
+  const { error: updateError } = await tenantDb(supabase, auth.businessId)
+    .table('staff')
     .update({ photo_url: publicUrl })
     .eq('id', staffId);
 
@@ -194,8 +194,8 @@ export async function DELETE(
   await supabase.storage.from('staff-photos').remove(paths);
 
   // 6. Limpiar photo_url en DB
-  const { error: updateError } = await supabase
-    .from('staff')
+  const { error: updateError } = await tenantDb(supabase, auth.businessId)
+    .table('staff')
     .update({ photo_url: null })
     .eq('id', staffId);
 

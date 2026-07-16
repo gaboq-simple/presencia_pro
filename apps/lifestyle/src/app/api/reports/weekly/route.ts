@@ -21,6 +21,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import { getPeriodRange, toDateStr } from '@/lib/dashboard.types';
 import type { WeeklyReportData } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
@@ -114,10 +115,9 @@ async function computeWeeklyReport(
   const period_end   = end.slice(0, 10);
 
   // Appointments del período
-  const { data: apptData, error: apptError } = await supabase
-    .from('appointments')
+  const { data: apptData, error: apptError } = await tenantDb(supabase, businessId)
+    .table('appointments')
     .select('staff_id, status, customer_id, price_charged, service:service_id(price), staff:staff_id(name)')
-    .eq('business_id', businessId)
     .gte('starts_at', start)
     .lte('starts_at', end)
     .in('status', ['completed', 'no_show']);
@@ -176,8 +176,8 @@ async function computeWeeklyReport(
   let recurring_clients = 0;
 
   if (completedCustomerIds.size > 0) {
-    const { data: custData, error: custError } = await supabase
-      .from('customers')
+    const { data: custData, error: custError } = await tenantDb(supabase, businessId)
+      .table('customers')
       .select('id, visit_count')
       .in('id', [...completedCustomerIds]);
 

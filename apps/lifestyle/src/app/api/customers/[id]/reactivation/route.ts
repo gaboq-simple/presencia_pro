@@ -17,6 +17,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ export async function POST(
   }
   const businessId = auth.businessId;
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
 
   // 3. Validar body con Zod
   let rawBody: unknown;
@@ -86,8 +88,8 @@ export async function POST(
   const { id: customerId } = await params;
 
   // 5. Obtener cliente — verificar que pertenece al mismo negocio
-  const { data: custData, error: custError } = await supabase
-    .from('customers')
+  const { data: custData, error: custError } = await db
+    .table('customers')
     .select('id, name, phone, business_id')
     .eq('id', customerId)
     .maybeSingle();
@@ -137,8 +139,7 @@ export async function POST(
   // envió); las 3 columnas existen. business_id sigue scopeado por la sesión (Ola 1).
   try {
     const now = new Date().toISOString();
-    await supabase.from('scheduled_notifications').insert({
-      business_id:    businessId,
+    await db.table('scheduled_notifications').insert({
       appointment_id: null,
       customer_id:    customerId,
       customer_phone: customer.phone,

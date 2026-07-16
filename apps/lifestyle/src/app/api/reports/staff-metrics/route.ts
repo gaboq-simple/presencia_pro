@@ -22,6 +22,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import { getPeriodRange, toDateStr } from '@/lib/dashboard.types';
 import type { StaffMetrics, StaffMetricsPeriod } from '@/lib/dashboard.types';
 
@@ -127,10 +128,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     const { start, end } = getPeriodRange(period, date);
 
     // 5. Staff activo del negocio
-    const { data: staffData, error: staffDataError } = await supabase
-      .from('staff')
+    const { data: staffData, error: staffDataError } = await tenantDb(supabase, businessId)
+      .table('staff')
       .select('id, name, photo_url')
-      .eq('business_id', businessId)
       .eq('active', true)
       .order('name');
 
@@ -144,10 +144,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     const staffIds = staffList.map((s) => s.id);
 
     // 6. Appointments del período para todos los staff activos
-    const { data: apptData, error: apptError } = await supabase
-      .from('appointments')
+    const { data: apptData, error: apptError } = await tenantDb(supabase, businessId)
+      .table('appointments')
       .select('staff_id, status, customer_id, price_charged, service:service_id(price)')
-      .eq('business_id', businessId)
       .in('staff_id', staffIds)
       .gte('starts_at', start)
       .lte('starts_at', end)
@@ -200,8 +199,8 @@ export async function GET(request: Request): Promise<NextResponse> {
     const customerVisitMap = new Map<string, number>();
 
     if (allCustomerIds.length > 0) {
-      const { data: custData, error: custError } = await supabase
-        .from('customers')
+      const { data: custData, error: custError } = await tenantDb(supabase, businessId)
+        .table('customers')
         .select('id, visit_count')
         .in('id', allCustomerIds);
 

@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireBusinessSession } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Validación ───────────────────────────────────────────────────────────────
 
@@ -77,12 +78,11 @@ export async function PATCH(
   const { notes } = bodyParsed.data;
 
   try {
-    // 4. Actualizar notes — WHERE id AND business_id garantiza aislamiento
-    const { data: updated, error: updateError } = await supabase
-      .from('customers')
+    // 4. Actualizar notes — el helper inyecta business_id → aislamiento garantizado
+    const { data: updated, error: updateError } = await tenantDb(supabase, businessId)
+      .table('customers')
       .update({ notes })
       .eq('id', customerId)
-      .eq('business_id', businessId)
       .select('notes')
       .maybeSingle();
 

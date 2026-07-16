@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { z }           from 'zod';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import type { WaitlistEntry } from '@/lib/dashboard.types';
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -33,9 +34,10 @@ export async function GET(): Promise<NextResponse> {
 
   try {
     const supabase = getServiceClient();
+    const db = tenantDb(supabase, auth.businessId);
 
-    const { data, error } = await supabase
-      .from('waitlist')
+    const { data, error } = await db
+      .table('waitlist')
       .select(`
         id,
         business_id,
@@ -141,11 +143,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     // Verificar que la entrada pertenece al negocio del admin
     const supabase = getServiceClient();
-    const { data: wlEntry } = await supabase
-      .from('waitlist')
+    const db = tenantDb(supabase, auth.businessId);
+    const { data: wlEntry } = await db
+      .table('waitlist')
       .select('id, business_id, status')
       .eq('id', waitlist_id)
-      .eq('business_id', auth.businessId)
       .eq('status', 'waiting')
       .maybeSingle();
 
@@ -158,8 +160,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     const notifiedAt = new Date();
     const expiresAt  = new Date(notifiedAt.getTime() + 30 * 60_000);
 
-    await supabase
-      .from('waitlist')
+    await db
+      .table('waitlist')
       .update({
         status:      'notified',
         notified_at: notifiedAt.toISOString(),
@@ -168,8 +170,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       .eq('id', waitlist_id);
 
     // Obtener teléfono del cliente y datos del negocio para programar expiración
-    const { data: fullEntry } = await supabase
-      .from('waitlist')
+    const { data: fullEntry } = await db
+      .table('waitlist')
       .select('business_id, customer:customer_id(id, phone), service:service_id(name)')
       .eq('id', waitlist_id)
       .maybeSingle();
@@ -182,8 +184,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       };
 
       if (entry.customer) {
-        await supabase.from('scheduled_notifications').insert({
-          business_id:    entry.business_id,
+        await db.table('scheduled_notifications').insert({
           type:           'waitlist_expiry',
           scheduled_for:  expiresAt.toISOString(),
           customer_phone: entry.customer.phone,
