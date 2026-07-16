@@ -25,8 +25,9 @@ function makeFakeClient(seed: Record<string, Row[]>) {
 
   function builder(table: string) {
     const filters: Array<(row: Row) => boolean> = [];
-    let op: 'select' | 'insert' | 'update' | 'delete' = 'select';
+    let op: 'select' | 'insert' | 'update' | 'delete' | 'upsert' = 'select';
     let payload: Row | Row[] | null = null;
+    let onConflict: string[] = [];
 
     const match = (row: Row) => filters.every((f) => f(row));
 
@@ -38,6 +39,18 @@ function makeFakeClient(seed: Record<string, Row[]>) {
         const copies = rows.map((r) => ({ ...r }));
         store[table].push(...copies);
         return { data: copies, error: null };
+      }
+      if (op === 'upsert') {
+        const rows = Array.isArray(payload) ? payload : [payload as Row];
+        const out: Row[] = [];
+        for (const r of rows) {
+          const existing = onConflict.length
+            ? store[table].find((s) => onConflict.every((c) => s[c] === r[c]))
+            : undefined;
+          if (existing) { Object.assign(existing, r); out.push(existing); }
+          else { const copy = { ...r }; store[table].push(copy); out.push(copy); }
+        }
+        return { data: out, error: null };
       }
       if (op === 'update') {
         const changed: Row[] = [];
@@ -53,6 +66,11 @@ function makeFakeClient(seed: Record<string, Row[]>) {
     const b: Record<string, unknown> = {
       select(_columns?: string, _opts?: unknown) { op = 'select'; return b; },
       insert(v: Row | Row[]) { op = 'insert'; payload = v; return b; },
+      upsert(v: Row | Row[], opts?: { onConflict?: string }) {
+        op = 'upsert'; payload = v;
+        onConflict = opts?.onConflict ? opts.onConflict.split(',').map((s) => s.trim()) : [];
+        return b;
+      },
       update(v: Row) { op = 'update'; payload = v; return b; },
       delete() { op = 'delete'; return b; },
       eq(col: string, val: unknown) { filters.push((r) => r[col] === val); return b; },
@@ -141,6 +159,30 @@ test('INSERT vía tenantDb(A) fuerza business_id=A aunque el payload diga B', as
 
   const inserted = fake._store['services']!.find((r) => r['id'] === 'sv-new')!;
   assert.equal(inserted['business_id'], A, 'el business_id del payload debe ser pisado por el del helper');
+});
+
+test('UPSERT vía tenantDb(A) fuerza business_id=A aunque el payload diga B', async () => {
+  const fake = makeFakeClient(freshSeed());
+  const db = tenantDb(fake, A);
+  // Intento: upsertar una excepción "en B". El helper debe pisar business_id con A.
+  await db.table('staff_schedule_exceptions').upsert(
+    { staff_id: 'st-A1', exception_date: '2026-07-20', business_id: B, available: false },
+    { onConflict: 'staff_id,exception_date' },
+  );
+
+  const rows = fake._store['staff_schedule_exceptions'] ?? [];
+  assert.equal(rows.length, 1, 'debe haber insertado una fila');
+  assert.equal(rows[0]!['business_id'], A, 'el business_id del payload debe ser pisado por el del helper');
+
+  // Segundo upsert con el mismo onConflict → actualiza la misma fila, sigue en A.
+  await db.table('staff_schedule_exceptions').upsert(
+    { staff_id: 'st-A1', exception_date: '2026-07-20', available: true },
+    { onConflict: 'staff_id,exception_date' },
+  );
+  const rows2 = fake._store['staff_schedule_exceptions'] ?? [];
+  assert.equal(rows2.length, 1, 'onConflict debe actualizar, no duplicar');
+  assert.equal(rows2[0]!['available'], true, 'el upsert debe actualizar el campo');
+  assert.equal(rows2[0]!['business_id'], A, 'sigue scopeado a A tras el update');
 });
 
 // ─── 🔴 Control negativo: el test PUEDE fallar ────────────────────────────────

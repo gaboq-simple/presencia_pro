@@ -87,6 +87,19 @@ export function tenantDb(client: SupabaseClient, businessId: string) {
           return qb.insert(injectBusinessId(values, bid)) as unknown as AnyFilterBuilder;
         },
 
+        /**
+         * UPSERT scopeado: inyecta business_id en el/los row(s) (igual que insert). El
+         * onConflict lo pasa el caller (típicamente una UNIQUE que ya es tenant-safe por
+         * un staff_id/id globalmente único). El business_id del payload se pisa con el del
+         * helper → no se puede upsertar en otro negocio.
+         */
+        upsert(
+          values: Record<string, unknown> | Record<string, unknown>[],
+          options?: { onConflict?: string; ignoreDuplicates?: boolean },
+        ): AnyFilterBuilder {
+          return qb.upsert(injectBusinessId(values, bid), options) as unknown as AnyFilterBuilder;
+        },
+
         /** UPDATE scopeado: inyecta .eq('business_id', businessId) en el WHERE. */
         update(values: Record<string, unknown>): AnyFilterBuilder {
           return qb.update(values).eq('business_id', bid) as unknown as AnyFilterBuilder;

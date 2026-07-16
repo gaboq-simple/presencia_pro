@@ -8,6 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import { getDayAppointments, queryStaffBlocksForDay, zonedWallTimeToUtc } from '@/lib/dashboard.types';
 import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
@@ -72,11 +73,10 @@ async function assertBarberOwnsAppointment(
   appointmentId: string,
 ): Promise<{ error?: string } | void> {
   if (session.role !== 'barber' || !session.staff_id) return;
-  const { data, error } = await supabase
-    .from('appointments')
+  const { data, error } = await tenantDb(supabase, session.business_id)
+    .table('appointments')
     .select('staff_id')
     .eq('id', appointmentId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
   // Mensajes de cara al usuario → return { error } (no se redactan en prod, a
   // diferencia de un throw). El gate 2b es informativo, no filtra nada sensible.
@@ -111,35 +111,34 @@ export async function cancelAppointment(
 ): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
   const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
   if (gate?.error) return gate;
 
-  const { data: existing, error: fetchErr } = await supabase
-    .from('appointments')
+  const { data: existing, error: fetchErr } = await db
+    .table('appointments')
     .select('id, business_id, status, starts_at, customer_id, staff_id')
     .eq('id', appointmentId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'cancelled') return; // idempotente
 
-  const { error } = await supabase
-    .from('appointments')
+  const { error } = await db
+    .table('appointments')
     .update({
       status:               'cancelled',
       notes:                reason.trim() || null,
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
-    .eq('id', appointmentId)
-    .eq('business_id', session.business_id);
+    .eq('id', appointmentId);
 
   if (error) throw new Error(`cancelAppointment failed: ${error.message}`);
 
   // Cancelar recordatorios pendientes — best-effort, no interrumpe el flujo
-  await supabase
-    .from('scheduled_notifications')
+  await db
+    .table('scheduled_notifications')
     .update({ failed_at: new Date().toISOString() })
     .eq('appointment_id', appointmentId)
     .is('sent_at', null)
@@ -159,8 +158,8 @@ export async function cancelAppointment(
     let customerPhone: string | null = null;
     let customerName:  string | null = null;
     if (apptRow.customer_id) {
-      const { data: cust } = await supabase
-        .from('customers')
+      const { data: cust } = await db
+        .table('customers')
         .select('phone, name')
         .eq('id', apptRow.customer_id)
         .maybeSingle();
@@ -197,10 +196,9 @@ export async function cancelAppointment(
         );
 
         const now = new Date().toISOString();
-        await supabase
-          .from('scheduled_notifications')
+        await db
+          .table('scheduled_notifications')
           .insert({
-            business_id:    session.business_id,
             appointment_id: appointmentId,
             customer_phone: customerPhone,
             type:           'cancellation_notice',
@@ -233,18 +231,18 @@ export async function updateAppointmentNotes(
 ): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
   const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
   if (gate?.error) return gate;
 
-  const { error } = await supabase
-    .from('appointments')
+  const { error } = await db
+    .table('appointments')
     .update({
       notes:                notes.trim() || null,
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
-    .eq('id', appointmentId)
-    .eq('business_id', session.business_id);
+    .eq('id', appointmentId);
 
   if (error) throw new Error(`updateAppointmentNotes failed: ${error.message}`);
 }
@@ -254,28 +252,27 @@ export async function updateAppointmentNotes(
 export async function completeAppointment(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
   const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
   if (gate?.error) return gate;
 
-  const { data: existing, error: fetchErr } = await supabase
-    .from('appointments')
+  const { data: existing, error: fetchErr } = await db
+    .table('appointments')
     .select('id, business_id, status')
     .eq('id', appointmentId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'completed') return; // idempotente
 
-  const { error } = await supabase
-    .from('appointments')
+  const { error } = await db
+    .table('appointments')
     .update({
       status:               'completed',
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
-    .eq('id', appointmentId)
-    .eq('business_id', session.business_id);
+    .eq('id', appointmentId);
 
   if (error) throw new Error(`completeAppointment failed: ${error.message}`);
 }
@@ -285,28 +282,27 @@ export async function completeAppointment(appointmentId: string): Promise<{ erro
 export async function noShowAppointment(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
   const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
   if (gate?.error) return gate;
 
-  const { data: existing, error: fetchErr } = await supabase
-    .from('appointments')
+  const { data: existing, error: fetchErr } = await db
+    .table('appointments')
     .select('id, business_id, status')
     .eq('id', appointmentId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'no_show') return; // idempotente
 
-  const { error } = await supabase
-    .from('appointments')
+  const { error } = await db
+    .table('appointments')
     .update({
       status:               'no_show',
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
-    .eq('id', appointmentId)
-    .eq('business_id', session.business_id);
+    .eq('id', appointmentId);
 
   if (error) throw new Error(`noShowAppointment failed: ${error.message}`);
 }
@@ -318,29 +314,28 @@ export async function noShowAppointment(appointmentId: string): Promise<{ error?
 export async function confirmAppointment(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
   const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
   if (gate?.error) return gate;
 
-  const { data: existing, error: fetchErr } = await supabase
-    .from('appointments')
+  const { data: existing, error: fetchErr } = await db
+    .table('appointments')
     .select('id, business_id, status')
     .eq('id', appointmentId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'confirmed') return; // idempotente
   if (existing.status !== 'pending') return { error: 'Solo se puede confirmar una cita pendiente' };
 
-  const { error } = await supabase
-    .from('appointments')
+  const { error } = await db
+    .table('appointments')
     .update({
       status:               'confirmed',
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
     .eq('id', appointmentId)
-    .eq('business_id', session.business_id)
     .eq('status', 'pending'); // guard atómico contra carreras
 
   if (error) throw new Error(`confirmAppointment failed: ${error.message}`);
@@ -354,14 +349,14 @@ export async function confirmAppointment(appointmentId: string): Promise<{ error
 export async function markArrived(appointmentId: string): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
   const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
   if (gate?.error) return gate;
 
-  const { data: existing, error: fetchErr } = await supabase
-    .from('appointments')
+  const { data: existing, error: fetchErr } = await db
+    .table('appointments')
     .select('id, business_id, status, arrived_at')
     .eq('id', appointmentId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !existing) return { error: 'Cita no encontrada' };
@@ -370,15 +365,14 @@ export async function markArrived(appointmentId: string): Promise<{ error?: stri
     return { error: 'La cita ya está cerrada' };
   }
 
-  const { error } = await supabase
-    .from('appointments')
+  const { error } = await db
+    .table('appointments')
     .update({
       arrived_at:           new Date().toISOString(),
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
-    .eq('id', appointmentId)
-    .eq('business_id', session.business_id);
+    .eq('id', appointmentId);
 
   if (error) throw new Error(`markArrived failed: ${error.message}`);
 }
@@ -413,6 +407,7 @@ export async function createAssistantAppointment(
 ): Promise<{ id?: string; warning?: string; error?: string }> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   // ── Gate de staff_id (REGLA DURA, seguridad) ─────────────────────────────
   // El barbero solo puede crear citas asignadas a SÍ MISMO: ignoramos el
@@ -468,8 +463,8 @@ export async function createAssistantAppointment(
   if (isBarber) {
     const maxPerStaffPerDay = bizCfg?.max_appointments_per_staff_per_day ?? 20;
     const day = input.startsAt.slice(0, 10); // YYYY-MM-DD (misma convención que getDayAppointments)
-    const { count } = await supabase
-      .from('appointments')
+    const { count } = await db
+      .table('appointments')
       .select('id', { count: 'exact', head: true })
       .eq('staff_id', effectiveStaffId)
       .neq('status', 'cancelled')
@@ -484,10 +479,9 @@ export async function createAssistantAppointment(
   if (name) {
     if (phone) {
       // Buscar por teléfono — identificador canónico
-      const { data: existing } = await supabase
-        .from('customers')
+      const { data: existing } = await db
+        .table('customers')
         .select('id, noshow_count, is_flagged')
-        .eq('business_id', session.business_id)
         .eq('phone', phone)
         .maybeSingle();
 
@@ -498,10 +492,9 @@ export async function createAssistantAppointment(
           customerWarning = `Este cliente tiene ${row.noshow_count} no-show${row.noshow_count !== 1 ? 's' : ''} registrado${row.noshow_count !== 1 ? 's' : ''}`;
         }
       } else {
-        const { data: created } = await supabase
-          .from('customers')
+        const { data: created } = await db
+          .table('customers')
           .insert({
-            business_id:   session.business_id,
             name,
             phone,
             consent_at:    new Date().toISOString(),
@@ -513,10 +506,9 @@ export async function createAssistantAppointment(
       }
     } else {
       // Solo nombre: buscar por nombre exacto (less reliable)
-      const { data: existing } = await supabase
-        .from('customers')
+      const { data: existing } = await db
+        .table('customers')
         .select('id, noshow_count, is_flagged')
-        .eq('business_id', session.business_id)
         .ilike('name', name)
         .limit(1)
         .maybeSingle();
@@ -529,10 +521,9 @@ export async function createAssistantAppointment(
         }
       } else {
         // Crear sin teléfono (phone es nullable desde migration 023)
-        const { data: created } = await supabase
-          .from('customers')
+        const { data: created } = await db
+          .table('customers')
           .insert({
-            business_id:   session.business_id,
             name,
             phone:         null,
             consent_at:    new Date().toISOString(),
@@ -546,10 +537,9 @@ export async function createAssistantAppointment(
   }
 
   // ── Insertar cita ─────────────────────────────────────────────────────────
-  const { data, error } = await supabase
-    .from('appointments')
+  const { data, error } = await db
+    .table('appointments')
     .insert({
-      business_id:          session.business_id,
       staff_id:             effectiveStaffId,
       service_id:           input.serviceId,
       customer_id:          customerId,
@@ -598,15 +588,15 @@ type RescheduleInput = {
 export async function rescheduleAppointment(input: RescheduleInput): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
   const gate = await assertBarberOwnsAppointment(supabase, session, input.appointmentId);
   if (gate?.error) return gate;
 
   // Verificar que la cita pertenece al negocio y obtener datos necesarios
-  const { data: raw, error: fetchErr } = await supabase
-    .from('appointments')
+  const { data: raw, error: fetchErr } = await db
+    .table('appointments')
     .select('id, business_id, staff_id, status, starts_at, customer_id, service:service_id(duration_minutes, name)')
     .eq('id', input.appointmentId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !raw) return { error: 'Cita no encontrada' };
@@ -642,8 +632,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
   // Con force=true (la recepción forzó un solape intencional) se salta: el drop
   // marcará allow_overlap=true y quedará exenta del constraint.
   if (!input.force) {
-    const { data: conflicts } = await supabase
-      .from('appointments')
+    const { data: conflicts } = await db
+      .table('appointments')
       .select('id')
       .eq('staff_id', newStaffId)
       .neq('id', input.appointmentId)
@@ -657,8 +647,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
     }
   }
 
-  const { error } = await supabase
-    .from('appointments')
+  const { error } = await db
+    .table('appointments')
     .update({
       starts_at:            newStartsAt,
       ends_at:              newEndsAt,
@@ -670,8 +660,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })
-    .eq('id', input.appointmentId)
-    .eq('business_id', session.business_id);
+    .eq('id', input.appointmentId);
 
   if (error) throw new Error(`rescheduleAppointment failed: ${error.message}`);
 
@@ -679,8 +668,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
   // los reminder_* a propósito: el aviso de reagenda (reschedule_notice) ahora vive
   // PENDIENTE en esta misma tabla y su ciclo de vida lo maneja el bloque de abajo
   // (encolar/superseder/borrar) — este cancel NO debe tocarlo.
-  await supabase
-    .from('scheduled_notifications')
+  await db
+    .table('scheduled_notifications')
     .update({ failed_at: new Date().toISOString() })
     .eq('appointment_id', input.appointmentId)
     .in('type', ['reminder_24h', 'reminder_2h', 'reminder_1h'])
@@ -695,8 +684,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
     let customerPhone: string | null = null;
     let customerName:  string | null = null;
     if (appt.customer_id) {
-      const { data: cust } = await supabase
-        .from('customers')
+      const { data: cust } = await db
+        .table('customers')
         .select('phone, name')
         .eq('id', appt.customer_id)
         .maybeSingle();
@@ -712,8 +701,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
           .select('timezone, name')
           .eq('id', session.business_id)
           .maybeSingle(),
-        supabase
-          .from('staff')
+        db
+          .table('staff')
           .select('name')
           .eq('id', newStaffId)
           .maybeSingle(),
@@ -733,8 +722,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
       // solo prod) lo envía como texto libre cuando vence scheduled_for. La decisión
       // se evalúa SIEMPRE sobre la posición FINAL vs la ORIGINAL (la de antes del
       // burst, preservada en metadata.old_iso de la fila pendiente).
-      const { data: pendingRows } = await supabase
-        .from('scheduled_notifications')
+      const { data: pendingRows } = await db
+        .table('scheduled_notifications')
         .select('id, metadata')
         .eq('appointment_id', input.appointmentId)
         .eq('type', 'reschedule_notice')
@@ -763,13 +752,12 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
           `${newDateStr} a las ${newTimeStr} en ${businessName}. Si necesitas cambios, responde a este mensaje.`;
 
         if (pending) {
-          await supabase
-            .from('scheduled_notifications')
+          await db
+            .table('scheduled_notifications')
             .update({ scheduled_for: graceIso, message_body: body, metadata: { old_iso: originalIso } })
             .eq('id', pending.id);
         } else {
-          await supabase.from('scheduled_notifications').insert({
-            business_id:    session.business_id,
+          await db.table('scheduled_notifications').insert({
             appointment_id: input.appointmentId,
             customer_phone: customerPhone,
             type:           'reschedule_notice',
@@ -781,7 +769,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
       } else if (pending) {
         // La posición final quedó a < umbral del origen (incluye net-zero / deshacer)
         // → ya no amerita aviso: borrar el pendiente del burst. Sin fila = sin mensaje.
-        await supabase.from('scheduled_notifications').delete().eq('id', pending.id);
+        await db.table('scheduled_notifications').delete().eq('id', pending.id);
       }
 
       // ── Reminders 24h/2h/1h para la nueva hora (independiente del aviso) ───────
@@ -845,7 +833,8 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
       }
 
       if (reminderRows.length > 0) {
-        await supabase.from('scheduled_notifications').insert(reminderRows);
+        // Las filas ya traen business_id: session.business_id; el helper lo re-inyecta (idéntico).
+        await db.table('scheduled_notifications').insert(reminderRows);
       }
     }
   } catch {
@@ -871,12 +860,12 @@ export async function getStaffBlocksForDay(
 ): Promise<StaffBlockForDay[]> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   // IDs de staff activo del negocio (scopeados por la sesión)
-  const { data: staffData, error: staffErr } = await supabase
-    .from('staff')
+  const { data: staffData, error: staffErr } = await db
+    .table('staff')
     .select('id')
-    .eq('business_id', session.business_id)
     .eq('active', true);
 
   if (staffErr || !staffData) return [];
@@ -915,14 +904,14 @@ export async function searchCustomers(
 ): Promise<CustomerSearchResult[]> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   const q = query.trim();
   if (q.length < 2) return [];
 
-  const { data: customers, error } = await supabase
-    .from('customers')
+  const { data: customers, error } = await db
+    .table('customers')
     .select('id, name, phone')
-    .eq('business_id', session.business_id)
     .or(`name.ilike.%${q}%,phone.ilike.%${q}%`)
     .limit(5);
 
@@ -933,8 +922,8 @@ export async function searchCustomers(
   // Por cada cliente, obtener visitas completadas + barbero más frecuente
   const results = await Promise.all(
     rows.map(async (c) => {
-      const { data: appts } = await supabase
-        .from('appointments')
+      const { data: appts } = await db
+        .table('appointments')
         .select('starts_at, staff:staff_id(name)')
         .eq('customer_id', c.id)
         .eq('status', 'completed')
@@ -989,24 +978,23 @@ export async function takeoverConversation(customerPhone: string): Promise<void>
   }
   const takenBy = isBarber ? session.staff_id : null;
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   // Leer estado previo para no enviar aviso si ya estaba en modo humano
-  const { data: prevConv } = await supabase
-    .from('bot_conversations')
+  const { data: prevConv } = await db
+    .table('bot_conversations')
     .select('session_mode')
-    .eq('business_id', session.business_id)
     .eq('customer_phone', customerPhone)
     .maybeSingle();
   const prevMode = (prevConv as { session_mode: string } | null)?.session_mode;
 
-  const { error } = await supabase
-    .from('bot_conversations')
+  const { error } = await db
+    .table('bot_conversations')
     .update({
       session_mode: 'human',
       taken_by:     takenBy,
       taken_at:     new Date().toISOString(),
     })
-    .eq('business_id', session.business_id)
     .eq('customer_phone', customerPhone);
 
   if (error) throw new Error(`takeoverConversation failed: ${error.message}`);
@@ -1037,10 +1025,9 @@ export async function takeoverConversation(customerPhone: string): Promise<void>
           { to: customerPhone, body: TAKEOVER_MSG },
           { accessToken, phoneNumberId },
         );
-        await supabase
-          .from('conversation_messages')
+        await db
+          .table('conversation_messages')
           .insert({
-            business_id:    session.business_id,
             customer_phone: customerPhone,
             direction:      'outbound',
             body:           TAKEOVER_MSG,
@@ -1063,14 +1050,13 @@ export async function releaseConversation(customerPhone: string): Promise<void> 
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
 
-  const { error } = await supabase
-    .from('bot_conversations')
+  const { error } = await tenantDb(supabase, session.business_id)
+    .table('bot_conversations')
     .update({
       session_mode: 'bot',
       taken_by:     null,
       taken_at:     null,
     })
-    .eq('business_id', session.business_id)
     .eq('customer_phone', customerPhone);
 
   if (error) throw new Error(`releaseConversation failed: ${error.message}`);
@@ -1100,12 +1086,12 @@ export async function sendMessageFromPanel(
     throw new Error('Se requiere identificación de staff para enviar mensajes');
   }
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   // ── Verificar que la conversación está bajo control humano ────────────────
-  const { data: conv } = await supabase
-    .from('bot_conversations')
+  const { data: conv } = await db
+    .table('bot_conversations')
     .select('session_mode')
-    .eq('business_id', session.business_id)
     .eq('customer_phone', customerPhone)
     .maybeSingle();
 
@@ -1138,10 +1124,9 @@ export async function sendMessageFromPanel(
   }
 
   // ── Persistir en conversation_messages ────────────────────────────────────
-  await supabase
-    .from('conversation_messages')
+  await db
+    .table('conversation_messages')
     .insert({
-      business_id:    session.business_id,
       customer_phone: customerPhone,
       direction:      'outbound',
       body:           message,
@@ -1153,10 +1138,9 @@ export async function sendMessageFromPanel(
   // ── Resetear timer de auto-release ────────────────────────────────────────
   // Cada mensaje del staff renueva los 30 min del takeover, evitando
   // que se pierda el control en medio de una conversación activa.
-  await supabase
-    .from('bot_conversations')
+  await db
+    .table('bot_conversations')
     .update({ taken_at: new Date().toISOString() })
-    .eq('business_id', session.business_id)
     .eq('customer_phone', customerPhone)
     .eq('session_mode', 'human'); // guard: solo si sigue en modo humano
 
@@ -1185,17 +1169,19 @@ export async function updateStaffSchedule(
 ): Promise<void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   // Verificar que el staff pertenece al negocio de la sesión
-  const { data: existing, error: fetchErr } = await supabase
-    .from('staff')
+  const { data: existing, error: fetchErr } = await db
+    .table('staff')
     .select('id')
     .eq('id', staffId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !existing) throw new Error('Staff no encontrado');
 
+  // staff_availability NO tiene business_id (se scopea por staff_id, ya validado
+  // arriba contra el negocio) → queda crudo, fuera del helper. Ver tenantDb.ts.
   const { error: deleteError } = await supabase
     .from('staff_availability')
     .delete()
@@ -1254,23 +1240,22 @@ export async function createScheduleException(
 ): Promise<ScheduleException> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   // Verificar que el staff pertenece al negocio de la sesión
-  const { data: existing, error: fetchErr } = await supabase
-    .from('staff')
+  const { data: existing, error: fetchErr } = await db
+    .table('staff')
     .select('id')
     .eq('id', data.staffId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !existing) throw new Error('Staff no encontrado');
 
-  const { data: result, error } = await supabase
-    .from('staff_schedule_exceptions')
+  const { data: result, error } = await db
+    .table('staff_schedule_exceptions')
     .upsert(
       {
         staff_id:       data.staffId,
-        business_id:    session.business_id,
         exception_date: data.exceptionDate,
         available:      data.available,
         start_time:     data.startTime  ?? null,
@@ -1295,11 +1280,10 @@ export async function deleteScheduleException(exceptionId: string): Promise<void
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
 
-  const { error } = await supabase
-    .from('staff_schedule_exceptions')
+  const { error } = await tenantDb(supabase, session.business_id)
+    .table('staff_schedule_exceptions')
     .delete()
-    .eq('id', exceptionId)
-    .eq('business_id', session.business_id);
+    .eq('id', exceptionId);
 
   if (error) throw new Error(`deleteScheduleException failed: ${error.message}`);
 }
@@ -1315,22 +1299,21 @@ export async function getScheduleExceptions(
 ): Promise<ScheduleException[]> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, session.business_id);
 
   // Verificar que el staff pertenece al negocio de la sesión
-  const { data: staffRow, error: fetchErr } = await supabase
-    .from('staff')
+  const { data: staffRow, error: fetchErr } = await db
+    .table('staff')
     .select('id')
     .eq('id', staffId)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (fetchErr || !staffRow) throw new Error('Staff no encontrado');
 
-  let query = supabase
-    .from('staff_schedule_exceptions')
+  let query = db
+    .table('staff_schedule_exceptions')
     .select('id, staff_id, business_id, exception_date, available, start_time, end_time, reason, created_at')
     .eq('staff_id', staffId)
-    .eq('business_id', session.business_id)
     .order('exception_date', { ascending: true });
 
   if (month) {
@@ -1370,8 +1353,8 @@ export async function getActiveConversations(): Promise<ConversationSummary[]> {
   const { business_id } = await requireAssistantSession();
   const supabase = getServiceClient();
 
-  const { data, error } = await supabase
-    .from('bot_conversations')
+  const { data, error } = await tenantDb(supabase, business_id)
+    .table('bot_conversations')
     .select(`
       customer_phone,
       session_mode,
@@ -1379,7 +1362,6 @@ export async function getActiveConversations(): Promise<ConversationSummary[]> {
       last_message,
       taken_by_staff:taken_by(name)
     `)
-    .eq('business_id', business_id)
     .order('last_message', { ascending: false })
     .limit(50);
 
@@ -1427,10 +1409,9 @@ export async function getConversationMessages(
   const { business_id } = await requireAssistantSession();
   const supabase = getServiceClient();
 
-  const { data, error } = await supabase
-    .from('conversation_messages')
+  const { data, error } = await tenantDb(supabase, business_id)
+    .table('conversation_messages')
     .select('id, direction, body, sent_by, staff_id, created_at')
-    .eq('business_id', business_id)
     .eq('customer_phone', customerPhone)
     .order('created_at', { ascending: true })
     .limit(100);
