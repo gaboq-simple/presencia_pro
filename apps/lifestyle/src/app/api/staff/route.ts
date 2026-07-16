@@ -27,6 +27,7 @@ import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 import { logManagementAudit } from '@/lib/managementAudit';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -59,10 +60,9 @@ async function generateCandidatePin(
   supabase: SupabaseClient,
   businessId: string,
 ): Promise<string> {
-  const { data } = await supabase
-    .from('staff')
+  const { data } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('pin')
-    .eq('business_id', businessId)
     .not('pin', 'is', null);
 
   const taken = new Set(
@@ -116,6 +116,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const d = parsed.data;
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
 
   // 2b. Servicios que hará el staff. Validamos ANTES de insertar el staff para que,
   //     una vez creada la fila, el único motivo de fallo del mapeo sea un error
@@ -133,10 +134,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Pertenencia: cada service_id debe ser un servicio ACTIVO de ESTE negocio
   // (mismo criterio que PATCH /api/staff/[id]/services).
   if (requestedServiceIds.length > 0) {
-    const { data: activeRows, error: svcError } = await supabase
-      .from('services')
+    const { data: activeRows, error: svcError } = await db
+      .table('services')
       .select('id')
-      .eq('business_id', businessId)
       .eq('active', true);
 
     if (svcError) {
@@ -169,10 +169,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'No hay PINs disponibles en el negocio' }, { status: 409 });
     }
 
-    const { data: row, error } = await supabase
-      .from('staff')
+    const { data: row, error } = await db
+      .table('staff')
       .insert({
-        business_id: businessId,
         name:        d.name,
         role:        d.role,
         phone:       d.phone ?? '',        // NOT NULL — '' como el script de onboarding
@@ -210,7 +209,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .insert(requestedServiceIds.map((sid) => ({ staff_id: created.id, service_id: sid })));
 
     if (mapError) {
-      const { error: cleanupError } = await supabase.from('staff').delete().eq('id', created.id);
+      const { error: cleanupError } = await db.table('staff').delete().eq('id', created.id);
       if (cleanupError) {
         // Doble fallo (mapeo + limpieza): queda un staff huérfano. Log fuerte para
         // reconciliación manual — no debería ocurrir salvo caída de DB entre pasos.
