@@ -12,6 +12,7 @@
 //     puede tumbar la gestión del dueño.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 
 export type ManagementEntity = 'services' | 'staff' | 'staff_services' | 'businesses';
 export type ManagementAction =
@@ -58,8 +59,7 @@ export async function logManagementAudit(
   input: ManagementAuditInput,
 ): Promise<void> {
   try {
-    const { error } = await supabase.from('management_audit').insert({
-      business_id:    input.businessId,
+    const { error } = await tenantDb(supabase, input.businessId).table('management_audit').insert({
       entity:         input.entity,
       entity_id:      input.entityId,
       action:         input.action,

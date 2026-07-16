@@ -5,6 +5,7 @@
 // que Ola 1 / PR0. Cada query filtra por él; nunca lee cross-tenant.
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 import {
   computeClientelaStats,
   type CustomerCadenceInput,
@@ -40,20 +41,19 @@ export async function getClientelaStats(
   now: Date = new Date(),
 ): Promise<ClientelaStats> {
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
 
   // 1. Todos los clientes del negocio (scope Ola 1).
-  const { data: custData } = await supabase
-    .from('customers')
-    .select('id, name, visit_count, is_flagged, noshow_count, created_at')
-    .eq('business_id', businessId);
+  const { data: custData } = await db
+    .table('customers')
+    .select('id, name, visit_count, is_flagged, noshow_count, created_at');
 
   const customers = (custData ?? []) as CustomerRow[];
 
   // 2. Serie de visitas completadas del negocio, ligadas a cliente (scope Ola 1).
-  const { data: apptData } = await supabase
-    .from('appointments')
+  const { data: apptData } = await db
+    .table('appointments')
     .select('customer_id, starts_at, price_charged')
-    .eq('business_id', businessId)
     .eq('status', 'completed')
     .not('customer_id', 'is', null)
     .order('starts_at', { ascending: true });

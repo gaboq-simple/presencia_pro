@@ -4,6 +4,7 @@
 // que Ola 1 / PR0. Cada query filtra por él; nunca lee cross-tenant.
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 import {
   computeRetentionFeed,
   MIN_VISITS_FOR_CADENCE,
@@ -39,11 +40,11 @@ export async function getRetentionFeed(
   opts?: { topN?: number },
 ): Promise<RetentionFeed> {
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
   // 1. Serie de citas completadas del negocio, ligadas a cliente.
-  const { data: apptData } = await supabase
-    .from('appointments')
+  const { data: apptData } = await db
+    .table('appointments')
     .select('customer_id, starts_at, price_charged')
-    .eq('business_id', businessId)
     .eq('status', 'completed')
     .not('customer_id', 'is', null)
     .order('starts_at', { ascending: true });
@@ -64,10 +65,9 @@ export async function getRetentionFeed(
   if (eligibleIds.length === 0) return { rows: [], porRecuperar: 0 };
 
   // 3. Campos denormalizados de esos clientes (scope por business_id).
-  const { data: custData } = await supabase
-    .from('customers')
+  const { data: custData } = await db
+    .table('customers')
     .select('id, name, visit_count, is_flagged, noshow_count, created_at')
-    .eq('business_id', businessId)
     .in('id', eligibleIds);
 
   const inputs: CustomerCadenceInput[] = ((custData ?? []) as CustomerRow[]).map((c) => {
@@ -96,10 +96,9 @@ export async function getContactadosCount(
   businessId: string,
 ): Promise<number> {
   const supabase = getServiceClient();
-  const { count } = await supabase
-    .from('scheduled_notifications')
+  const { count } = await tenantDb(supabase, businessId)
+    .table('scheduled_notifications')
     .select('id', { count: 'exact', head: true })
-    .eq('business_id', businessId)
     .eq('type', 'reactivation');
   return count ?? 0;
 }

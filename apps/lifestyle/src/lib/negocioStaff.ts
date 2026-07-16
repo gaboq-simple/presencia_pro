@@ -7,6 +7,7 @@
 //    del barbero): esta métrica es recompra AL barbero, otro cálculo al lado.
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 import {
   computeStaffRecompra,
   type CompletedVisit,
@@ -28,18 +29,18 @@ export async function getNegocioStaffRecompra(
   now: Date = new Date(),
 ): Promise<StaffRecompraResult> {
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
 
   // 1. Barberos activos del negocio (define filas y orden; incluye los de 0 data).
-  const { data: staffData } = await supabase
-    .from('staff')
+  const { data: staffData } = await db
+    .table('staff')
     .select('id, name')
-    .eq('business_id', businessId)
     .eq('role', 'barber')
     .eq('active', true);
 
-  const roster: StaffRosterEntry[] = (staffData ?? []).map((s) => ({
-    staffId: s.id as string,
-    staffName: s.name as string,
+  const roster: StaffRosterEntry[] = ((staffData ?? []) as { id: string; name: string }[]).map((s) => ({
+    staffId: s.id,
+    staffName: s.name,
   }));
 
   // Sin barberos → resultado vacío (el módulo puro degrada con gracia).
@@ -49,15 +50,13 @@ export async function getNegocioStaffRecompra(
 
   // 2. Visitas completadas ligadas a cliente (customer_id NOT NULL) del negocio.
   //    staff_id es NOT NULL en el schema → la liga cita↔barbero nunca falta.
-  const { data: apptData } = await supabase
-    .from('appointments')
+  const { data: apptData } = await db
+    .table('appointments')
     .select('staff_id, customer_id, starts_at')
-    .eq('business_id', businessId)
     .eq('status', 'completed')
     .not('customer_id', 'is', null);
 
-  const visits: CompletedVisit[] = (apptData ?? []).map((r) => {
-    const row = r as RawVisitRow;
+  const visits: CompletedVisit[] = ((apptData ?? []) as RawVisitRow[]).map((row) => {
     return { staffId: row.staff_id, customerId: row.customer_id, startsAt: row.starts_at };
   });
 
