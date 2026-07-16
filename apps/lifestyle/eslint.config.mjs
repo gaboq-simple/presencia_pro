@@ -20,15 +20,13 @@ const TENANT_TABLES = [
 ].join('|');
 
 const noRawTenantFrom = {
-  files: [
-    // ── Superficie migrada (Fase 1 — catálogo). Extender por tanda. ──
-    // (`*` matchea el segmento `[id]` literal — minimatch trataría `[id]` como
-    //  character class, por eso no se listan las rutas con corchetes.)
-    'src/app/api/services/route.ts',
-    'src/app/api/services/*/route.ts',        // services/[id]/route.ts
-    'src/app/api/staff/route.ts',
-    'src/app/api/staff/*/services/route.ts',  // staff/[id]/services/route.ts
-    'src/app/api/staff/*/manage/route.ts',    // staff/[id]/manage/route.ts
+  // ── Superficie migrada. Fase 2 tanda 1: TODO app/api (menos auth y bot, que
+  //    son tandas siguientes). Las siguientes tandas suman server actions, lib y
+  //    engine hasta cubrir todo src/. ──
+  files: ['src/app/api/**/*.{ts,tsx}'],
+  ignores: [
+    'src/app/api/auth/**',  // login PIN/email — tanda auth
+    'src/app/api/bot/**',   // webhook del bot — tanda bot
   ],
   rules: {
     'no-restricted-syntax': [

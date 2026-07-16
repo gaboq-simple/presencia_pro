@@ -28,6 +28,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -113,11 +114,11 @@ export async function POST(
 
   // 5. Verificar que el staff pertenece al negocio de la sesion
   const supabase = getServiceClient();
-  const { data: existing } = await supabase
-    .from('staff')
+  const db = tenantDb(supabase, businessId);
+  const { data: existing } = await db
+    .table('staff')
     .select('id, name')
     .eq('id', staffId)
-    .eq('business_id', businessId)
     .maybeSingle();
 
   if (!existing) {
@@ -126,8 +127,8 @@ export async function POST(
 
   // 6. Verificar si hay citas confirmadas/pendientes ese dia (si no es force)
   if (!force) {
-    const { data: appts } = await supabase
-      .from('appointments')
+    const { data: appts } = await db
+      .table('appointments')
       .select('id')
       .eq('staff_id', staffId)
       .gte('starts_at', `${date}T00:00:00`)

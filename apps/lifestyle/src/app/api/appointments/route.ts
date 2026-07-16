@@ -26,6 +26,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
 
 // ─── UUID regex ───────────────────────────────────────────────────────────────
@@ -146,10 +147,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const dayEnd   = `${date}T23:59:59+00:00`;
 
   const admin = getAdminClient();
-  let query = admin
-    .from('appointments')
+  let query = tenantDb(admin, businessId)
+    .table('appointments')
     .select('*')
-    .eq('business_id', businessId)
     .gte('starts_at', dayStart)
     .lte('starts_at', dayEnd)
     .order('starts_at');
@@ -226,10 +226,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Insert ──────────────────────────────────────────────────────────────────
   const admin = getAdminClient();
 
-  const { data, error } = await admin
-    .from('appointments')
+  const { data, error } = await tenantDb(admin, businessId)
+    .table('appointments')
     .insert({
-      business_id: businessId,
       staff_id:    staffId,
       service_id:  serviceId,
       customer_id: customerId ?? null,
@@ -294,8 +293,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // restricción, comportamiento intacto. El RLS "solo mis citas" existe pero es
   // INERTE bajo service_role: el enforcement vive aquí, no en la DB.
   if (session.role === 'barber' && session.staff_id) {
-    const { data: target, error: targetError } = await admin
-      .from('appointments')
+    const { data: target, error: targetError } = await tenantDb(admin, businessId)
+      .table('appointments')
       .select('staff_id')
       .eq('id', id)
       .eq('business_id', businessId)
@@ -319,15 +318,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // Atribución: registramos quién tocó la cita (mismo patrón que el panel del
   // asistente — migración 023). staff_id puede ser null en sesiones por token
   // (owner/admin): se guarda null, no rompe el FK (columna nullable).
-  const { data: updatedAppt, error: updateError } = await admin
-    .from('appointments')
+  const { data: updatedAppt, error: updateError } = await tenantDb(admin, businessId)
+    .table('appointments')
     .update({
       status,
       modified_by_staff_id: session.staff_id ?? null,
       modified_at:          new Date().toISOString(),
     })
     .eq('id', id)
-    .eq('business_id', businessId)
     .select('id, customer_id, business_id, starts_at, staff_id')
     .maybeSingle();
 
@@ -340,8 +338,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   // ── Cancelar recordatorios pendientes si la cita se cancela o no se presenta
   if (status === 'cancelled' || status === 'no_show') {
-    await admin
-      .from('scheduled_notifications')
+    await tenantDb(admin, businessId)
+      .table('scheduled_notifications')
       .update({ failed_at: new Date().toISOString() })
       .eq('appointment_id', id)
       .is('sent_at', null)
@@ -396,8 +394,8 @@ async function scheduleReviewRequest(
     if (!biz?.review_requests_enabled || !biz.review_url) return;
 
     // Obtener datos del cliente
-    const { data: custData } = await admin
-      .from('customers')
+    const { data: custData } = await tenantDb(admin, appt.business_id)
+      .table('customers')
       .select('id, name, phone')
       .eq('id', appt.customer_id)
       .maybeSingle();
@@ -411,8 +409,7 @@ async function scheduleReviewRequest(
       `Hola ${firstName}, ¿qué tal tu experiencia hoy en ${biz.name}? 💈 ` +
       `Si tienes un momento, tu opinión nos ayuda mucho → ${biz.review_url}`;
 
-    await admin.from('scheduled_notifications').insert({
-      business_id:    appt.business_id,
+    await tenantDb(admin, appt.business_id).table('scheduled_notifications').insert({
       appointment_id: appt.id,
       type:           'review_request',
       scheduled_for:  scheduledFor,

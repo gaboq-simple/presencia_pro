@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
   const supabase = getServiceClient();
   let businessId: string | null = null;
 
+  // eslint-disable-next-line no-restricted-syntax -- endpoint PÚBLICO ARCO (LFPDPPP): resuelve el business_id del solicitante por su teléfono; sin sesión por diseño (rate-limit por teléfono); solo lee business_id, ningún otro dato del cliente.
   const { data: customerRow } = await supabase
     .from('customers')
     .select('business_id')
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── INSERT en arco_requests ─────────────────────────────────────────────────
+  // eslint-disable-next-line no-restricted-syntax -- insert de solicitud ARCO pública; business_id puede ser null (solicitante sin customer en ningún negocio); no hay sesión por diseño.
   const { error } = await supabase.from('arco_requests').insert({
     customer_phone,
     customer_name,

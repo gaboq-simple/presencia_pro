@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { requireOwnerOrAdmin } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Service client ────────────────────────────────────────────────────────────
 
@@ -79,8 +80,8 @@ export async function PATCH(
   const block = blockRow as BlockRequestRow;
 
   // 5. Verificar que el barbero pertenece al mismo negocio del admin
-  const { data: targetStaff, error: targetError } = await supabase
-    .from('staff')
+  const { data: targetStaff, error: targetError } = await tenantDb(supabase, auth.businessId)
+    .table('staff')
     .select('business_id')
     .eq('id', block.staff_id)
     .maybeSingle();

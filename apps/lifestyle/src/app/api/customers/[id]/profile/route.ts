@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { tenantDb } from '@/lib/tenantDb';
 import type { ClientProfile } from '@/lib/dashboard.types';
 
 // ─── Validación del path param ────────────────────────────────────────────────
@@ -81,6 +82,7 @@ export async function GET(
 
   // 3. Obtener staff autenticado + business_id (cualquier rol puede consultar)
   const supabase = getServiceClient();
+  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global); el business_id sale de acá, no se conoce antes
   const { data: staffRecord, error: staffError } = await supabase
     .from('staff')
     .select('id, business_id, role')
@@ -94,11 +96,12 @@ export async function GET(
 
   const businessId = staffRecord.business_id as string;
   const staffId = staffRecord.id as string;
+  const db = tenantDb(supabase, businessId);
 
   try {
     // 4. Fetch del cliente con joins de servicio y barbero favoritos
-    const { data: customerData, error: customerError } = await supabase
-      .from('customers')
+    const { data: customerData, error: customerError } = await db
+      .table('customers')
       .select(`
         id,
         name,
@@ -110,7 +113,6 @@ export async function GET(
         favorite_staff:favorite_staff_id(name)
       `)
       .eq('id', customerId)
-      .eq('business_id', businessId)
       .maybeSingle();
 
     if (customerError) throw new Error(`customer query failed: ${customerError.message}`);
@@ -124,10 +126,9 @@ export async function GET(
     // 5. Próxima cita del barbero autenticado con este cliente (desde ahora)
     const now = new Date().toISOString();
 
-    const { data: upcomingData, error: upcomingError } = await supabase
-      .from('appointments')
+    const { data: upcomingData, error: upcomingError } = await db
+      .table('appointments')
       .select('starts_at, ends_at, service:service_id(name)')
-      .eq('business_id', businessId)
       .eq('staff_id', staffId)
       .eq('customer_id', customerId)
       .gte('starts_at', now)

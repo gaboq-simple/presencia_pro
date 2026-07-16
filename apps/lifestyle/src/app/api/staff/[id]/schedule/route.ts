@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -115,11 +116,10 @@ export async function GET(
   const supabase = getServiceClient();
 
   // Verificar que el staff pertenece al negocio de la sesion
-  const { data: existing } = await supabase
-    .from('staff')
+  const { data: existing } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id')
     .eq('id', staffId)
-    .eq('business_id', businessId)
     .maybeSingle();
 
   if (!existing) {
@@ -195,11 +195,10 @@ export async function PATCH(
 
   // 4. Verificar que el staff pertenece al negocio de la sesion
   const supabase = getServiceClient();
-  const { data: existing, error: fetchError } = await supabase
-    .from('staff')
+  const { data: existing, error: fetchError } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id')
     .eq('id', staffId)
-    .eq('business_id', businessId)
     .maybeSingle();
 
   if (fetchError || !existing) {

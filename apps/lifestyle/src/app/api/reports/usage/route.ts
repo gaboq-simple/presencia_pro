@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   try {
     const supabase = getServiceClient();
+    const db = tenantDb(supabase, businessId);
 
     // Rango del mes: [inicio, fin_exclusivo)
     const [year, mon] = month.split('-').map(Number);
@@ -146,10 +148,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     const businessName = (bizData as { name: string }).name;
 
     // 5. Metricas de citas
-    const { data: apptData, error: apptError } = await supabase
-      .from('appointments')
+    const { data: apptData, error: apptError } = await db
+      .table('appointments')
       .select('status, customer_id')
-      .eq('business_id', businessId)
       .gte('starts_at', startISO)
       .lt('starts_at', endISO);
 
@@ -167,49 +168,44 @@ export async function GET(request: Request): Promise<NextResponse> {
     );
 
     // 6. Clientes nuevos creados en el mes
-    const { count: newCustomers, error: newCustError } = await supabase
-      .from('customers')
+    const { count: newCustomers, error: newCustError } = await db
+      .table('customers')
       .select('id', { count: 'exact', head: true })
-      .eq('business_id', businessId)
       .gte('created_at', startISO)
       .lt('created_at', endISO);
 
     if (newCustError) throw new Error(`new_customers query failed: ${newCustError.message}`);
 
     // 7. Mensajes WhatsApp enviados/fallidos (scheduled_notifications)
-    const { count: msgSent, error: msgSentError } = await supabase
-      .from('scheduled_notifications')
+    const { count: msgSent, error: msgSentError } = await db
+      .table('scheduled_notifications')
       .select('id', { count: 'exact', head: true })
-      .eq('business_id', businessId)
       .gte('sent_at', startISO)
       .lt('sent_at', endISO);
 
     if (msgSentError) throw new Error(`whatsapp_sent query failed: ${msgSentError.message}`);
 
-    const { count: msgFailed, error: msgFailedError } = await supabase
-      .from('scheduled_notifications')
+    const { count: msgFailed, error: msgFailedError } = await db
+      .table('scheduled_notifications')
       .select('id', { count: 'exact', head: true })
-      .eq('business_id', businessId)
       .gte('failed_at', startISO)
       .lt('failed_at', endISO);
 
     if (msgFailedError) throw new Error(`whatsapp_failed query failed: ${msgFailedError.message}`);
 
     // 8. Conversaciones con actividad en el mes (bot_conversations)
-    const { count: botConvs, error: botConvsError } = await supabase
-      .from('bot_conversations')
+    const { count: botConvs, error: botConvsError } = await db
+      .table('bot_conversations')
       .select('id', { count: 'exact', head: true })
-      .eq('business_id', businessId)
       .gte('last_message', startISO)
       .lt('last_message', endISO);
 
     if (botConvsError) throw new Error(`bot_conversations query failed: ${botConvsError.message}`);
 
     // 9. Takeovers humanos: mensajes con sent_by='human' en el mes
-    const { count: humanTakeovers, error: humanError } = await supabase
-      .from('conversation_messages')
+    const { count: humanTakeovers, error: humanError } = await db
+      .table('conversation_messages')
       .select('id', { count: 'exact', head: true })
-      .eq('business_id', businessId)
       .eq('sent_by', 'human')
       .gte('created_at', startISO)
       .lt('created_at', endISO);
