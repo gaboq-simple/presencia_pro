@@ -27,6 +27,7 @@ import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 import { logManagementAudit } from '@/lib/managementAudit';
+import { tenantDb } from '@/lib/tenantDb';
 import { ServiceCreateSchema } from './schema';
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -80,12 +81,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const d = parsed.data;
 
-  // 3. Insertar
+  // 3. Insertar — vía tenantDb: el business_id lo inyecta el helper (server-derivado).
   const supabase = getServiceClient();
-  const { data: created, error: insertError } = await supabase
-    .from('services')
+  const db = tenantDb(supabase, businessId);
+  const { data: created, error: insertError } = await db
+    .table('services')
     .insert({
-      business_id:      businessId,
       name:             d.name,
       description:      d.description ?? null,
       price:            d.price,

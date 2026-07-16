@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 import { logManagementAudit } from '@/lib/managementAudit';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -94,13 +95,14 @@ export async function PATCH(
 
   const { active, pin } = parsed.data;
 
-  // 4. Verificar que el staff target pertenece al mismo negocio
+  // 4. Verificar que el staff target pertenece al mismo negocio. Vía tenantDb:
+  //    el .eq('business_id') lo inyecta el helper → el `.eq('id')` acota a la fila.
   const supabase = getServiceClient();
-  const { data: existing, error: fetchError } = await supabase
-    .from('staff')
-    .select('id, active, pin, business_id')
+  const db = tenantDb(supabase, businessId);
+  const { data: existing, error: fetchError } = await db
+    .table('staff')
+    .select('id, active, pin')
     .eq('id', staffId)
-    .eq('business_id', businessId)
     .maybeSingle();
 
   if (fetchError || !existing) {
@@ -112,8 +114,8 @@ export async function PATCH(
   if (active !== undefined) updates['active'] = active;
   if (pin !== undefined)    updates['pin']    = pin;  // null borra el PIN
 
-  const { data: updated, error: updateError } = await supabase
-    .from('staff')
+  const { data: updated, error: updateError } = await db
+    .table('staff')
     .update(updates)
     .eq('id', staffId)
     .select('id, active, pin')

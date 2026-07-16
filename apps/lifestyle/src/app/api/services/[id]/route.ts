@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 import { logManagementAudit } from '@/lib/managementAudit';
+import { tenantDb } from '@/lib/tenantDb';
 import { ServiceUpdateSchema } from '../schema';
 
 // ─── Service client ───────────────────────────────────────────────────────────
@@ -88,14 +89,15 @@ export async function PATCH(
     );
   }
 
-  // 4. Verificar que el servicio pertenece al negocio de la sesión. El select se
-  //    ensancha a los campos auditables → sirve de `before` sin query extra.
+  // 4. Verificar que el servicio pertenece al negocio de la sesión. Vía tenantDb:
+  //    el .eq('business_id') lo inyecta el helper → el `.eq('id')` acota a la fila.
+  //    El select se ensancha a los campos auditables → sirve de `before` sin query extra.
   const supabase = getServiceClient();
-  const { data: existing, error: fetchError } = await supabase
-    .from('services')
-    .select('id, business_id, name, description, price, price_min, price_max, price_note, currency, duration_minutes, active')
+  const db = tenantDb(supabase, businessId);
+  const { data: existing, error: fetchError } = await db
+    .table('services')
+    .select('id, name, description, price, price_min, price_max, price_note, currency, duration_minutes, active')
     .eq('id', serviceId)
-    .eq('business_id', businessId)
     .maybeSingle();
 
   if (fetchError || !existing) {
@@ -109,8 +111,8 @@ export async function PATCH(
     if (value !== undefined) updates[key] = value;
   }
 
-  const { data: updated, error: updateError } = await supabase
-    .from('services')
+  const { data: updated, error: updateError } = await db
+    .table('services')
     .update(updates)
     .eq('id', serviceId)
     .select('id, name, description, price, price_min, price_max, price_note, currency, duration_minutes, active')

@@ -24,6 +24,7 @@ import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 import { logManagementAudit } from '@/lib/managementAudit';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -64,11 +65,10 @@ async function guard(rawId: string): Promise<Guarded> {
   }
 
   const supabase = getServiceClient();
-  const { data: existing } = await supabase
-    .from('staff')
+  const { data: existing } = await tenantDb(supabase, session.business_id)
+    .table('staff')
     .select('id')
     .eq('id', parsedId.data)
-    .eq('business_id', session.business_id)
     .maybeSingle();
 
   if (!existing) {
@@ -131,12 +131,12 @@ export async function PATCH(
 
   const requestedIds = [...new Set(parsed.data.service_ids)]; // dedup (respeta PK compuesta)
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
 
   // Servicios ACTIVOS del negocio — universo válido y ámbito del replace-all.
-  const { data: activeRows, error: svcError } = await supabase
-    .from('services')
+  const { data: activeRows, error: svcError } = await db
+    .table('services')
     .select('id')
-    .eq('business_id', businessId)
     .eq('active', true);
 
   if (svcError) {
