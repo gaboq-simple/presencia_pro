@@ -60,6 +60,7 @@ export type AdminStaffPhotoRow = {
 };
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 import type {
   AppointmentStatus,
   AppointmentSource,
@@ -350,8 +351,8 @@ export async function getDayAppointments(
   }
   const { start, end } = localDayRangeUtc(date, timeZone);
 
-  const { data, error } = await supabase
-    .from('appointments')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('appointments')
     .select(`
       id,
       starts_at,
@@ -371,7 +372,6 @@ export async function getDayAppointments(
       created_by:created_by_staff_id(id, name),
       modified_by:modified_by_staff_id(id, name)
     `)
-    .eq('business_id', businessId)
     .gte('starts_at', start)
     .lt('starts_at', end)
     .order('starts_at');
@@ -394,8 +394,8 @@ export async function getActiveStaffWithAvailability(
 ): Promise<DashboardStaff[]> {
   const supabase = getServiceClient();
 
-  const { data, error } = await supabase
-    .from('staff')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select(`
       id,
       name,
@@ -403,7 +403,6 @@ export async function getActiveStaffWithAvailability(
       availability:staff_availability(day_of_week, start_time, end_time, break_start, break_end, is_active),
       services:staff_services(service_id)
     `)
-    .eq('business_id', businessId)
     .eq('active', true)
     .order('name');
 
@@ -502,10 +501,9 @@ export async function getDayExceptions(
   date: string,
 ): Promise<DayException[]> {
   const supabase = getServiceClient();
-  const { data, error } = await supabase
-    .from('staff_schedule_exceptions')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff_schedule_exceptions')
     .select('staff_id, available, start_time, end_time')
-    .eq('business_id', businessId)
     .eq('exception_date', date);
   if (error) throw new Error(`getDayExceptions failed: ${error.message}`);
   return (data ?? []) as DayException[];
@@ -586,10 +584,9 @@ export async function getPeriodMetrics(
   const supabase = getServiceClient();
   const { start, end } = getPeriodRange(period, date);
 
-  const { data, error } = await supabase
-    .from('appointments')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('appointments')
     .select('status, source, starts_at, customer_id, price_charged, service:service_id(price, currency)')
-    .eq('business_id', businessId)
     .gte('starts_at', start)
     .lte('starts_at', end);
 
@@ -667,8 +664,8 @@ export async function getPeriodMetrics(
 
   let top_clients: TopClientEntry[] = [];
   if (topCustomerIds.length > 0) {
-    const { data: custData } = await supabase
-      .from('customers')
+    const { data: custData } = await tenantDb(supabase, businessId)
+      .table('customers')
       .select('id, name')
       .in('id', topCustomerIds);
 
@@ -851,6 +848,7 @@ export async function getStaffDayAppointments(
 ): Promise<DayAppointmentForStaff[]> {
   const supabase = getServiceClient();
 
+  // eslint-disable-next-line no-restricted-syntax -- scoped por staff_id server-derivado (sesión del barbero, staff/page.tsx); NO hay businessId en scope y el staff_id es único global → ya acota al tenant. Sin superficie cross-tenant.
   const { data, error } = await supabase
     .from('appointments')
     .select(`
@@ -938,10 +936,9 @@ export async function getPendingBlockRequests(
   const supabase = getServiceClient();
 
   // 1. Staff activo del negocio
-  const { data: staffData, error: staffError } = await supabase
-    .from('staff')
+  const { data: staffData, error: staffError } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id')
-    .eq('business_id', businessId)
     .eq('active', true);
 
   if (staffError) throw new Error(`getPendingBlockRequests(staff) failed: ${staffError.message}`);
@@ -1053,10 +1050,9 @@ export async function getAllStaffForManagement(
 ): Promise<AdminStaffManagementRow[]> {
   const supabase = getServiceClient();
 
-  const { data, error } = await supabase
-    .from('staff')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id, name, role, photo_url, active, pin')
-    .eq('business_id', businessId)
     .order('name');
 
   if (error) throw new Error(`getAllStaffForManagement failed: ${error.message}`);
@@ -1091,10 +1087,10 @@ export async function getServicesForManagement(
 ): Promise<AdminServiceRow[]> {
   const supabase = getServiceClient();
 
-  const { data, error } = await supabase
-    .from('services')
+  const db = tenantDb(supabase, businessId);
+  const { data, error } = await db
+    .table('services')
     .select('id, name, description, price, price_min, price_max, price_note, currency, duration_minutes, active')
-    .eq('business_id', businessId)
     .order('active', { ascending: false })
     .order('name');
 
@@ -1105,10 +1101,9 @@ export async function getServicesForManagement(
   // Conteo de citas futuras por servicio — solo agendables (pending|confirmed) y
   // con starts_at en el futuro. Las citas pasadas no importan para la advertencia.
   const nowIso = new Date().toISOString();
-  const { data: apptRows, error: apptError } = await supabase
-    .from('appointments')
+  const { data: apptRows, error: apptError } = await db
+    .table('appointments')
     .select('service_id')
-    .eq('business_id', businessId)
     .gt('starts_at', nowIso)
     .in('status', ['pending', 'confirmed']);
 
@@ -1135,10 +1130,9 @@ export async function getActiveStaffWithPhoto(
 ): Promise<AdminStaffPhotoRow[]> {
   const supabase = getServiceClient();
 
-  const { data, error } = await supabase
-    .from('staff')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id, name, photo_url')
-    .eq('business_id', businessId)
     .eq('active', true)
     .order('name');
 

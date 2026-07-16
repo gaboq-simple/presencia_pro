@@ -8,6 +8,7 @@
 // exacta con catálogo multi-servicio. Ignora excepciones/blocks por-fecha (patrón semanal).
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 import { generateSlotsForStaff } from '@presenciapro/engine/bot/lifestyle/scheduling';
 import { utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '@presenciapro/engine/bot/lifestyle/tzUtils';
 import { assembleOccupancy, occCellKey, type OccupancyResult } from './occupancy';
@@ -40,6 +41,7 @@ export async function getNegocioOccupancy(
   now: Date = new Date(),
 ): Promise<OccupancyResult> {
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
   const nowMs = now.getTime();
 
   // ── Timezone del negocio ──
@@ -47,21 +49,21 @@ export async function getNegocioOccupancy(
   const tz = (biz as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
 
   // ── Barberos activos ──
-  const { data: staffData } = await supabase
-    .from('staff').select('id, name').eq('business_id', businessId).eq('role', 'barber').eq('active', true);
+  const { data: staffData } = await db
+    .table('staff').select('id, name').eq('role', 'barber').eq('active', true);
   const staff = (staffData ?? []) as { id: string; name: string }[];
   const staffIds = staff.map((s) => s.id);
   const staffName = new Map(staff.map((s) => [s.id, s.name]));
 
   // ── Servicio representativo (el más común) → duración + precio para la capacidad ──
-  const { data: svcData } = await supabase
-    .from('services').select('id, duration_minutes, price').eq('business_id', businessId).eq('active', true);
+  const { data: svcData } = await db
+    .table('services').select('id, duration_minutes, price').eq('active', true);
   const services = (svcData ?? []) as { id: string; duration_minutes: number; price: number }[];
   // El más completado; si no hay completadas, el primero.
   let repService = services[0] ?? null;
   if (services.length > 1) {
-    const { data: apptSvc } = await supabase
-      .from('appointments').select('service_id').eq('business_id', businessId).eq('status', 'completed').not('service_id', 'is', null);
+    const { data: apptSvc } = await db
+      .table('appointments').select('service_id').eq('status', 'completed').not('service_id', 'is', null);
     const counts = new Map<string, number>();
     for (const r of (apptSvc ?? []) as { service_id: string }[]) counts.set(r.service_id, (counts.get(r.service_id) ?? 0) + 1);
     const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -104,10 +106,9 @@ export async function getNegocioOccupancy(
 
   // ── Citas de la ventana (completadas + confirmadas) por franja ──
   const windowStart = new Date(nowMs - WINDOW_WEEKS * 7 * 86_400_000);
-  const { data: apptData } = await supabase
-    .from('appointments')
+  const { data: apptData } = await db
+    .table('appointments')
     .select('starts_at')
-    .eq('business_id', businessId)
     .in('status', ['completed', 'confirmed'])
     .gte('starts_at', windowStart.toISOString())
     .lte('starts_at', now.toISOString());

@@ -21,19 +21,23 @@ const TENANT_TABLES = [
 
 const noRawTenantFrom = {
   // ── Superficie migrada. Fase 2 tanda 1: TODO app/api (menos auth y bot).
-  //    Tanda 2: los server actions (`'use server'`). Se listan por archivo a
-  //    propósito — NO por directorio — para no arrastrar los Server Components
-  //    de esas carpetas (p.ej. staff/page.tsx), que son tandas posteriores. Las
-  //    siguientes tandas suman esos pages, lib y engine hasta cubrir todo src/. ──
+  //    Tanda 2: los server actions (`'use server'`). Tanda 3: TODO src/lib (la
+  //    capa de lectura de las vistas) menos auth.ts (tanda auth). Los server
+  //    actions se listan por archivo a propósito — NO por directorio — para no
+  //    arrastrar los Server Components de app/ (p.ej. staff/page.tsx), tandas
+  //    posteriores. Las siguientes tandas suman esos pages, engine y auth/bot
+  //    hasta cubrir todo src/. ──
   files: [
     'src/app/api/**/*.{ts,tsx}',
     'src/app/staff/assistant-actions.ts',
     'src/app/staff/actions.ts',
     'src/app/dashboard/actions.ts',
+    'src/lib/**/*.{ts,tsx}',
   ],
   ignores: [
     'src/app/api/auth/**',  // login PIN/email — tanda auth
     'src/app/api/bot/**',   // webhook del bot — tanda bot
+    'src/lib/auth.ts',      // resolución de sesión/identidad por auth_id — tanda auth
   ],
   rules: {
     'no-restricted-syntax': [

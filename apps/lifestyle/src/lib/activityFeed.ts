@@ -11,6 +11,7 @@
 // timestamptz de microsegundos; se acepta.)
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 
 const PAGE_SIZE = 50;
 
@@ -221,11 +222,12 @@ type ApptRow = {
 
 export async function getActivityFeed(businessId: string, before?: string): Promise<ActivityPage> {
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, businessId);
 
   // Mapas de nombres + timezone (para formatear las citas en hora del negocio).
   const [staffRes, svcRes, bizRes] = await Promise.all([
-    supabase.from('staff').select('id, name').eq('business_id', businessId),
-    supabase.from('services').select('id, name').eq('business_id', businessId),
+    db.table('staff').select('id, name'),
+    db.table('services').select('id, name'),
     supabase.from('businesses').select('timezone').eq('id', businessId).maybeSingle(),
   ]);
 
@@ -235,16 +237,14 @@ export async function getActivityFeed(businessId: string, before?: string): Prom
     timezone: (bizRes.data as { timezone: string } | null)?.timezone ?? 'America/Mexico_City',
   };
 
-  let apptQ = supabase
-    .from('appointment_audit')
+  let apptQ = db
+    .table('appointment_audit')
     .select('id, created_at, action, actor_staff_id, actor_type, old_data, new_data')
-    .eq('business_id', businessId)
     .order('created_at', { ascending: false })
     .limit(PAGE_SIZE);
-  let mgmtQ = supabase
-    .from('management_audit')
+  let mgmtQ = db
+    .table('management_audit')
     .select('id, created_at, entity, entity_id, action, actor_staff_id, actor_type, old_data, new_data, changed_fields')
-    .eq('business_id', businessId)
     .order('created_at', { ascending: false })
     .limit(PAGE_SIZE);
 

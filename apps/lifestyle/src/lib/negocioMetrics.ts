@@ -6,6 +6,7 @@
 // 🔴 Precio: COALESCE(price_charged, service.price) sobre completadas — idéntico a #81.
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 import {
   tramoRanges,
   monthlySpecs,
@@ -45,10 +46,9 @@ async function sumSealedRevenue(
   businessId: string,
   range: RevenueRange,
 ): Promise<number> {
-  const { data } = await supabase
-    .from('appointments')
+  const { data } = await tenantDb(supabase, businessId)
+    .table('appointments')
     .select('price_charged, service:service_id(price)')
-    .eq('business_id', businessId)
     .eq('status', 'completed')
     .gte('starts_at', new Date(range.startMs).toISOString())
     .lte('starts_at', new Date(range.endMs).toISOString());

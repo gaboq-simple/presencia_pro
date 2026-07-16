@@ -9,6 +9,7 @@
 // directamente sin bundling.
 
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 import { sendWaitlistOffer, type MetaConfig } from '@/lib/whatsapp-templates';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,13 +57,13 @@ export async function notifyWaitlistOnCancel(
   slotStaffId:  string | null,
 ): Promise<void> {
   const slotDate = slotStartsAt.split('T')[0]!;
+  const db = tenantDb(supabase, businessId);
 
   // ── Buscar primer cliente en espera para esa fecha ────────────────────────
 
-  const { data: wlData } = await supabase
-    .from('waitlist')
+  const { data: wlData } = await db
+    .table('waitlist')
     .select('id, customer:customer_id(id, name, phone), service:service_id(name)')
-    .eq('business_id', businessId)
     .eq('requested_date', slotDate)
     .eq('status', 'waiting')
     .order('created_at', { ascending: true })
@@ -84,8 +85,8 @@ export async function notifyWaitlistOnCancel(
 
   // ── 1. Marcar como notificado ─────────────────────────────────────────────
 
-  await (supabase as any)
-    .from('waitlist')
+  await db
+    .table('waitlist')
     .update({
       status:      'notified',
       notified_at: notifiedAt.toISOString(),
@@ -102,7 +103,7 @@ export async function notifyWaitlistOnCancel(
       .eq('id', businessId)
       .maybeSingle(),
     slotStaffId
-      ? supabase.from('staff').select('name').eq('id', slotStaffId).maybeSingle()
+      ? db.table('staff').select('name').eq('id', slotStaffId).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
 
@@ -113,8 +114,7 @@ export async function notifyWaitlistOnCancel(
 
   // ── 2. Programar expiración ───────────────────────────────────────────────
 
-  await (supabase as any).from('scheduled_notifications').insert({
-    business_id:    businessId,
+  await db.table('scheduled_notifications').insert({
     type:           'waitlist_expiry',
     scheduled_for:  expiresAt.toISOString(),
     customer_phone: entry.customer.phone,
