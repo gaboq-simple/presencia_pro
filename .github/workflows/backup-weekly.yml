@@ -44,3 +44,17 @@ jobs:
         run: |
           chmod +x scripts/backup-supabase.sh
           bash scripts/backup-supabase.sh
+
+      # Prueba de restore SOLO en dispatch manual (no en el cron semanal, para no
+      # cargar cada backup). Restaura el objeto recién subido en un Postgres
+      # efímero y cuenta filas — prueba que el backup es restaurable de verdad.
+      - name: Restore smoke-test (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+        run: |
+          chmod +x scripts/restore-smoke-test.sh
+          bash scripts/restore-smoke-test.sh
