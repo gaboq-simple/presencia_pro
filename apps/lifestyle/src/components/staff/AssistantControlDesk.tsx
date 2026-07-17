@@ -285,6 +285,11 @@ export default function AssistantControlDesk({
   // Pre-apuntado: tap en un hueco libre del panorama fija barbero+hora ANTES de la
   // hoja. Si el servicio elegido cabe ahí → crea directo; si no → cae al place-mode.
   const [pendingAim, setPendingAim] = useState<{ staffId: string; startMin: number } | null>(null);
+  // Aviso de hora pasada: un tap explícito en un hueco que ya pasó abre esta confirmación
+  // ("esta hora ya pasó, ¿registrar igual?") antes de crear un walk-in retroactivo.
+  const [pastConfirm, setPastConfirm] = useState<
+    { move: Extract<MoveState, { kind: 'walkin' }>; staffId: string; startMin: number } | null
+  >(null);
 
   // Cerrar la hoja SIN crear limpia también el pre-apuntado (no queda pegado para el
   // próximo "+ Walk-in" del header).
@@ -327,15 +332,30 @@ export default function AssistantControlDesk({
     setWiPhone('');
     setPendingAim(null);
 
-    // Pre-apuntado (tap en hueco): si el servicio elegido CABE limpio en ese
-    // barbero+hora → crea directo (sin pasar por los chips). Si NO cabe (el servicio
-    // es más largo que el hueco, o pisaría una cita) → cae con gracia al place-mode
-    // normal para que el asistente elija un hueco que sí entra.
-    if (aim && walkinFitsAt(aim.staffId, aim.startMin, move.dur)) {
-      void handleWalkinPlace(move, aim.staffId, aim.startMin);
-      return;
-    }
+    // Pre-apuntado (tap en hueco). Tres caminos:
+    //  · Cabe limpio y NO es pasado → crea directo (sin pasar por los chips).
+    //  · Cabe pero la hora ya pasó (tap explícito en el pasado) → aviso de confirmación:
+    //    solo se crea si la recepción dice "registrar igual" (walk-in retroactivo). NUNCA
+    //    se crea en el pasado en silencio.
+    //  · No cabe (fuera de turno / solape), sea pasado o futuro → place-mode con gracia.
     if (aim) {
+      // Umbral de "pasado": el slot EN CURSO (nowMin redondeado hacia abajo a 15) NO es
+      // pasado — un walk-in "ahora" es legítimo. Solo los slots anteriores lo son.
+      const slotStart = today && nowMin !== null ? Math.floor(nowMin / 15) * 15 : -Infinity;
+      const isPast = aim.startMin < slotStart;
+      if (isPast) {
+        if (walkinFitsAt(aim.staffId, aim.startMin, move.dur, { ignorePast: true })) {
+          setPastConfirm({ move, staffId: aim.staffId, startMin: aim.startMin });
+        } else {
+          setToast({ msg: 'No cabe ahí — elegí un hueco', kind: 'warn' });
+          setWalkin(move);
+        }
+        return;
+      }
+      if (walkinFitsAt(aim.staffId, aim.startMin, move.dur)) {
+        void handleWalkinPlace(move, aim.staffId, aim.startMin);
+        return;
+      }
       setToast({ msg: 'No cabe ahí — elegí un hueco', kind: 'warn' });
     }
     setWalkin(move); // place-mode: iluminan los chips donde el servicio entra
@@ -344,11 +364,17 @@ export default function AssistantControlDesk({
   // ¿Cabe un walk-in de `dur` min en `staffId` a las `startMin`? Limpio = dentro del
   // tiempo físicamente disponible del carril (turno − descanso − bloqueo, piso en
   // "ahora") y sin solapar ninguna cita. Misma aritmética que el gesto (panoramaEngine),
-  // sobre los engineLanes ya derivados abajo.
-  function walkinFitsAt(staffId: string, startMin: number, dur: number): boolean {
+  // sobre los engineLanes ya derivados abajo. `ignorePast`: sacar el piso de "ahora" para
+  // evaluar si un hueco PASADO cabría por turno/solape (walk-in retroactivo con aviso).
+  function walkinFitsAt(
+    staffId: string,
+    startMin: number,
+    dur: number,
+    opts?: { ignorePast?: boolean },
+  ): boolean {
     const lane = engineLanes.find((l) => l.staffId === staffId);
     if (!lane) return false;
-    const floor = today && nowMin !== null ? nowMin : -Infinity;
+    const floor = opts?.ignorePast ? -Infinity : today && nowMin !== null ? nowMin : -Infinity;
     if (startMin < floor) return false;
     const domainStart = Math.max(lane.availFrom, floor);
     const avail = availableIntervals(lane.unavail, domainStart, lane.availTo);
@@ -591,6 +617,7 @@ export default function AssistantControlDesk({
         customerName: move.name,
         customerPhone: move.phone,
         force: opts?.force,
+        allowPast: opts?.allowPast,
       });
       if (res.error) {
         setAppointments(snapshot); // revert
@@ -1036,6 +1063,52 @@ export default function AssistantControlDesk({
                 className="rounded-pill bg-teal px-4 py-2 text-sm font-bold text-card shadow-card transition hover:opacity-90 disabled:opacity-40"
               >
                 {pendingAim ? 'Crear walk-in →' : 'Elegir hueco →'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Aviso de hora pasada — walk-in retroactivo. El auto-fit nunca crea en el pasado
+          en silencio; un tap explícito en un hueco que ya pasó pide esta confirmación. */}
+      {pastConfirm && (
+        <div
+          className="fixed inset-0 z-[65] flex items-end justify-center bg-ink/30 sm:items-center"
+          onClick={() => setPastConfirm(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-t-2xl bg-card p-5 shadow-card sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <h2 className="text-base font-semibold">Esta hora ya pasó</h2>
+            <p className="mt-2 text-sm text-ink-2">
+              ¿Registrar el walk-in de <strong>{pastConfirm.move.name}</strong> con{' '}
+              {staffNameById.get(pastConfirm.staffId) ?? 'este barbero'} a las{' '}
+              {fmtHora(pastConfirm.startMin)} igual?
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setPastConfirm(null)}
+                className="rounded-pill border border-line px-4 py-2 text-sm font-semibold text-ink-2 transition hover:bg-canvas"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const pc = pastConfirm;
+                  setPastConfirm(null);
+                  void handleWalkinPlace(pc.move, pc.staffId, pc.startMin, {
+                    force: false,
+                    overlapMin: 0,
+                    overlapName: '',
+                    allowPast: true,
+                  });
+                }}
+                className="rounded-pill bg-teal px-4 py-2 text-sm font-bold text-card shadow-card transition hover:opacity-90"
+              >
+                Registrar igual
               </button>
             </div>
           </div>

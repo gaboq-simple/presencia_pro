@@ -108,7 +108,8 @@ export type WalkinRequest = { serviceId: string; dur: number; name: string; serv
 export type RescheduleRequest = { apptId: string; dur: number; name: string; service: string; fromLaneId: string };
 
 // Payload del drop → el desk despacha por kind (reschedule vs create).
-export type PlaceOpts = { force: boolean; overlapMin: number; overlapName: string };
+// allowPast: walk-in retroactivo confirmado (la hora ya pasó y la recepción dijo "igual").
+export type PlaceOpts = { force: boolean; overlapMin: number; overlapName: string; allowPast?: boolean };
 
 // Un destino ofrecido: limpio (soft=false) o solape forzable (soft=true).
 type DropChip = { min: number; soft: boolean; overlapMin: number; overlapName: string };
