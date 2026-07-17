@@ -34,6 +34,9 @@ jobs:
           # SUPABASE_PROJECT_REF=uhhatetytaucucihfyyy era el proyecto EQUIVOCADO y
           # --project-ref/--output ya no existen en `supabase db dump` (CLI 2.x).
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          # Read-only: solo para descubrir el host del session pooler vía Management
+          # API (la conexión directa es IPv6-only y no llega desde los runners).
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

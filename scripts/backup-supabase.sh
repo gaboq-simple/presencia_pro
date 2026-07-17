@@ -33,22 +33,43 @@ set -euo pipefail
 # ── Connection variant: forzar el SESSION POOLER (IPv4) ───────────────────────
 # La conexión DIRECTA (db.<ref>.supabase.co) es IPv6-only y los runners de GitHub
 # Actions son IPv4-only → "Network is unreachable". El transaction pooler (:6543)
-# no sirve para pg_dump. El SESSION POOLER (aws-0-<region>.pooler.supabase.com:5432,
-# user postgres.<ref>) es IPv4 y compatible con pg_dump.
+# no sirve para pg_dump. El SESSION POOLER (<host>.pooler.supabase.com:5432, user
+# postgres.<ref>) es IPv4 y compatible con pg_dump.
 #
-# Si SUPABASE_DB_URL ya apunta al pooler, se usa tal cual (idempotente). Si es la
-# conexión directa, se reescribe SOLO host+user — el password NO se extrae ni se
-# loguea, son dos sustituciones de string sobre la URL (que vive en env, nunca en
-# el log). Región del proyecto presenciapro: us-east-1 (Supabase get_project).
+# El subdominio del pooler NO es derivable de forma fiable (aws-0/aws-1/…) — un
+# host equivocado da "tenant not found". Se DESCUBRE determinísticamente vía
+# Management API (campo db_host) usando SUPABASE_ACCESS_TOKEN; fallback:
+# aws-0-<region>. Si SUPABASE_DB_URL ya es un pooler, se usa tal cual (idempotente).
+# El password NUNCA se extrae ni se loguea: se sustituye SOLO host+user sobre la
+# URL (que vive en env). El puerto directo (5432) coincide con el del session pooler.
 SUPABASE_POOLER_REGION="${SUPABASE_POOLER_REGION:-us-east-1}"
 DB_URL="${SUPABASE_DB_URL}"
 if [[ "${DB_URL}" == *"@db."*".supabase.co"* ]]; then
   REF=$(printf '%s' "${DB_URL}" | sed -E 's#.*@db\.([a-z0-9]+)\.supabase\.co.*#\1#')
-  POOLER_HOST="aws-0-${SUPABASE_POOLER_REGION}.pooler.supabase.com"
+
+  POOLER_HOST=""
+  if [[ -n "${SUPABASE_ACCESS_TOKEN:-}" ]]; then
+    echo "[backup] Descubriendo el host del session pooler vía Management API..."
+    POOLER_JSON=$(curl -fsS -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+      "https://api.supabase.com/v1/projects/${REF}/config/database/pooler" 2>/dev/null || true)
+    # Preferir db_host; si no, extraer el host del connection_string del pooler.
+    POOLER_HOST=$(printf '%s' "${POOLER_JSON}" \
+      | grep -oE '"db_host"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
+      | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/' || true)
+    if [[ -z "${POOLER_HOST}" ]]; then
+      POOLER_HOST=$(printf '%s' "${POOLER_JSON}" \
+        | grep -oE '@[a-z0-9.-]+\.pooler\.supabase\.com' | head -1 | sed -E 's/^@//' || true)
+    fi
+  fi
+  if [[ -z "${POOLER_HOST}" ]]; then
+    POOLER_HOST="aws-0-${SUPABASE_POOLER_REGION}.pooler.supabase.com"
+    echo "[backup] WARN: no se descubrió el pooler vía API — fallback por región: ${POOLER_HOST}"
+  fi
+
   DB_URL=$(printf '%s' "${DB_URL}" \
     | sed -E "s#://postgres:#://postgres.${REF}:#" \
     | sed -E "s#@db\.${REF}\.supabase\.co#@${POOLER_HOST}#")
-  echo "[backup] Conexión directa (IPv6-only) detectada → reescrita al session pooler: ${POOLER_HOST} (user postgres.${REF})"
+  echo "[backup] Conexión directa (IPv6-only) → session pooler: ${POOLER_HOST} (user postgres.${REF}, puerto 5432)"
 else
   # Diagnóstico sin exponer credenciales: solo el host.
   echo "[backup] Usando SUPABASE_DB_URL provisto (host: $(printf '%s' "${DB_URL}" | sed -E 's#.*@([^:/?]+).*#\1#'))"
