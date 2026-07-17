@@ -2,12 +2,19 @@
 # backup-supabase.sh — Dump, encrypt, and upload Supabase DB to Cloudflare R2
 #
 # Required environment variables:
-#   SUPABASE_DB_URL               — Postgres connection string (percent-encoded
-#                                   password). Direct connection o session pooler,
-#                                   NO el transaction pooler (pg_dump no funciona ahí).
-#                                   Dashboard → Project Settings → Database →
-#                                   Connection string (URI). Apunta al proyecto de
-#                                   prod: hdqazbuxtpavtioufrsv.
+#   SUPABASE_DB_URL               — Postgres connection string (password
+#                                   percent-encoded). En GitHub Actions (runners
+#                                   IPv4-only) DEBE ser el SESSION POOLER:
+#                                     postgresql://postgres.<ref>:<pwd>@<host>.pooler.supabase.com:5432/postgres
+#                                   Dashboard → Connect → Session pooler (puerto 5432).
+#                                   La conexión DIRECTA (db.<ref>.supabase.co) es
+#                                   IPv6-only → "Network is unreachable" en runners.
+#                                   El TRANSACTION pooler (:6543) NO sirve para pg_dump.
+#                                   Proyecto de prod: hdqazbuxtpavtioufrsv.
+#                                   (Si el secret quedara como conexión directa, el
+#                                   script intenta reescribir al pooler, pero el
+#                                   subdominio exacto no siempre es derivable — lo
+#                                   fiable es que el secret YA sea el session pooler.)
 #   BACKUP_ENCRYPTION_PASSPHRASE  — GPG symmetric passphrase
 #   R2_ACCESS_KEY_ID              — Cloudflare R2 access key
 #   R2_SECRET_ACCESS_KEY          — Cloudflare R2 secret key
