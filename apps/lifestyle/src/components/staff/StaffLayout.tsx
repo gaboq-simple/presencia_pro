@@ -27,6 +27,7 @@ import type {
 import { refreshStaffDayAppointments } from '@/app/staff/actions';
 import NextClientCard from './NextClientCard';
 import ClientProfileCard from './ClientProfileCard';
+import DayBar from './DayBar';
 import AssistantDayTimeline from './AssistantDayTimeline';
 import EndOfDaySummary from './EndOfDaySummary';
 import BarberWeekView from './BarberWeekView';
@@ -214,6 +215,14 @@ export default function StaffLayout({
       <main className="mx-auto max-w-xl space-y-4 px-4 pt-4">
         {tab === 'hoy' && (
           <>
+            {/* Barra del día — el ancho es el tiempo (Paso 2) */}
+            <DayBar
+              appointments={appointments}
+              availability={availability}
+              date={date}
+              timezone={timezone}
+            />
+
             {/* + Nueva cita */}
             <button
               onClick={() => setShowNewForm(true)}

@@ -52,6 +52,11 @@
   --color-past-ink:    #6E7378;             /* v5 --past-ink */
   --color-past-faint:  #9CA0A4;             /* v5 --past-faint */
 
+  /* ── Barra del día — pista del hueco LIBRE agendable (Paso 2, barbero). El hueco
+     es un hueco de verdad: fondo neutro visible, NO un color de estado. Distinto del
+     off-shift (fuera de jornada, usa past-bg) y del break (hatch, no es agendable). ── */
+  --color-gap:         #E7ECEC;
+
   /* ── Avatar (iniciales sobre teal) ── */
   --color-avatar-ink:  #04130F;             /* v5 iniciales del avatar */
 
@@ -141,6 +146,21 @@
 .appt-glow-walk:hover  { box-shadow: 0 0 0 3px var(--color-walk-tint),  0 10px 24px rgba(91, 76, 196, 0.18); }
 .appt-glow-done:hover  { box-shadow: 0 0 0 3px rgba(18, 32, 30, 0.14),  0 8px 20px rgba(22, 24, 28, 0.10); }
 .appt-glow-red:hover   { box-shadow: 0 0 0 3px var(--color-red-tint),   0 10px 24px rgba(162, 59, 54, 0.16); }
+
+/* ── Barra del día (Paso 2, barbero) ──────────────────────────────────────────
+ * Break: banda rayada — "no trabajo" (no es hueco agendable). El rayado la separa
+ * visualmente del hueco liso (bg-gap). Color por tono (past-line), no opacity.
+ * En curso: halo teal ESTÁTICO (no hover) — la cita que está pasando ahora se
+ * distingue de las confirmadas por el anillo, no por opacidad. */
+.bar-break-hatch {
+  background-color: var(--color-past-bg);
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--color-past-line) 0, var(--color-past-line) 1.5px,
+    transparent 1.5px, transparent 6px
+  );
+}
+.bar-block-live { box-shadow: 0 0 0 3px var(--color-tint-1), 0 4px 12px rgba(1, 130, 113, 0.22); }
 
 /*
  * Accesibilidad — prefers-reduced-motion (S6-UI-02 PR-6, corrección de spec).
