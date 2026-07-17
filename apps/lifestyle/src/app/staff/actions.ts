@@ -6,7 +6,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
 import { getCurrentSession } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import type { DayAppointmentForStaff, ServiceRef, CustomerRef } from '@/lib/dashboard.types';
@@ -22,7 +21,7 @@ function getServiceClient() {
  * Actualiza el status de una cita a 'completed' o 'no_show'.
  *
  * Invariantes de seguridad:
- *   - staffId siempre del servidor — obtenido de auth_id, nunca del cliente.
+ *   - staffId siempre del servidor — de la sesión (PIN/token o Supabase Auth), nunca del cliente.
  *   - Verificación explícita: appointment.staff_id === staff autenticado.
  *   - Solo roles 'barber' y 'assistant' usan esta acción — admin usa actions.ts del dashboard.
  */
@@ -30,30 +29,19 @@ export async function updateAppointmentStatusAsBarber(
   appointmentId: string,
   status: 'completed' | 'no_show',
 ): Promise<void> {
-  // 1. Verificar sesión activa
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
-
-  // 2. Obtener registro de staff — staffId y businessId siempre del servidor
-  const supabase = getServiceClient();
-  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global): el business_id SALE de acá, no se puede scopear por él.
-  const { data: staffRecord, error: staffError } = await supabase
-    .from('staff')
-    .select('id, role, business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (staffError || !staffRecord) throw new Error('Unauthorized');
-  if (staffRecord.role !== 'barber' && staffRecord.role !== 'assistant') {
+  // 1. Verificar sesión activa — ls_session (PIN) o Supabase Auth (operador).
+  //    Soporta al barbero por PIN, que antes quedaba fuera (auth.getUser() null → 401).
+  const session = await getCurrentSession();
+  if (!session || session.type !== 'business') throw new Error('Unauthorized');
+  if (session.role !== 'barber' && session.role !== 'assistant') {
     throw new Error('Forbidden');
   }
 
-  const staffId    = staffRecord.id as string;
-  const businessId = staffRecord.business_id as string;
+  // 2. staffId y businessId de la sesión (server-derivados, nunca del cliente)
+  const staffId = session.staff_id;
+  if (!staffId) throw new Error('No staff_id en la sesión');
+  const businessId = session.business_id;
+  const supabase   = getServiceClient();
   const db         = tenantDb(supabase, businessId);
 
   // 3. Verificar que la cita pertenece al barbero autenticado (y a su negocio)
@@ -66,10 +54,11 @@ export async function updateAppointmentStatusAsBarber(
   if (apptError || !appt) throw new Error('Appointment not found');
   if (appt.staff_id !== staffId) throw new Error('Forbidden');
 
-  // 4. Actualizar — doble filtro: id + staff_id para integridad (business_id lo inyecta el helper)
+  // 4. Actualizar — doble filtro: id + staff_id para integridad (business_id lo inyecta el helper).
+  //    modified_by_staff_id firma el audit (actor_type='staff' + actor real, no 'unknown').
   const { error } = await db
     .table('appointments')
-    .update({ status })
+    .update({ status, modified_by_staff_id: staffId })
     .eq('id', appointmentId)
     .eq('staff_id', staffId);
 

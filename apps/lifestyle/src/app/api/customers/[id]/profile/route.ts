@@ -14,7 +14,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { requireBusinessSession } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import type { ClientProfile } from '@/lib/dashboard.types';
 
@@ -58,14 +58,11 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  // 1. Verificar sesión
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // 1. Verificar sesión — cualquier miembro del negocio (token/PIN o Supabase Auth).
+  //    La próxima cita se scopea al staff_id de la sesión (feature del barbero).
+  const auth = await requireBusinessSession();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
   // 2. Validar path param
@@ -80,22 +77,10 @@ export async function GET(
 
   const customerId = parsed.data.id;
 
-  // 3. Obtener staff autenticado + business_id (cualquier rol puede consultar)
+  // 3. business_id + staff_id de la sesión (server-derivados, nunca del cliente)
   const supabase = getServiceClient();
-  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global); el business_id sale de acá, no se conoce antes
-  const { data: staffRecord, error: staffError } = await supabase
-    .from('staff')
-    .select('id, business_id, role')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (staffError || !staffRecord) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
-  const businessId = staffRecord.business_id as string;
-  const staffId = staffRecord.id as string;
+  const businessId = auth.businessId;
+  const staffId = auth.staffId;
   const db = tenantDb(supabase, businessId);
 
   try {
@@ -123,7 +108,12 @@ export async function GET(
 
     const customer = customerData as unknown as RawCustomerRow;
 
-    // 5. Próxima cita del barbero autenticado con este cliente (desde ahora)
+    // 5. Próxima cita del barbero autenticado con este cliente (desde ahora).
+    //    Sin staff_id en la sesión (p.ej. dueño por token) no hay cita atribuible.
+    if (!staffId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
     const now = new Date().toISOString();
 
     const { data: upcomingData, error: upcomingError } = await db
