@@ -7,6 +7,7 @@
 //   → Estado → ESCALATED.
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
+import { tenantDb } from '../../../tenantDb';
 import { sendWhatsAppMeta } from '../../../notifications/whatsapp';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
@@ -26,10 +27,9 @@ export async function handleFallback(
 
     // Notificar al admin del negocio — best-effort
     try {
-      const { data: adminStaff } = await supabase
-        .from('staff')
+      const { data: adminStaff } = await tenantDb(supabase, business.id)
+        .table('staff')
         .select('whatsapp_id')
-        .eq('business_id', business.id)
         .eq('role', 'admin')
         .eq('active', true)
         .limit(1)

@@ -16,6 +16,7 @@
 // texto del usuario (value / message_raw / question).
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { tenantDb } from '../../tenantDb';
 import { withRetry } from '../../utils/retry';
 import { logBotError } from '../../utils/logger';
 import {
@@ -109,8 +110,7 @@ export function logClassifierOutput(input: {
     try {
       await withRetry(
         async () => {
-          const { error } = await supabase.from('bot_logs').insert({
-            business_id:    businessId,
+          const { error } = await tenantDb(supabase, businessId).table('bot_logs').insert({
             customer_phone: customerPhone,
             state_from:     state,
             state_to:       state,

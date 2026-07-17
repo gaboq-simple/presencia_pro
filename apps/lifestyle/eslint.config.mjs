@@ -21,18 +21,16 @@ const TENANT_TABLES = [
 
 const noRawTenantFrom = {
   // ── Superficie migrada. Tanda 1: app/api. Tanda 2: server actions. Tanda 3:
-  //    src/lib. Tanda 4: los Server Components (page.tsx y similares) → el glob
-  //    pasa a TODO src/app + TODO src/lib. Queda fuera SOLO la última tanda:
-  //    auth/bot (api/auth, api/bot, lib/auth.ts) y el paquete engine (aparte).
-  //    Cuando esos entren, la garantía es global. ──
+  //    src/lib. Tanda 4: Server Components. Tanda 5 (FINAL): auth + bot → se
+  //    retiraron los ignores. El glob cubre TODO src/app + TODO src/lib SIN
+  //    excepciones. Con la config espejo del engine (packages/engine, superficie
+  //    bot/lifestyle), la GARANTÍA es GLOBAL: un `.from('<tabla de tenant>')`
+  //    crudo en cualquier ruta viva de lifestyle es error de lint. Los casos
+  //    legítimos (identidad por auth_id antes de conocer el tenant) llevan
+  //    escape con motivo auditable. ──
   files: [
     'src/app/**/*.{ts,tsx}',
     'src/lib/**/*.{ts,tsx}',
-  ],
-  ignores: [
-    'src/app/api/auth/**',  // login PIN/email — tanda auth
-    'src/app/api/bot/**',   // webhook del bot — tanda bot
-    'src/lib/auth.ts',      // resolución de sesión/identidad por auth_id — tanda auth
   ],
   rules: {
     'no-restricted-syntax': [

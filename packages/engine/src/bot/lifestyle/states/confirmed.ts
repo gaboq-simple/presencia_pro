@@ -11,6 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { sendWhatsAppMeta } from '../../../notifications/whatsapp';
+import { tenantDb } from '../../../tenantDb';
 import { getCatalog, getStaffForService } from '../catalog';
 import { buildSystemPrompt } from '../prompt';
 import { logBot, maskPhone } from '../../../utils/logger';
@@ -84,10 +85,9 @@ export async function handleConfirmed(
   //   starts_at < endsAt AND ends_at > startsAt
   // Equivalente a: NOT (ends_at <= startsAt OR starts_at >= endsAt)
 
-  const { data: slotConflict } = await supabase
-    .from('appointments')
+  const { data: slotConflict } = await tenantDb(supabase, business.id)
+    .table('appointments')
     .select('id')
-    .eq('business_id', business.id)
     .eq('staff_id', context.staffId)
     .not('status', 'in', '("cancelled")')
     .lt('starts_at', endsAt.toISOString())
@@ -118,10 +118,9 @@ export async function handleConfirmed(
 
   // ── Crear cita ────────────────────────────────────────────────────────────
 
-  const { data: apptData, error: apptError } = await supabase
-    .from('appointments')
+  const { data: apptData, error: apptError } = await tenantDb(supabase, business.id)
+    .table('appointments')
     .insert({
-      business_id:  business.id,
       staff_id:     context.staffId,
       service_id:   context.serviceId,
       customer_id:  context.customerId ?? null,
@@ -188,13 +187,12 @@ export async function handleConfirmed(
   // ── Actualizar customer con favoritos ─────────────────────────────────────
 
   if (context.customerId) {
-    await supabase
-      .from('customers')
+    await tenantDb(supabase, business.id)
+      .table('customers')
       .update({
         favorite_staff_id:   context.staffId,
         favorite_service_id: context.serviceId,
       })
-      .eq('business_id', business.id)
       .eq('id', context.customerId);
   }
 
@@ -222,7 +220,6 @@ export async function handleConfirmed(
   const now = Date.now();
 
   type NotifRow = {
-    business_id:    string;
     appointment_id: string;
     customer_phone: string;
     type:           string;
@@ -236,7 +233,6 @@ export async function handleConfirmed(
   const at24h = new Date(startsAt.getTime() - 24 * 60 * 60_000);
   if (at24h.getTime() > now) {
     remindersToInsert.push({
-      business_id:    business.id,
       appointment_id: appointmentId,
       customer_phone: msg.customerPhone,
       type:           'reminder_24h',
@@ -251,7 +247,6 @@ export async function handleConfirmed(
   const at2h = new Date(startsAt.getTime() - 2 * 60 * 60_000);
   if (at2h.getTime() > now) {
     remindersToInsert.push({
-      business_id:    business.id,
       appointment_id: appointmentId,
       customer_phone: msg.customerPhone,
       type:           'reminder_2h',
@@ -266,7 +261,6 @@ export async function handleConfirmed(
   const at1h = new Date(startsAt.getTime() - 1 * 60 * 60_000);
   if (at1h.getTime() > now) {
     remindersToInsert.push({
-      business_id:    business.id,
       appointment_id: appointmentId,
       customer_phone: msg.customerPhone,
       type:           'reminder_1h',
@@ -280,8 +274,8 @@ export async function handleConfirmed(
 
   if (remindersToInsert.length > 0) {
     try {
-      const { error: notifError } = await supabase
-        .from('scheduled_notifications')
+      const { error: notifError } = await tenantDb(supabase, business.id)
+        .table('scheduled_notifications')
         .insert(remindersToInsert);
       if (notifError) throw notifError;
     } catch (err) {

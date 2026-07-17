@@ -24,6 +24,7 @@ import { handleQualifyingService }     from './states/qualifyingService';
 import { handleQualifyingStaff }       from './states/qualifyingStaff';
 import { handleShowingSlots }          from './states/presentingSlots';
 import { getCatalog }                  from './catalog';
+import { tenantDb }                    from '../../tenantDb';
 import { interpret }                   from './interpreter';
 import { buildSystemPrompt }           from './prompt';
 import { answerSideQuestion as buildDerivaAnswer } from './businessContext';
@@ -526,10 +527,9 @@ async function handleModificationOrCancellation(
     // ── Obtener customerId (del contexto o query) ─────────────────────────
     let customerId = context.customerId;
     if (!customerId) {
-      const { data: customerData } = await supabase
-        .from('customers')
+      const { data: customerData } = await tenantDb(supabase, business.id)
+        .table('customers')
         .select('id')
-        .eq('business_id', business.id)
         .eq('phone', msg.customerPhone)
         .maybeSingle();
       customerId = (customerData as { id: string } | null)?.id;
@@ -545,10 +545,9 @@ async function handleModificationOrCancellation(
 
     // ── Buscar cita confirmada futura ─────────────────────────────────────
     const now = new Date();
-    const { data: apptData } = await supabase
-      .from('appointments')
+    const { data: apptData } = await tenantDb(supabase, business.id)
+      .table('appointments')
       .select(`id, starts_at, staff:staff_id(name)`)
-      .eq('business_id', business.id)
       .eq('customer_id', customerId)
       .eq('status', 'confirmed')
       .gt('starts_at', now.toISOString())

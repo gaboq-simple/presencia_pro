@@ -13,7 +13,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { tenantDb, TENANT_TABLES } from '../apps/lifestyle/src/lib/tenantDb';
+// El helper canónico vive en el engine (la app lo re-exporta). Se importa relativo
+// porque el runner de tests (ts-node sin tsconfig-paths) no resuelve el alias.
+import { tenantDb, TENANT_TABLES } from '../packages/engine/src/tenantDb';
 
 // ─── Fake Supabase client (modela PostgREST: eq/in se ANDean) ─────────────────
 
