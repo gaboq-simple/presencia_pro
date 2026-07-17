@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { createClient } from '@/lib/supabase/server';
+import { requireBusinessSession } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import type { MetaWhatsAppCredentials } from '@presenciapro/engine/notifications';
@@ -46,22 +46,6 @@ type BlockRequestRow = {
   urgent: boolean;
   created_at: string;
 };
-
-// ─── Helper: leer staff autenticado ──────────────────────────────────────────
-
-async function getAuthenticatedStaff(userId: string) {
-  const supabase = getAdminClient();
-  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global); el business_id sale de acá, no se conoce antes
-  const { data, error } = await supabase
-    .from('staff')
-    .select('id, name, business_id, role')
-    .eq('auth_id', userId)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return data as { id: string; name: string; business_id: string; role: string };
-}
 
 // ─── Helper: ¿starts_at es hoy o mañana? ─────────────────────────────────────
 
@@ -151,17 +135,19 @@ async function notifyAdminUrgent(
 // ─── POST ─────────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // 1. Auth
-  const authClient = await createClient();
-  const { data: { user } } = await authClient.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  // 1. Auth — sesión de negocio (ls_session PIN/token o Supabase Auth).
+  //    Soporta al barbero por PIN, que antes quedaba fuera (auth.getUser() null → 401).
+  const auth = await requireBusinessSession();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  // 2. Obtener staff — staffId siempre del servidor
-  const staff = await getAuthenticatedStaff(user.id);
-  if (!staff) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-  if (staff.role !== 'barber' && staff.role !== 'assistant') {
+  // 2. Solo barber/assistant CREAN solicitudes (owner/admin las aprueban en [id]).
+  //    staffId siempre del servidor.
+  if (auth.role !== 'barber' && auth.role !== 'assistant') {
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
   }
+  const staffId    = auth.staffId;
+  if (!staffId) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  const businessId = auth.businessId;
 
   // 3. Validar body
   let rawBody: unknown;
@@ -181,12 +167,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const { starts_at, ends_at, reason, urgent } = parsed.data;
 
-  // 4. Insertar solicitud con status='pending'
+  // 4. Insertar solicitud con status='pending'.
+  //    staff_blocks no tiene business_id (se scopea por staff_id) → .from() legítimo,
+  //    fuera del tenant guard; el staff_id es del servidor.
   const supabase = getAdminClient();
   const { data, error } = await supabase
     .from('staff_blocks')
     .insert({
-      staff_id:  staff.id,
+      staff_id:  staffId,
       starts_at,
       ends_at,
       reason:    reason ?? null,
@@ -200,12 +188,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Error al crear solicitud' }, { status: 500 });
   }
 
-  // 5. Notificación urgente: solo si urgent===true Y hoy/mañana — best-effort
+  // 5. Notificación urgente: solo si urgent===true Y hoy/mañana — best-effort.
+  //    El nombre del solicitante se resuelve acá (la sesión por PIN no lo trae).
   if (urgent && isUrgentTiming(starts_at)) {
     try {
+      const { data: meData } = await tenantDb(supabase, businessId)
+        .table('staff')
+        .select('name')
+        .eq('id', staffId)
+        .maybeSingle();
+      const staffName = (meData as { name: string } | null)?.name ?? 'Un miembro del equipo';
       await notifyAdminUrgent(
-        staff.name,
-        staff.business_id,
+        staffName,
+        businessId,
         starts_at,
         ends_at,
         reason,
@@ -223,21 +218,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   void request;
 
-  // 1. Auth
-  const authClient = await createClient();
-  const { data: { user } } = await authClient.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-
-  // 2. Obtener staff
-  const staff = await getAuthenticatedStaff(user.id);
-  if (!staff) return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  // 1. Auth — sesión de negocio (ls_session PIN/token o Supabase Auth)
+  const auth = await requireBusinessSession();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const supabase = getAdminClient();
 
-  // Admin: todas las solicitudes pendientes del negocio (bandeja de aprobaciones)
-  if (staff.role === 'admin') {
+  // Owner/Admin: todas las solicitudes pendientes del negocio (bandeja de aprobaciones)
+  if (auth.role === 'admin' || auth.role === 'owner') {
     // Obtener staff_ids del negocio
-    const { data: staffData, error: staffError } = await tenantDb(supabase, staff.business_id)
+    const { data: staffData, error: staffError } = await tenantDb(supabase, auth.businessId)
       .table('staff')
       .select('id')
       .eq('active', true);
@@ -267,14 +257,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(data as BlockRequestRow[]);
   }
 
-  // Barber / assistant: solicitudes propias de los últimos 30 días
+  // Barber / assistant: solicitudes PROPIAS de los últimos 30 días.
+  //    El scope por staff_id garantiza que un barbero solo ve las suyas.
+  const staffId = auth.staffId;
+  if (!staffId) return NextResponse.json([] as BlockRequestRow[]);
+
   const since = new Date();
   since.setDate(since.getDate() - 30);
 
   const { data, error } = await supabase
     .from('staff_blocks')
     .select('id, starts_at, ends_at, reason, status, urgent, created_at')
-    .eq('staff_id', staff.id)
+    .eq('staff_id', staffId)
     .gte('created_at', since.toISOString())
     .order('created_at', { ascending: false });
 
