@@ -30,6 +30,30 @@ set -euo pipefail
 : "${R2_SECRET_ACCESS_KEY:?Missing R2_SECRET_ACCESS_KEY}"
 : "${R2_ENDPOINT:?Missing R2_ENDPOINT}"
 
+# ── Connection variant: forzar el SESSION POOLER (IPv4) ───────────────────────
+# La conexión DIRECTA (db.<ref>.supabase.co) es IPv6-only y los runners de GitHub
+# Actions son IPv4-only → "Network is unreachable". El transaction pooler (:6543)
+# no sirve para pg_dump. El SESSION POOLER (aws-0-<region>.pooler.supabase.com:5432,
+# user postgres.<ref>) es IPv4 y compatible con pg_dump.
+#
+# Si SUPABASE_DB_URL ya apunta al pooler, se usa tal cual (idempotente). Si es la
+# conexión directa, se reescribe SOLO host+user — el password NO se extrae ni se
+# loguea, son dos sustituciones de string sobre la URL (que vive en env, nunca en
+# el log). Región del proyecto presenciapro: us-east-1 (Supabase get_project).
+SUPABASE_POOLER_REGION="${SUPABASE_POOLER_REGION:-us-east-1}"
+DB_URL="${SUPABASE_DB_URL}"
+if [[ "${DB_URL}" == *"@db."*".supabase.co"* ]]; then
+  REF=$(printf '%s' "${DB_URL}" | sed -E 's#.*@db\.([a-z0-9]+)\.supabase\.co.*#\1#')
+  POOLER_HOST="aws-0-${SUPABASE_POOLER_REGION}.pooler.supabase.com"
+  DB_URL=$(printf '%s' "${DB_URL}" \
+    | sed -E "s#://postgres:#://postgres.${REF}:#" \
+    | sed -E "s#@db\.${REF}\.supabase\.co#@${POOLER_HOST}#")
+  echo "[backup] Conexión directa (IPv6-only) detectada → reescrita al session pooler: ${POOLER_HOST} (user postgres.${REF})"
+else
+  # Diagnóstico sin exponer credenciales: solo el host.
+  echo "[backup] Usando SUPABASE_DB_URL provisto (host: $(printf '%s' "${DB_URL}" | sed -E 's#.*@([^:/?]+).*#\1#'))"
+fi
+
 BUCKET="presenciapro-backups"
 TIMESTAMP=$(date -u +"%Y-%m-%d-%H%M%S")
 WORK_DIR="/tmp/supabase-backup-${TIMESTAMP}"
@@ -50,16 +74,16 @@ SCHEMA_FILE="${WORK_DIR}/schema.sql"
 DATA_FILE="${WORK_DIR}/data.sql"
 
 echo "[backup] Dumping roles (best-effort)..."
-if ! supabase db dump --db-url "${SUPABASE_DB_URL}" --role-only -f "${ROLES_FILE}"; then
+if ! supabase db dump --db-url "${DB_URL}" --role-only -f "${ROLES_FILE}"; then
   echo "[backup] WARN: role dump failed (puede requerir permisos elevados) — continúo sin roles."
   : > "${ROLES_FILE}"
 fi
 
 echo "[backup] Dumping schema..."
-supabase db dump --db-url "${SUPABASE_DB_URL}" -f "${SCHEMA_FILE}"
+supabase db dump --db-url "${DB_URL}" -f "${SCHEMA_FILE}"
 
 echo "[backup] Dumping data..."
-supabase db dump --db-url "${SUPABASE_DB_URL}" --data-only --use-copy -f "${DATA_FILE}"
+supabase db dump --db-url "${DB_URL}" --data-only --use-copy -f "${DATA_FILE}"
 
 cat "${ROLES_FILE}" "${SCHEMA_FILE}" "${DATA_FILE}" > "${DUMP_FILE}"
 
