@@ -6,7 +6,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
-import { createClient as createAuthClient } from '@/lib/supabase/server';
+import { requireOwnerOrAdmin } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 
 function getServiceClient() {
@@ -24,31 +24,19 @@ export async function updateAppointmentStatus(
   appointmentId: string,
   status: 'completed' | 'no_show',
 ): Promise<void> {
-  // 1. Verificar sesión
-  const authClient = await createAuthClient();
-  const {
-    data: { user },
-  } = await authClient.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
+  // 1. Verificar sesión — autoridad admin del negocio (owner o admin), vía
+  //    getCurrentSession (token o Supabase Auth). Rechaza barber/assistant, así
+  //    esta acción sigue siendo inalcanzable para el barbero (sin abrir agujero).
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) throw new Error(auth.status === 401 ? 'Unauthorized' : 'Forbidden');
 
-  // 2. Verificar rol admin y obtener business_id
+  // 2. Actualizar — el helper inyecta .eq('business_id') → aislamiento garantizado.
+  //    modified_by_staff_id firma el audit: el trigger toma el actor de esa columna
+  //    (queda actor_type='staff' + actor_staff_id real, no 'unknown').
   const supabase = getServiceClient();
-  // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global): el business_id SALE de acá, no se puede scopear por él.
-  const { data: staffRecord, error: staffError } = await supabase
-    .from('staff')
-    .select('role, business_id')
-    .eq('auth_id', user.id)
-    .eq('active', true)
-    .maybeSingle();
-
-  if (staffError || !staffRecord || staffRecord.role !== 'admin') {
-    throw new Error('Forbidden');
-  }
-
-  // 3. Actualizar — el helper inyecta .eq('business_id') → aislamiento garantizado
-  const { error } = await tenantDb(supabase, staffRecord.business_id as string)
+  const { error } = await tenantDb(supabase, auth.businessId)
     .table('appointments')
-    .update({ status })
+    .update({ status, modified_by_staff_id: auth.staffId })
     .eq('id', appointmentId);
 
   if (error) throw new Error(`updateAppointmentStatus failed: ${error.message}`);
