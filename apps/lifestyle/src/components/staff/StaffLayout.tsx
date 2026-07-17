@@ -276,7 +276,7 @@ export default function StaffLayout({
         {tab === 'cierre' && (
           <section aria-label="Fin de jornada">
             {isEndOfDay(appointments, date) ? (
-              <EndOfDaySummary appointments={appointments} date={date} staffId={staffId} />
+              <EndOfDaySummary appointments={appointments} date={date} staffId={staffId} timezone={timezone} />
             ) : (
               <div className="rounded-card border border-line bg-card px-4 py-8 text-center shadow-card">
                 <p className="text-sm text-ink-2">Tu resumen del día</p>

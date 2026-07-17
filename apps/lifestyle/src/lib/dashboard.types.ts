@@ -61,6 +61,7 @@ export type AdminStaffPhotoRow = {
 
 import { createClient } from '@supabase/supabase-js';
 import { tenantDb } from '@/lib/tenantDb';
+import { zonedWallTimeToUtc, localDayRangeUtc } from './dayWindow';
 import type {
   AppointmentStatus,
   AppointmentSource,
@@ -274,54 +275,11 @@ type RawMetricsRow = {
 
 // ─── Query: citas del día ─────────────────────────────────────────────────────
 
-/**
- * Instante UTC que corresponde a una hora-de-pared (naive) en una tz IANA.
- * Usa el offset real de la tz en ese instante (México es UTC-6 fijo; maneja DST
- * donde aplique, salvo el borde exacto de una transición a medianoche — irrelevante
- * para límites de día en producción).
- *
- * Exportado (S6-DATA-01): `rescheduleAppointment` lo usa para interpretar la
- * hora-de-pared que recibe como hora del NEGOCIO (no del servidor Vercel=UTC).
- */
-export function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: string): Date {
-  const asIfUtc = new Date(`${dateStr}T${timeStr}Z`).getTime();
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(new Date(asIfUtc));
-  const m: Record<string, string> = {};
-  for (const p of parts) m[p.type] = p.value;
-  const localAsUtc = Date.UTC(
-    Number(m['year']),
-    Number(m['month']) - 1,
-    Number(m['day']),
-    Number(m['hour'] === '24' ? '0' : m['hour']),
-    Number(m['minute']),
-    Number(m['second']),
-  );
-  return new Date(asIfUtc - (localAsUtc - asIfUtc));
-}
-
-/**
- * Rango `[inicio, fin)` del día `date` en la tz del negocio, como instantes UTC ISO.
- * El día local va de 00:00 a 00:00 del día siguiente. Exportado para que otras
- * queries del día (bloqueos, etc.) usen los mismos límites tz-correctos.
- */
-export function localDayRangeUtc(date: string, timeZone: string): { start: string; end: string } {
-  const next = new Date(`${date}T00:00:00Z`);
-  next.setUTCDate(next.getUTCDate() + 1);
-  const nextStr = next.toISOString().slice(0, 10);
-  return {
-    start: zonedWallTimeToUtc(date, '00:00:00', timeZone).toISOString(),
-    end: zonedWallTimeToUtc(nextStr, '00:00:00', timeZone).toISOString(),
-  };
-}
+// Los helpers de límites de día tz-aware (`zonedWallTimeToUtc`, `localDayRangeUtc`)
+// se movieron a `@/lib/dayWindow` (módulo PURO, client-safe) para que un Client
+// Component pueda usarlos sin arrastrar la data-layer al bundle. Se re-exportan acá
+// (importados arriba) para que los importadores existentes sigan igual.
+export { zonedWallTimeToUtc, localDayRangeUtc };
 
 /**
  * Retorna las citas de un día dado con staff, servicio y cliente.
@@ -844,8 +802,24 @@ export async function getStaffDayAppointments(
   businessId: string,
   staffId: string,
   date: string,
+  // tz del negocio ya cargada por el caller (staff/page.tsx). Opcional/retrocompat:
+  // sin ella se consulta. El día se acota a ESTA tz, no a UTC — igual que
+  // getDayAppointments. Sin esto, un negocio UTC-6 perdía las citas ≥18:00 locales
+  // (caían al día UTC siguiente) y la barra del día las dibujaba como hueco libre.
+  timezone?: string,
 ): Promise<DashboardAppointment[]> {
   const supabase = getServiceClient();
+
+  let timeZone = timezone;
+  if (timeZone === undefined) {
+    const { data: bizRow } = await supabase
+      .from('businesses')
+      .select('timezone')
+      .eq('id', businessId)
+      .maybeSingle();
+    timeZone = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
+  }
+  const { start, end } = localDayRangeUtc(date, timeZone);
 
   // businessId (de la sesión del barbero, staff/page.tsx) → el helper inyecta
   // .eq('business_id'); el .eq('staff_id') acota a las citas propias. Antes esto
@@ -872,8 +846,8 @@ export async function getStaffDayAppointments(
       modified_by:modified_by_staff_id(id, name)
     `)
     .eq('staff_id', staffId)
-    .gte('starts_at', `${date}T00:00:00`)
-    .lte('starts_at', `${date}T23:59:59`)
+    .gte('starts_at', start)
+    .lt('starts_at', end)
     .order('starts_at');
 
   if (error) throw new Error(`getStaffDayAppointments failed: ${error.message}`);

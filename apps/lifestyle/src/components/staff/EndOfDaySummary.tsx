@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { localDayRangeUtc } from '@/lib/dayWindow';
 import type { DayAppointmentForStaff } from '@/lib/dashboard.types';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ type Props = {
   appointments: DayAppointmentForStaff[];
   date: string;      // 'YYYY-MM-DD' visualizado
   staffId: string;   // para contar las citas de mañana (RLS-scoped)
+  timezone: string;  // IANA del negocio — acota "mañana" a la tz local, no a UTC
 };
 
 // ─── Pool de frases (v5) ──────────────────────────────────────────────────────
@@ -109,7 +111,7 @@ function Cell({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function EndOfDaySummary({ appointments, date, staffId }: Props) {
+export default function EndOfDaySummary({ appointments, date, staffId, timezone }: Props) {
   const [tomorrowCount, setTomorrowCount] = useState<number | null>(null);
   const phrase = pickPhrase(date);
 
@@ -118,6 +120,9 @@ export default function EndOfDaySummary({ appointments, date, staffId }: Props) 
     if (!staffId) return;
     let cancelled = false;
     const tomorrow = addDays(date, 1);
+    // Ventana de "mañana" en la tz del negocio (no UTC): sin esto el conteo perdía
+    // las citas ≥18:00 locales y contaba las de la noche de hoy como de mañana.
+    const { start, end } = localDayRangeUtc(tomorrow, timezone);
     (async () => {
       const supabase = createClient();
       const { count } = await supabase
@@ -125,14 +130,14 @@ export default function EndOfDaySummary({ appointments, date, staffId }: Props) 
         .select('id', { count: 'exact', head: true })
         .eq('staff_id', staffId)
         .neq('status', 'cancelled')
-        .gte('starts_at', `${tomorrow}T00:00:00`)
-        .lte('starts_at', `${tomorrow}T23:59:59`);
+        .gte('starts_at', start)
+        .lt('starts_at', end);
       if (!cancelled) setTomorrowCount(count ?? 0);
     })();
     return () => {
       cancelled = true;
     };
-  }, [staffId, date]);
+  }, [staffId, date, timezone]);
 
   // ── Gating ──────────────────────────────────────────────────────────────────
   if (!isToday(date)) return null;
