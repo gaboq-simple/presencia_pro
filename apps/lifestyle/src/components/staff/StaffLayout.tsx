@@ -1,84 +1,69 @@
 // ─── StaffLayout ─────────────────────────────────────────────────────────────
-// Client Component — orquesta toda la vista del barbero.
+// Client Component — shell UNIFICADO de la vista del barbero.
 //
-// Responsabilidades:
-//   - Header: nombre + fecha formateada + navegación entre días.
-//   - Suscripción Realtime a sus citas del día (filtrado por staff_id).
-//     · INSERT → refetch + agregar al estado ordenado.
-//     · UPDATE → refetch + reemplazar en el estado.
-//     · DELETE → eliminar del estado por id.
-//   - Limpia el canal en unmount (supabase.removeChannel).
-//   - Resetea appointments cuando cambia la fecha (nueva navegación).
-//   - Distribuye estado a NextClientCard y StaffDayTimeline.
-//   - Renderiza BlockRequestForm y RecurringAvailability con sus datos fijos.
+// Reemplaza las dos vistas separadas (/staff día/semana + /staff/gestion): un solo
+// lugar con tab bar mobile-first → Hoy / Semana / Cierre. El barbero ve y gestiona
+// SOLO sus citas (modelo rico DashboardAppointment acotado por staff_id en el
+// servidor). El panorama del negocio es de recepción, no vive aquí.
+//
+// Pestañas:
+//   · Hoy    → "+ Nueva cita", NextClientCard, ClientProfileCard (cliente ≤2h),
+//              AssistantDayTimeline (completar / no asistió / reagendar / cancelar / notas).
+//   · Semana → BarberWeekView + BlockRequestForm + RecurringAvailability.
+//   · Cierre → EndOfDaySummary (matriz de fin de jornada).
+//
+// Datos: polling cada 30s (ls_session por PIN, sin Supabase Auth → sin Realtime) +
+// refresh optimista post-mutación vía refreshStaffDayAppointments (scopeado al barbero).
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { createClient } from '@/lib/supabase/client';
 import type {
-  DayAppointmentForStaff,
+  DashboardAppointment,
   StaffAvailabilitySlot,
   StaffBlockRequest,
 } from '@/lib/dashboard.types';
+import { refreshStaffDayAppointments } from '@/app/staff/actions';
 import NextClientCard from './NextClientCard';
 import ClientProfileCard from './ClientProfileCard';
-import StaffDayTimeline from './StaffDayTimeline';
+import AssistantDayTimeline from './AssistantDayTimeline';
 import EndOfDaySummary from './EndOfDaySummary';
 import BarberWeekView from './BarberWeekView';
 import BlockRequestForm from './BlockRequestForm';
 import RecurringAvailability from './RecurringAvailability';
+import NewAppointmentForm from './NewAppointmentForm';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
+
+type StaffOption = { id: string; name: string };
 
 export type StaffLayoutProps = {
   staffId: string;
   staffName: string;
   businessId: string;
   date: string;                              // 'YYYY-MM-DD'
-  initialAppointments: DayAppointmentForStaff[];
+  timezone: string;                          // IANA — para la línea "Ahora" del timeline
+  initialAppointments: DashboardAppointment[];
   availability: StaffAvailabilitySlot[];
   initialBlockRequests: StaffBlockRequest[];
-  upcomingCustomerId: string | null;         // cliente con cita en las próximas 2h
-  /** role controla secciones exclusivas de barbero; default 'barber' */
-  role?: 'barber' | 'assistant';
+  staffOptions: StaffOption[];               // [el propio barbero] — se agenda solo a sí mismo
 };
 
-// ─── Realtime row (plano, sin joins) ─────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 
-type AppointmentRowMin = {
-  id: string;
-  starts_at: string;
-};
+const POLL_MS = 30_000; // 30 segundos
 
-// ─── Helper: refetch de una cita con todos sus joins ─────────────────────────
-// Usa browser client (anon key + sesión). RLS garantiza que el barbero
-// solo puede leer sus propias citas.
+const ACTIVE_STATUSES = new Set(['pending', 'confirmed', 'walkin']);
+const TERMINAL_STATUSES = new Set(['completed', 'no_show', 'cancelled']);
 
-async function fetchAppointmentById(
-  id: string,
-): Promise<DayAppointmentForStaff | null> {
-  const supabase = createClient();
+type Tab = 'hoy' | 'semana' | 'cierre';
 
-  const { data, error } = await supabase
-    .from('appointments')
-    .select(`
-      id,
-      starts_at,
-      ends_at,
-      status,
-      source,
-      service:service_id(id, name, duration_minutes),
-      customer:customer_id(id, name, phone)
-    `)
-    .eq('id', id)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return data as unknown as DayAppointmentForStaff;
-}
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'hoy', label: 'Hoy' },
+  { id: 'semana', label: 'Semana' },
+  { id: 'cierre', label: 'Cierre' },
+];
 
 // ─── Helpers de fecha ─────────────────────────────────────────────────────────
 
@@ -101,13 +86,18 @@ function isToday(dateStr: string): boolean {
   return dateStr === new Date().toISOString().slice(0, 10);
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// Mismo predicado que EndOfDaySummary — para saber si mostrar el resumen o el
+// placeholder de la pestaña Cierre (no toca el componente, solo decide el marco).
+function isEndOfDay(appointments: DashboardAppointment[], dateStr: string): boolean {
+  if (!isToday(dateStr)) return false;
+  if (appointments.length === 0) return false;
+  if (appointments.some((a) => ACTIVE_STATUSES.has(a.status))) return false;
+  return appointments.every((a) => TERMINAL_STATUSES.has(a.status));
+}
 
-// ─── Helper: customer_id de la cita próxima en las siguientes 2 horas ─────────
-// Rederiva reactivamente del estado de appointments (cubre actualizaciones Realtime).
-
+// Cliente con cita en las próximas 2h → ficha contextual en Hoy.
 function deriveUpcomingCustomerId(
-  appointments: DayAppointmentForStaff[],
+  appointments: DashboardAppointment[],
 ): string | null {
   const now = Date.now();
   const twoHoursMs = 2 * 60 * 60 * 1000;
@@ -119,154 +109,72 @@ function deriveUpcomingCustomerId(
   return found?.customer?.id ?? null;
 }
 
-type StaffView = 'day' | 'week';
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function StaffLayout({
   staffId,
   staffName,
-  businessId: _businessId,
+  businessId,
   date,
+  timezone,
   initialAppointments,
   availability,
   initialBlockRequests,
-  upcomingCustomerId: _upcomingCustomerIdProp,
-  role = 'barber',
+  staffOptions,
 }: StaffLayoutProps) {
   const router = useRouter();
 
   const [appointments, setAppointments] =
-    useState<DayAppointmentForStaff[]>(initialAppointments);
+    useState<DashboardAppointment[]>(initialAppointments);
   const [syncedDate, setSyncedDate] = useState(date);
   if (syncedDate !== date) {
     setSyncedDate(date);
     setAppointments(initialAppointments);
   }
 
-  // Vista activa — solo relevante para role='barber'
-  const [view, setView] = useState<StaffView>('day');
+  const [tab, setTab] = useState<Tab>('hoy');
+  const [showNewForm, setShowNewForm] = useState(false);
 
-  // Ref para leer la fecha actual dentro del callback de Realtime
-  // sin causar que el effect se re-suscriba al navegar entre días.
+  // Ref para leer la fecha dentro del intervalo sin re-suscribir el polling.
   const dateRef = useRef(date);
   useEffect(() => { dateRef.current = date; });
 
-  // ── Suscripción Realtime — citas del barbero ────────────────────────────────
-  // Solo activa cuando role='barber' y hay staffId válido.
-  // El asistente recibe los datos iniciales del servidor (sin Realtime en Bloque A).
+  // ── Refresh (scopeado al barbero) ───────────────────────────────────────────
+  const refresh = useCallback(async () => {
+    const fresh = await refreshStaffDayAppointments(dateRef.current);
+    setAppointments(fresh);
+  }, []);
+
+  // ── Polling cada 30s ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (role !== 'barber' || !staffId) return;
-
-    const supabase = createClient();
-
-    const channel = supabase
-      .channel(`staff-appointments-${staffId}`)
-      .on<AppointmentRowMin>(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'appointments',
-          filter: `staff_id=eq.${staffId}`,
-        },
-        async (payload: RealtimePostgresChangesPayload<AppointmentRowMin>) => {
-          const currentDate = dateRef.current;
-
-          if (payload.eventType === 'DELETE') {
-            const deletedId = payload.old.id;
-            if (deletedId) {
-              setAppointments((prev) => prev.filter((a) => a.id !== deletedId));
-            }
-            return;
-          }
-
-          const newRow = payload.new;
-          if (!newRow.id || !newRow.starts_at) return;
-
-          // Ignorar citas fuera del día que se está viendo
-          const apptDate = newRow.starts_at.slice(0, 10);
-          if (apptDate !== currentDate) return;
-
-          const updated = await fetchAppointmentById(newRow.id);
-          if (!updated) return;
-
-          if (payload.eventType === 'INSERT') {
-            setAppointments((prev) => {
-              const withNew = [...prev, updated];
-              return withNew.sort((a, b) =>
-                a.starts_at.localeCompare(b.starts_at),
-              );
-            });
-          } else {
-            // UPDATE
-            setAppointments((prev) =>
-              prev.map((a) => (a.id === updated.id ? updated : a)),
-            );
-          }
-        },
-      )
-      .subscribe();
-
-    // Cleanup — libera el canal al desmontar o cuando cambia staffId
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [staffId, role]);
+    const interval = setInterval(() => { void refresh(); }, POLL_MS);
+    return () => clearInterval(interval);
+  }, [refresh]);
 
   // ── Navegación entre días ─────────────────────────────────────────────────
-
   function navigate(targetDate: string) {
     router.push(`/staff?date=${targetDate}`);
   }
 
-  // Rederiva reactivamente del estado (cubre actualizaciones Realtime)
   const upcomingCustomerId = deriveUpcomingCustomerId(appointments);
-
   const prevDate  = addDays(date, -1);
   const nextDate  = addDays(date, +1);
   const todayDate = new Date().toISOString().slice(0, 10);
 
+  // Navegación de día — relevante en Hoy (Semana tiene su propia navegación
+  // interna; Cierre es siempre "hoy").
+  const showDayNav = tab === 'hoy';
+
   return (
-    <div className="min-h-screen bg-canvas bg-grid">
+    <div className="min-h-screen bg-canvas bg-grid pb-20">
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-10 border-b border-line bg-card px-4 py-3">
         <div className="mx-auto max-w-xl">
-          {/* Nombre + toggle Hoy/Semana */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-faint">
-              {staffName}
-            </p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-faint">
+            {staffName}
+          </p>
 
-            {/* Toggle + link gestion — solo para barberos */}
-            {role === 'barber' && (
-              <div className="flex items-center gap-2">
-                <div className="flex rounded-md border border-line p-0.5">
-                  {(['day', 'week'] as StaffView[]).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setView(v)}
-                      className={`rounded px-2.5 py-1 text-xs font-semibold transition-colors ${
-                        view === v
-                          ? 'bg-teal-ink text-card'
-                          : 'text-ink-2 hover:text-ink'
-                      }`}
-                    >
-                      {v === 'day' ? 'Hoy' : 'Semana'}
-                    </button>
-                  ))}
-                </div>
-                <a
-                  href="/staff/gestion"
-                  className="rounded-md border border-line px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-tint-1 hover:text-teal-ink"
-                  title="Vista de gestion"
-                >
-                  Gestion →
-                </a>
-              </div>
-            )}
-          </div>
-
-          {/* Navegación de días — solo en vista día */}
-          {view === 'day' && (
+          {showDayNav && (
             <div className="mt-1 flex items-center justify-between gap-2">
               <button
                 onClick={() => navigate(prevDate)}
@@ -303,40 +211,43 @@ export default function StaffLayout({
       </header>
 
       {/* ── Cuerpo ────────────────────────────────────────────────────────── */}
-      <main className="mx-auto max-w-xl space-y-4 px-4 pb-12 pt-4">
-
-        {view === 'week' ? (
-          /* ── Vista semanal ─────────────────────────────────────────────── */
-          <section aria-label="Vista semanal">
-            <BarberWeekView
-              anchorDate={date}
-              todayAppointments={appointments}
-            />
-          </section>
-        ) : (
-          /* ── Vista diaria (default) ────────────────────────────────────── */
+      <main className="mx-auto max-w-xl space-y-4 px-4 pt-4">
+        {tab === 'hoy' && (
           <>
-            {/* Resumen de fin de día — visible solo cuando no quedan citas activas */}
-            <EndOfDaySummary appointments={appointments} date={date} staffId={staffId} />
+            {/* + Nueva cita */}
+            <button
+              onClick={() => setShowNewForm(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-teal-ink py-3 text-sm font-semibold text-card hover:opacity-90 active:opacity-80"
+            >
+              <span className="text-lg leading-none">+</span>
+              Nueva cita
+            </button>
 
             {/* Ficha contextual del cliente — solo si hay cita en las próximas 2h */}
-            {upcomingCustomerId && (
-              <ClientProfileCard customerId={upcomingCustomerId} />
-            )}
+            {upcomingCustomerId && <ClientProfileCard customerId={upcomingCustomerId} />}
 
             {/* Próximo cliente */}
             <NextClientCard appointments={appointments} date={date} />
 
-            {/* Agenda del día */}
+            {/* Agenda del día — con todas las acciones inline */}
             <section aria-label="Agenda del día">
-              <StaffDayTimeline appointments={appointments} date={date} />
+              <AssistantDayTimeline
+                appointments={appointments}
+                date={date}
+                timezone={timezone}
+                onMutated={() => void refresh()}
+                staffOptions={staffOptions}
+              />
             </section>
           </>
         )}
 
-        {/* ── Sección bottom: solo para barberos (no para asistentes) ──── */}
-        {role === 'barber' && (
+        {tab === 'semana' && (
           <>
+            <section aria-label="Vista semanal">
+              <BarberWeekView anchorDate={date} todayAppointments={appointments} />
+            </section>
+
             <section
               aria-label="Solicitar bloqueo"
               className="rounded-card border border-line bg-card px-4 py-4 shadow-card"
@@ -352,7 +263,59 @@ export default function StaffLayout({
             </section>
           </>
         )}
+
+        {tab === 'cierre' && (
+          <section aria-label="Fin de jornada">
+            {isEndOfDay(appointments, date) ? (
+              <EndOfDaySummary appointments={appointments} date={date} staffId={staffId} />
+            ) : (
+              <div className="rounded-card border border-line bg-card px-4 py-8 text-center shadow-card">
+                <p className="text-sm text-ink-2">Tu resumen del día</p>
+                <p className="mt-1 text-xs text-faint">
+                  Aparece aquí cuando cierres la jornada (todas tus citas completadas o marcadas).
+                </p>
+              </div>
+            )}
+          </section>
+        )}
       </main>
+
+      {/* ── Tab bar (mobile-first) ────────────────────────────────────────── */}
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-card">
+        <div className="mx-auto flex max-w-xl">
+          {TABS.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                aria-current={active ? 'page' : undefined}
+                className={`flex-1 border-t-2 py-3 text-xs font-semibold transition-colors ${
+                  active
+                    ? 'border-teal-ink text-teal-ink'
+                    : 'border-transparent text-faint hover:text-ink-2'
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* ── Modal Nueva cita ──────────────────────────────────────────────── */}
+      {showNewForm && (
+        <NewAppointmentForm
+          businessId={businessId}
+          staffOptions={staffOptions}
+          date={date}
+          onClose={() => setShowNewForm(false)}
+          onCreated={() => {
+            setShowNewForm(false);
+            void refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
