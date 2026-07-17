@@ -391,7 +391,16 @@ type CreateAppointmentInput = {
   force?:        boolean;  // recepción FUERZA un solape intencional (S6-UI-02 PR-4):
                            // marca allow_overlap=true. Solo el panel del asistente lo pasa
                            // (requireAssistantSession) → el bot nunca puede forzar.
+  allowPast?:    boolean;  // walk-in RETROACTIVO: la recepción confirmó "esta hora ya pasó,
+                           // registrar igual". SOLO el walk-in con aviso lo pasa; el form de
+                           // nueva cita NO → una hora pasada ahí se rechaza (visible). El bot
+                           // usa el engine, no esta action, y tiene su propio piso de "no pasado".
 };
+
+// Gracia del guard de pasado: se rechaza una cita cuyo starts_at quedó más de un slot
+// (15 min) por debajo de "ahora". Deja pasar el walk-in "ahora" (el slot en curso), pero
+// atrapa lo claramente pasado. El walk-in retroactivo lo saltea con allowPast.
+const PAST_GRACE_MS = 15 * 60 * 1000;
 
 /**
  * Crea una nueva cita desde la vista del asistente.
@@ -452,6 +461,16 @@ export async function createAssistantAppointment(
   if ((bizCfg?.require_customer_phone ?? false) && !phone) {
     // Validación de cara al usuario → return (los throw se redactan en prod).
     return { error: 'Este negocio requiere el teléfono del cliente para agendar' };
+  }
+
+  // ── Guard de pasado (fuente de verdad, visible) ──────────────────────────
+  // Una cita cuya hora ya pasó (más de un slot) se rechaza acá — de cara al usuario,
+  // no un fallo silencioso. Cierra el pasado para el form de "nueva cita" (que NO pasa
+  // allowPast). El walk-in RETROACTIVO, cuando la recepción confirma el aviso "esta hora
+  // ya pasó", pasa allowPast=true y lo saltea. Comparación por epoch (TZ-agnóstica): el
+  // startsAt ya viene con offset del negocio desde el cliente.
+  if (!input.allowPast && Date.parse(input.startsAt) < Date.now() - PAST_GRACE_MS) {
+    return { error: 'Esa hora ya pasó' };
   }
 
   // ── Tope suave de citas/día por barbero (anti-inflado grosero) ───────────
