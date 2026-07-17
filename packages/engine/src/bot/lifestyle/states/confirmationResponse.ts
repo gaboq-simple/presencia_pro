@@ -12,6 +12,7 @@
 // Retorna StateHandlerResult si el mensaje fue manejado, null si debe caer al router normal.
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
+import { tenantDb }                 from '../../../tenantDb';
 import { sendWhatsAppMeta }         from '../../../notifications/whatsapp';
 import { notifyWaitlist }           from '../scheduling';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
@@ -89,10 +90,9 @@ export async function handleConfirmationResponse(
 
   // ── Resolver customer por teléfono ────────────────────────────────────────
 
-  const { data: customerData } = await supabase
-    .from('customers')
+  const { data: customerData } = await tenantDb(supabase, business.id)
+    .table('customers')
     .select('id')
-    .eq('business_id', business.id)
     .eq('phone', msg.customerPhone)
     .maybeSingle();
 
@@ -105,8 +105,8 @@ export async function handleConfirmationResponse(
   const now  = new Date();
   const in3h = new Date(now.getTime() + 3 * 60 * 60_000);
 
-  const { data: apptData, error: apptQueryError } = await supabase
-    .from('appointments')
+  const { data: apptData, error: apptQueryError } = await tenantDb(supabase, business.id)
+    .table('appointments')
     .select(`
       id,
       starts_at,
@@ -114,7 +114,6 @@ export async function handleConfirmationResponse(
       service:service_id(name),
       customer:customer_id(id, name)
     `)
-    .eq('business_id', business.id)
     .eq('customer_id', customerId)
     .in('status', ['confirmed', 'pending'])
     .gte('starts_at', now.toISOString())
@@ -339,10 +338,9 @@ export async function handleConfirmationResponse(
     try {
       const apptDate = startsAt.toISOString().split('T')[0]!;
 
-      const { data: wlEntry } = await supabase
-        .from('waitlist')
+      const { data: wlEntry } = await tenantDb(supabase, business.id)
+        .table('waitlist')
         .select('id')
-        .eq('business_id', business.id)
         .eq('requested_date', apptDate)
         .eq('status', 'waiting')
         .order('created_at')
@@ -353,6 +351,7 @@ export async function handleConfirmationResponse(
         await notifyWaitlist(
           (wlEntry as { id: string }).id,
           supabase,
+          business.id,
           whatsappToken,
           business.whatsappPhoneNumberId,
           startsAt,

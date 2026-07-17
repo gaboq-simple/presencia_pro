@@ -24,6 +24,7 @@ import { parseTwilioPayload, buildLifestyleMessage as buildTwilioMessage } from 
 import { parseMetaPayload, buildLifestyleMessage as buildMetaMessage } from '@presenciapro/engine/bot/lifestyle/adapters/metaAdapter';
 import { maskPhone } from '@presenciapro/engine/utils';
 import { rateLimit } from '@/lib/rate-limit';
+import { tenantDb } from '@/lib/tenantDb';
 import { bufferAndProcess } from '@/lib/message-buffer';
 import { isTestResetCommand, TEST_RESET_CONFIRMATION } from '@/lib/test-reset';
 
@@ -679,8 +680,8 @@ async function performTestReset(
   businessId: string,
   customerPhone: string,
 ): Promise<void> {
-  await supabase
-    .from('bot_conversations')
+  await tenantDb(supabase, businessId)
+    .table('bot_conversations')
     .update({
       state:        'GREETING',
       context:      {},
@@ -688,7 +689,6 @@ async function performTestReset(
       taken_by:     null,
       taken_at:     null,
     })
-    .eq('business_id', businessId)
     .eq('customer_phone', customerPhone);
 
   console.log(JSON.stringify({
@@ -720,10 +720,9 @@ async function handoffGate(
   customerPhone: string,
   messageBody: string,
 ): Promise<boolean> {
-  const { data: conv } = await supabase
-    .from('bot_conversations')
+  const { data: conv } = await tenantDb(supabase, business.id)
+    .table('bot_conversations')
     .select('id, session_mode, taken_at')
-    .eq('business_id', business.id)
     .eq('customer_phone', customerPhone)
     .maybeSingle();
 
@@ -739,10 +738,9 @@ async function handoffGate(
     const elapsed = Date.now() - new Date(row.taken_at).getTime();
     if (elapsed > HANDOFF_TIMEOUT_MS) {
       const minutesInHuman = Math.round(elapsed / 60_000);
-      await supabase
-        .from('bot_conversations')
+      await tenantDb(supabase, business.id)
+        .table('bot_conversations')
         .update({ session_mode: 'bot', taken_by: null, taken_at: null })
-        .eq('business_id', business.id)
         .eq('customer_phone', customerPhone);
       console.log(JSON.stringify({
         ts:               new Date().toISOString(),
@@ -764,10 +762,9 @@ async function handoffGate(
   }
 
   // Modo 'human' (dentro del timeout) o 'paused': interceptar y persistir
-  const { data: insertedMsg } = await supabase
-    .from('conversation_messages')
+  const { data: insertedMsg } = await tenantDb(supabase, business.id)
+    .table('conversation_messages')
     .insert({
-      business_id:    business.id,
       customer_phone: customerPhone,
       direction:      'inbound',
       body:           messageBody,
@@ -776,7 +773,7 @@ async function handoffGate(
     })
     .select('id')
     .single()
-    .then((r) => r, () => ({ data: null }));
+    .then((r: { data: { id: string } | null }) => r, () => ({ data: null }));
 
   console.log(JSON.stringify({
     ts:              new Date().toISOString(),

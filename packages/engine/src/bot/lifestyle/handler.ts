@@ -21,6 +21,7 @@ import {
   shouldResetConversation,
 } from './context';
 import { dispatch } from './router';
+import { tenantDb } from '../../tenantDb';
 import { classifyIntent, classifyMultiIntent } from './classifier';
 import { selectModel } from './modelRouter';
 import { withRetry } from '../../utils/retry';
@@ -81,10 +82,9 @@ export async function handleLifestyleMessage(
 
   let row: ConversationRow | null = null;
   try {
-    const { data: existingRow, error: selectError } = await supabase
-      .from('bot_conversations')
+    const { data: existingRow, error: selectError } = await tenantDb(supabase, msg.businessId)
+      .table('bot_conversations')
       .select('id, state, context, last_message, last_message_id')
-      .eq('business_id', msg.businessId)
       .eq('customer_phone', msg.customerPhone)
       .maybeSingle();
 
@@ -171,11 +171,10 @@ export async function handleLifestyleMessage(
   try {
     await withRetry(
       async () => {
-        const { error } = await supabase
-          .from('bot_conversations')
+        const { error } = await tenantDb(supabase, msg.businessId)
+          .table('bot_conversations')
           .upsert(
             {
-              business_id:     msg.businessId,
               customer_phone:  msg.customerPhone,
               state:           result.newState,
               context:         serializedContext,
@@ -226,8 +225,7 @@ export async function handleLifestyleMessage(
     try {
       await withRetry(
         async () => {
-          const { error } = await supabase.from('bot_logs').insert({
-            business_id:    msg.businessId,
+          const { error } = await tenantDb(supabase, msg.businessId).table('bot_logs').insert({
             customer_phone: msg.customerPhone,
             state_from:     currentState,
             state_to:       result.newState,

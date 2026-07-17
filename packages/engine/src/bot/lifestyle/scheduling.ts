@@ -15,6 +15,7 @@
 //   Se devuelve como única opción (array de 1 elemento).
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { tenantDb } from '../../tenantDb';
 import { sendWhatsAppMeta } from '../../notifications/whatsapp';
 import type { SlotCandidate, StaffAvailabilityRow, StaffRow } from './types';
 
@@ -204,10 +205,9 @@ async function selectStaffRoundRobin(
   // COUNT de citas por barbero en la fecha solicitada (excluye canceladas)
   // business_id: defensa en profundidad (MT-03) — los staffIds ya vienen
   // pre-filtrados por negocio; el filtro es no-op para datos correctos.
-  const { data } = await supabase
-    .from('appointments')
+  const { data } = await tenantDb(supabase, businessId)
+    .table('appointments')
     .select('staff_id')
-    .eq('business_id', businessId)
     .in('staff_id', staffIds)
     .gte('starts_at', dayStart.toISOString())
     .lt('starts_at',  dayEnd.toISOString())
@@ -251,6 +251,7 @@ type WaitlistEntryRow = {
 export async function notifyWaitlist(
   waitlistId:    string,
   supabase:      SupabaseClient,
+  businessId:    string,   // server-derivado (del caller, ya scopeado por negocio)
   accessToken:   string,
   phoneNumberId: string,
   slotStartsAt:  Date,
@@ -258,9 +259,12 @@ export async function notifyWaitlist(
   slotStaffName: string,
   tz:            string,
 ): Promise<void> {
-  // Cargar entry — solo procesar si sigue en 'waiting'
-  const { data } = await supabase
-    .from('waitlist')
+  const db = tenantDb(supabase, businessId);
+
+  // Cargar entry — solo procesar si sigue en 'waiting'. El helper inyecta
+  // .eq('business_id') → aunque el waitlistId fuera de otro negocio, no lo ve.
+  const { data } = await db
+    .table('waitlist')
     .select('id, business_id, customer:customer_id(id, name, phone), service:service_id(name)')
     .eq('id', waitlistId)
     .eq('status', 'waiting')
@@ -276,8 +280,8 @@ export async function notifyWaitlist(
   const expiresAt  = new Date(notifiedAt.getTime() + 30 * 60_000);
 
   // 1. Marcar como notificado
-  await supabase
-    .from('waitlist')
+  await db
+    .table('waitlist')
     .update({
       status:      'notified',
       notified_at: notifiedAt.toISOString(),
@@ -286,8 +290,7 @@ export async function notifyWaitlist(
     .eq('id', waitlistId);
 
   // 2. Programar expiración
-  await supabase.from('scheduled_notifications').insert({
-    business_id:   entry.business_id,
+  await db.table('scheduled_notifications').insert({
     type:          'waitlist_expiry',
     scheduled_for: expiresAt.toISOString(),
     customer_phone: customer.phone,
@@ -480,10 +483,9 @@ export async function getDayAvailability(
       .eq('day_of_week', dayOfWeek)
       .eq('is_active', true),
 
-    supabase
-      .from('appointments')
+    tenantDb(supabase, businessId)
+      .table('appointments')
       .select('staff_id, starts_at, ends_at')
-      .eq('business_id', businessId)
       .in('staff_id', staffIds)
       .gte('starts_at', dayStartUTC.toISOString())
       .lt('starts_at',  dayEndUTC.toISOString())
@@ -497,10 +499,9 @@ export async function getDayAvailability(
       .gte('starts_at', dayStartUTC.toISOString())
       .lt('starts_at',  dayEndUTC.toISOString()),
 
-    supabase
-      .from('staff_schedule_exceptions')
+    tenantDb(supabase, businessId)
+      .table('staff_schedule_exceptions')
       .select('staff_id, exception_date, available, start_time, end_time')
-      .eq('business_id', businessId)
       .in('staff_id', staffIds)
       .eq('exception_date', dateStr),
   ]);

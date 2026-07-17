@@ -20,6 +20,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
 import type { LifestyleBotContext, LifestyleBotState } from '../../../types/lifestyle.types';
 import { buildSystemPrompt } from '../prompt';
+import { tenantDb } from '../../../tenantDb';
 import { logBot, maskPhone } from '../../../utils/logger';
 import type { MultiIntentClassification } from '../types';
 import {
@@ -78,10 +79,9 @@ export async function handleGreeting(
   let favStaffName: string | null       = null;
   let favServiceName: string | null     = null;
 
-  const { data: existing } = await supabase
-    .from('customers')
+  const { data: existing } = await tenantDb(supabase, business.id)
+    .table('customers')
     .select('id, name, favorite_staff_id, favorite_service_id, last_visit, favorite_staff:favorite_staff_id(name), favorite_service:favorite_service_id(name)')
-    .eq('business_id', business.id)
     .eq('phone', msg.customerPhone)
     .maybeSingle();
 
@@ -96,10 +96,9 @@ export async function handleGreeting(
     isReturning       = true;
   } else {
     const nameToSave = msg.customerName ?? 'Cliente';
-    const { data: inserted, error } = await supabase
-      .from('customers')
+    const { data: inserted, error } = await tenantDb(supabase, business.id)
+      .table('customers')
       .insert({
-        business_id:        business.id,
         phone:              msg.customerPhone,
         name:               nameToSave,
         consent_at:         new Date().toISOString(),
@@ -118,10 +117,9 @@ export async function handleGreeting(
       // lo vio. Re-consultar recupera la liga sin cambiar el flujo. Antes se
       // tragaba el fallo (customerId = '') → una cita agendada después en esta
       // conversación quedaba SIN liga al cliente, en silencio.
-      const { data: recovered } = await supabase
-        .from('customers')
+      const { data: recovered } = await tenantDb(supabase, business.id)
+        .table('customers')
         .select('id, name')
-        .eq('business_id', business.id)
         .eq('phone', msg.customerPhone)
         .maybeSingle();
 

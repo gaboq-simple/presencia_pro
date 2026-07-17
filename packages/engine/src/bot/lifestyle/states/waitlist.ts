@@ -8,6 +8,7 @@
 //   No claro      → FALLBACK
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
+import { tenantDb } from '../../../tenantDb';
 import { getCatalog, getStaffForService } from '../catalog';
 import { findSlotsInNextDays } from '../scheduling';
 import { noonUTCDate, utcToLocalDateStr } from '../tzUtils';
@@ -117,10 +118,9 @@ export async function handleQualifyingWaitlist(
   // Resolver customer_id (puede venir en contexto o requiere lookup)
   let customerId = context.customerId;
   if (!customerId) {
-    const { data: cData } = await supabase
-      .from('customers')
+    const { data: cData } = await tenantDb(supabase, business.id)
+      .table('customers')
       .select('id')
-      .eq('business_id', business.id)
       .eq('phone', msg.customerPhone)
       .maybeSingle();
 
@@ -136,8 +136,7 @@ export async function handleQualifyingWaitlist(
   }
 
   // INSERT en waitlist
-  const { error } = await supabase.from('waitlist').insert({
-    business_id:               business.id,
+  const { error } = await tenantDb(supabase, business.id).table('waitlist').insert({
     customer_id:               customerId,
     service_id:                context.serviceId,
     staff_id:                  context.staffId ?? null,

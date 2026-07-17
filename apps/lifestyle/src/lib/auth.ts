@@ -110,6 +110,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
     if (!user) return null;
 
     const supabase = getServiceClient();
+    // eslint-disable-next-line no-restricted-syntax -- resolución de identidad del actor por auth_id (único global): el business_id SALE de acá (la sesión aún no lo conoce), no se puede scopear por él.
     const { data: rawStaff, error } = await supabase
       .from('staff')
       .select('id, business_id, role, name')

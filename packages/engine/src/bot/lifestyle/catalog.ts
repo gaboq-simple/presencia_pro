@@ -4,6 +4,7 @@
 // Vercel Fluid Compute reutiliza instancias entre requests → cache efectivo.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { tenantDb } from '../../tenantDb';
 import type { ServiceRow, StaffRow } from './types';
 
 // ─── TTL in-memory cache ──────────────────────────────────────────────────────
@@ -37,10 +38,9 @@ export async function getCatalog(
   const cached = serviceCache.get(businessId);
   if (isFresh(cached)) return cached.data;
 
-  const { data, error } = await supabase
-    .from('services')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('services')
     .select('id, name, description, duration_minutes, price, currency, price_min, price_max, price_note')
-    .eq('business_id', businessId)
     .eq('active', true)
     .order('name');
 
@@ -74,10 +74,9 @@ export async function getActiveStaff(
   const cached = staffCache.get(businessId);
   if (isFresh(cached)) return cached.data;
 
-  const { data, error } = await supabase
-    .from('staff')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id, name, whatsapp_id')
-    .eq('business_id', businessId)
     .eq('active', true)
     .order('name');
 
@@ -111,10 +110,9 @@ export async function getStaffForService(
   const cached = staffServiceCache.get(cacheKey);
   if (isFresh(cached)) return cached.data;
 
-  const { data, error } = await supabase
-    .from('staff')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id, name, whatsapp_id, staff_services!inner(service_id)')
-    .eq('business_id', businessId)
     .eq('active', true)
     .eq('staff_services.service_id', serviceId)
     .order('name');

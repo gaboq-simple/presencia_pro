@@ -26,6 +26,7 @@ import {
   SESSION_COOKIE,
 } from '@/lib/session';
 import { rateLimit } from '@/lib/rate-limit';
+import { tenantDb } from '@/lib/tenantDb';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -118,11 +119,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'PIN incorrecto' }, { status: 401 });
   }
 
-  // 3. Buscar el staff con ese PIN DENTRO del negocio resuelto
-  const { data: rows, error } = await admin
-    .from('staff')
+  // 3. Buscar el staff con ese PIN DENTRO del negocio resuelto (business.id sale del
+  //    lookup por slug → server-derivado). El helper inyecta el .eq('business_id'):
+  //    el PIN NUNCA se busca global (dos negocios con el mismo PIN no colisionan).
+  const { data: rows, error } = await tenantDb(admin, business.id)
+    .table('staff')
     .select('id, business_id, name, role')
-    .eq('business_id', business.id)
     .eq('pin', pin)
     .eq('active', true)
     .limit(1);
