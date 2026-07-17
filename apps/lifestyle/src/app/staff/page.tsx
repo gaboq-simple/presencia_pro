@@ -21,6 +21,7 @@ import {
   toDateStr,
 } from '@/lib/dashboard.types';
 import { getCurrentSession } from '@/lib/auth';
+import { tenantDb } from '@/lib/tenantDb';
 import StaffLayout from '@/components/staff/StaffLayout';
 import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
 
@@ -94,8 +95,8 @@ export default async function StaffPage({
     const key = process.env['SUPABASE_SERVICE_ROLE_KEY'];
     if (url && key) {
       const supabase = createClient(url, key);
-      const { data } = await supabase
-        .from('staff')
+      const { data } = await tenantDb(supabase, businessId)
+        .table('staff')
         .select('name')
         .eq('id', staffId)
         .maybeSingle();
@@ -105,7 +106,7 @@ export default async function StaffPage({
 
   // Fetch en paralelo — citas del día + disponibilidad + solicitudes
   const [appointments, availability, blockRequests] = await Promise.all([
-    getStaffDayAppointments(staffId, date),
+    getStaffDayAppointments(businessId, staffId, date),
     getStaffRecurringAvailability(staffId),
     getStaffBlockRequests(staffId),
   ]);

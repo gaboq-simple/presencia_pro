@@ -10,6 +10,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
+import { tenantDb } from '@/lib/tenantDb';
 
 // next/font — variable CSS por fuente
 import { Bebas_Neue } from 'next/font/google';
@@ -204,10 +205,11 @@ async function getBusinessBySlug(slug: string): Promise<SiteBusinessRow | null> 
 
 async function getActiveServices(businessId: string): Promise<SiteServiceRow[]> {
   const supabase = getServiceClient();
-  const { data, error } = await supabase
-    .from('services')
+  // businessId server-derivado: resuelto por getBusinessBySlug (lookup por slug),
+  // NUNCA input crudo del cliente. El helper lo ata al id resuelto.
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('services')
     .select('id, name, description, duration_minutes, price, currency')
-    .eq('business_id', businessId)
     .eq('active', true)
     .order('name');
 
@@ -221,10 +223,9 @@ async function getActiveStaff(businessId: string): Promise<SiteStaffRow[]> {
   // en staff_services), no por role. Un dueño role='admin' que corta aparece; el
   // asistente/recepción (sin servicios) queda fuera. El nested embed va en la misma
   // query — Server Component sin cache, pero es un solo round-trip a tablas chicas.
-  const { data, error } = await supabase
-    .from('staff')
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('staff')
     .select('id, name, role, active, photo_url, services:staff_services(service_id)')
-    .eq('business_id', businessId)
     .eq('active', true)
     .order('name');
 
