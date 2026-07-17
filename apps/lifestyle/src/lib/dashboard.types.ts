@@ -793,17 +793,6 @@ export type BlockRequestWithStaff = StaffBlockRequest & {
 
 // ─── Shapes internos para queries staff ──────────────────────────────────────
 
-type RawStaffAppointmentRow = {
-  id: string;
-  starts_at: string;
-  ends_at: string;
-  status: string;
-  source: string;
-  notes: string | null;
-  service: ServiceRef;
-  customer: CustomerRef | null;
-};
-
 type RawStaffAvailabilityRow = {
   id:          string;
   day_of_week: number;
@@ -838,7 +827,15 @@ type RawBlockWithStaffRow = {
 // ─── Query: citas del barbero para un día ────────────────────────────────────
 
 /**
- * Retorna las citas del día para un barbero específico, con servicio y cliente.
+ * Retorna las citas del día para un barbero específico, con el modelo RICO
+ * `DashboardAppointment` (mismo shape que la vista de gestión) pero acotado a las
+ * citas propias vía `.eq('staff_id')`. Incluye `arrived_at`, `price_charged`,
+ * `adjusted_starts_at`, autoría, etc. — nunca trae citas de otros barberos.
+ *
+ * El shell del barbero (StaffLayout) usa este modelo para alimentar
+ * AssistantDayTimeline con todas sus acciones inline (completar / no asistió /
+ * reagendar / cancelar / notas), sin traer del negocio lo que no es suyo.
+ *
  * @param businessId - UUID del negocio (de la sesión — nunca del cliente). Scopea vía helper.
  * @param staffId    - UUID del staff autenticado (del servidor — nunca del cliente)
  * @param date       - 'YYYY-MM-DD'
@@ -847,7 +844,7 @@ export async function getStaffDayAppointments(
   businessId: string,
   staffId: string,
   date: string,
-): Promise<DayAppointmentForStaff[]> {
+): Promise<DashboardAppointment[]> {
   const supabase = getServiceClient();
 
   // businessId (de la sesión del barbero, staff/page.tsx) → el helper inyecta
@@ -862,8 +859,17 @@ export async function getStaffDayAppointments(
       status,
       source,
       notes,
+      modified_at,
+      allow_overlap,
+      adjusted_starts_at,
+      late_arrival_acknowledged,
+      price_charged,
+      arrived_at,
+      staff:staff_id(id, name),
       service:service_id(id, name, duration_minutes, price, currency),
-      customer:customer_id(id, name, phone)
+      customer:customer_id(id, name, phone),
+      created_by:created_by_staff_id(id, name),
+      modified_by:modified_by_staff_id(id, name)
     `)
     .eq('staff_id', staffId)
     .gte('starts_at', `${date}T00:00:00`)
@@ -872,7 +878,7 @@ export async function getStaffDayAppointments(
 
   if (error) throw new Error(`getStaffDayAppointments failed: ${error.message}`);
 
-  return (data ?? []) as unknown as RawStaffAppointmentRow[] as DayAppointmentForStaff[];
+  return (data ?? []) as unknown as RawAppointmentRow[] as DashboardAppointment[];
 }
 
 // ─── Query: disponibilidad recurrente del barbero ────────────────────────────

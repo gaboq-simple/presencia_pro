@@ -8,13 +8,37 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
-import type { DayAppointmentForStaff, ServiceRef, CustomerRef } from '@/lib/dashboard.types';
+import {
+  getStaffDayAppointments,
+  type DashboardAppointment,
+  type DayAppointmentForStaff,
+  type ServiceRef,
+  type CustomerRef,
+} from '@/lib/dashboard.types';
 
 function getServiceClient() {
   const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
   const key = process.env['SUPABASE_SERVICE_ROLE_KEY'];
   if (!url || !key) throw new Error('Supabase env vars not set');
   return createClient(url, key);
+}
+
+// ─── refreshStaffDayAppointments ──────────────────────────────────────────────
+// Recarga las citas del día del BARBERO autenticado (solo las suyas) para el
+// polling y el refresh post-mutación del shell. Análogo a
+// refreshAssistantAppointments, pero acotado a session.staff_id — nunca devuelve
+// citas del negocio que no sean del barbero.
+
+export async function refreshStaffDayAppointments(
+  date: string,
+): Promise<DashboardAppointment[]> {
+  const session = await getCurrentSession();
+  if (!session || session.type !== 'business') throw new Error('Unauthorized');
+  if (session.role !== 'barber') throw new Error('Forbidden');
+  const staffId = session.staff_id;
+  if (!staffId) throw new Error('No staff_id en la sesión');
+
+  return getStaffDayAppointments(session.business_id, staffId, date);
 }
 
 /**

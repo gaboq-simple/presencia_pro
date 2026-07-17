@@ -20,7 +20,7 @@ import {
   getStaffBlockRequests,
   toDateStr,
 } from '@/lib/dashboard.types';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import StaffLayout from '@/components/staff/StaffLayout';
 import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
@@ -30,19 +30,6 @@ import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
 function isValidDate(s: string | undefined): s is string {
   if (!s) return false;
   return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(`${s}T12:00:00`));
-}
-
-function deriveUpcomingCustomerId(
-  appointments: { starts_at: string; customer: { id: string } | null }[],
-): string | null {
-  const now = Date.now();
-  const twoHoursMs = 2 * 60 * 60 * 1000;
-  const found = appointments.find((a) => {
-    if (!a.customer?.id) return false;
-    const startsAt = new Date(a.starts_at).getTime();
-    return startsAt >= now && startsAt <= now + twoHoursMs;
-  });
-  return found?.customer?.id ?? null;
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -104,14 +91,19 @@ export default async function StaffPage({
     }
   }
 
-  // Fetch en paralelo — citas del día + disponibilidad + solicitudes
-  const [appointments, availability, blockRequests] = await Promise.all([
+  // Fetch en paralelo — citas del día (modelo rico, solo suyas) + disponibilidad +
+  // solicitudes + timezone del negocio (para la línea "Ahora" del timeline).
+  const [appointments, availability, blockRequests, timezone] = await Promise.all([
     getStaffDayAppointments(businessId, staffId, date),
     getStaffRecurringAvailability(staffId),
     getStaffBlockRequests(staffId),
+    getBusinessTimezone(businessId),
   ]);
 
-  const upcomingCustomerId = deriveUpcomingCustomerId(appointments);
+  // El barbero solo se agenda a sí mismo: staffOptions = [él]. El selector de
+  // barbero en "reagendar" y "nueva cita" no ofrece a otros — coherente con
+  // "el barbero ve/gestiona solo sus citas".
+  const staffOptions = [{ id: staffId, name: staffName }];
 
   return (
     <StaffLayout
@@ -119,11 +111,11 @@ export default async function StaffPage({
       staffName={staffName}
       businessId={businessId}
       date={date}
+      timezone={timezone}
       initialAppointments={appointments}
       availability={availability}
       initialBlockRequests={blockRequests}
-      upcomingCustomerId={upcomingCustomerId}
-      role="barber"
+      staffOptions={staffOptions}
     />
   );
 }
