@@ -569,7 +569,9 @@ export default function AssistantDayTimeline({
           })();
 
           return (
-            <div key={appt.id} className={isPast ? 'opacity-50' : undefined}>
+            // id ancla → la barra del día (Paso 2) hace scrollIntoView a esta cita.
+            // scroll-mt compensa el header sticky para que la card no quede tapada.
+            <div key={appt.id} id={`cita-${appt.id}`} className={`scroll-mt-24 ${isPast ? 'opacity-50' : ''}`}>
               {/* Separador "Ahora" — se inserta DESPUES de la ultima cita pasada */}
               {nowSplitIndex === idx && (
                 <div className="flex items-center gap-2 py-1">
