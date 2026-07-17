@@ -50,16 +50,17 @@ if [[ "${DB_URL}" == *"@db."*".supabase.co"* ]]; then
   POOLER_HOST=""
   if [[ -n "${SUPABASE_ACCESS_TOKEN:-}" ]]; then
     echo "[backup] Descubriendo el host del session pooler vía Management API..."
-    POOLER_JSON=$(curl -fsS -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-      "https://api.supabase.com/v1/projects/${REF}/config/database/pooler" 2>/dev/null || true)
-    # Preferir db_host; si no, extraer el host del connection_string del pooler.
-    POOLER_HOST=$(printf '%s' "${POOLER_JSON}" \
-      | grep -oE '"db_host"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
-      | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/' || true)
-    if [[ -z "${POOLER_HOST}" ]]; then
-      POOLER_HOST=$(printf '%s' "${POOLER_JSON}" \
-        | grep -oE '@[a-z0-9.-]+\.pooler\.supabase\.com' | head -1 | sed -E 's/^@//' || true)
+    POOLER_JSON_FILE="$(mktemp)"
+    HTTP_CODE=$(curl -sS -o "${POOLER_JSON_FILE}" -w '%{http_code}' \
+      -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+      "https://api.supabase.com/v1/projects/${REF}/config/database/pooler" 2>/dev/null || echo "000")
+    echo "[backup] Management API /config/database/pooler → HTTP ${HTTP_CODE}"
+    if [[ "${HTTP_CODE}" == "200" ]]; then
+      # El host aparece en db_host o dentro del connection_string. Se extrae SOLO
+      # el host (nunca se loguea el body: el connection_string trae el password).
+      POOLER_HOST=$(grep -oE '[a-z0-9-]+\.pooler\.supabase\.com' "${POOLER_JSON_FILE}" | head -1 || true)
     fi
+    rm -f "${POOLER_JSON_FILE}"
   fi
   if [[ -z "${POOLER_HOST}" ]]; then
     POOLER_HOST="aws-0-${SUPABASE_POOLER_REGION}.pooler.supabase.com"
