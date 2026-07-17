@@ -20,18 +20,13 @@ const TENANT_TABLES = [
 ].join('|');
 
 const noRawTenantFrom = {
-  // ── Superficie migrada. Fase 2 tanda 1: TODO app/api (menos auth y bot).
-  //    Tanda 2: los server actions (`'use server'`). Tanda 3: TODO src/lib (la
-  //    capa de lectura de las vistas) menos auth.ts (tanda auth). Los server
-  //    actions se listan por archivo a propósito — NO por directorio — para no
-  //    arrastrar los Server Components de app/ (p.ej. staff/page.tsx), tandas
-  //    posteriores. Las siguientes tandas suman esos pages, engine y auth/bot
-  //    hasta cubrir todo src/. ──
+  // ── Superficie migrada. Tanda 1: app/api. Tanda 2: server actions. Tanda 3:
+  //    src/lib. Tanda 4: los Server Components (page.tsx y similares) → el glob
+  //    pasa a TODO src/app + TODO src/lib. Queda fuera SOLO la última tanda:
+  //    auth/bot (api/auth, api/bot, lib/auth.ts) y el paquete engine (aparte).
+  //    Cuando esos entren, la garantía es global. ──
   files: [
-    'src/app/api/**/*.{ts,tsx}',
-    'src/app/staff/assistant-actions.ts',
-    'src/app/staff/actions.ts',
-    'src/app/dashboard/actions.ts',
+    'src/app/**/*.{ts,tsx}',
     'src/lib/**/*.{ts,tsx}',
   ],
   ignores: [

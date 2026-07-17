@@ -839,18 +839,22 @@ type RawBlockWithStaffRow = {
 
 /**
  * Retorna las citas del día para un barbero específico, con servicio y cliente.
- * @param staffId - UUID del staff autenticado (del servidor — nunca del cliente)
- * @param date    - 'YYYY-MM-DD'
+ * @param businessId - UUID del negocio (de la sesión — nunca del cliente). Scopea vía helper.
+ * @param staffId    - UUID del staff autenticado (del servidor — nunca del cliente)
+ * @param date       - 'YYYY-MM-DD'
  */
 export async function getStaffDayAppointments(
+  businessId: string,
   staffId: string,
   date: string,
 ): Promise<DayAppointmentForStaff[]> {
   const supabase = getServiceClient();
 
-  // eslint-disable-next-line no-restricted-syntax -- scoped por staff_id server-derivado (sesión del barbero, staff/page.tsx); NO hay businessId en scope y el staff_id es único global → ya acota al tenant. Sin superficie cross-tenant.
-  const { data, error } = await supabase
-    .from('appointments')
+  // businessId (de la sesión del barbero, staff/page.tsx) → el helper inyecta
+  // .eq('business_id'); el .eq('staff_id') acota a las citas propias. Antes esto
+  // vivía escapado (sin businessId en scope); la tanda de Server Components lo cerró.
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('appointments')
     .select(`
       id,
       starts_at,
