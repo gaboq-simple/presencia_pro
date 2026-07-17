@@ -91,13 +91,17 @@ export default async function StaffPage({
     }
   }
 
-  // Fetch en paralelo — citas del día (modelo rico, solo suyas) + disponibilidad +
-  // solicitudes + timezone del negocio (para la línea "Ahora" del timeline).
-  const [appointments, availability, blockRequests, timezone] = await Promise.all([
-    getStaffDayAppointments(businessId, staffId, date),
+  // La tz del negocio se resuelve PRIMERO: acota el día de las citas a la tz local
+  // (no a UTC) y alimenta la línea "Ahora" del timeline. Sin esto, un negocio UTC-6
+  // perdía sus citas ≥18:00 locales (caían al día UTC siguiente).
+  const timezone = await getBusinessTimezone(businessId);
+
+  // Fetch en paralelo — citas del día (modelo rico, solo suyas, día en tz local) +
+  // disponibilidad + solicitudes.
+  const [appointments, availability, blockRequests] = await Promise.all([
+    getStaffDayAppointments(businessId, staffId, date, timezone),
     getStaffRecurringAvailability(staffId),
     getStaffBlockRequests(staffId),
-    getBusinessTimezone(businessId),
   ]);
 
   // El barbero solo se agenda a sí mismo: staffOptions = [él]. El selector de

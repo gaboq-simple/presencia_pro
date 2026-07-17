@@ -6,8 +6,9 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
+import { localDayRangeUtc } from '@/lib/dayWindow';
 import {
   getStaffDayAppointments,
   type DashboardAppointment,
@@ -137,7 +138,13 @@ export async function getBarberWeekAppointments(
   const weekStart = toDateStr(monday);
   const weekEnd   = toDateStr(sunday);
 
-  // 3. Query — todos los appointments del barbero en esa semana
+  // 3. Query — todos los appointments del barbero en esa semana.
+  // La ventana se acota a la tz del negocio (lunes 00:00 → lunes siguiente 00:00
+  // locales), no a UTC. Sin esto, un negocio UTC-6 perdía las citas ≥18:00 locales
+  // (caían al día UTC siguiente) y la semana quedaba con huecos falsos.
+  const timezone = await getBusinessTimezone(session.business_id);
+  const weekStartUtc = localDayRangeUtc(weekStart, timezone).start;   // lunes 00:00 local
+  const weekEndUtc   = localDayRangeUtc(weekEnd, timezone).end;       // martes 00:00 local (fin exclusivo del domingo)
   const supabase = getServiceClient();
 
   const { data, error } = await tenantDb(supabase, session.business_id)
@@ -153,15 +160,17 @@ export async function getBarberWeekAppointments(
       customer:customer_id(id, name, phone)
     `)
     .eq('staff_id', staffId)
-    .gte('starts_at', `${weekStart}T00:00:00`)
-    .lte('starts_at', `${weekEnd}T23:59:59`)
+    .gte('starts_at', weekStartUtc)
+    .lt('starts_at', weekEndUtc)
     .order('starts_at');
 
   if (error) throw new Error(`getBarberWeekAppointments failed: ${error.message}`);
 
   const rows = (data ?? []) as unknown as RawWeekRow[];
 
-  // 4. Agrupar por fecha local (YYYY-MM-DD de starts_at)
+  // 4. Agrupar por fecha LOCAL del negocio (no el slice UTC de starts_at, que metía
+  //    una cita de las 19:00 MX en el día siguiente).
+  const localDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
   const grouped: Record<string, DayAppointmentForStaff[]> = {};
 
   for (let i = 0; i < 7; i++) {
@@ -171,7 +180,7 @@ export async function getBarberWeekAppointments(
   }
 
   for (const row of rows) {
-    const dateKey = row.starts_at.slice(0, 10);
+    const dateKey = localDateFmt.format(new Date(row.starts_at)); // 'YYYY-MM-DD' local
     if (dateKey in grouped) {
       (grouped[dateKey] as DayAppointmentForStaff[]).push(
         row as unknown as DayAppointmentForStaff,
