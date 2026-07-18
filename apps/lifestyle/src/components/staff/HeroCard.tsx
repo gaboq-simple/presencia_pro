@@ -173,6 +173,9 @@ export default function HeroCard({ appointments, timezone, onMutated, onRegister
   const { appt, startMin, endMin } = sel.item!;
   const name = appt.customer?.name ?? 'Cliente';
   const serviceName = appt.service?.name ?? '';
+  // "Ya está acá": el próximo que espera y ya llegó (arrived_at). Solo tiene sentido
+  // en 'upcoming' (en 'serving' ya lo estás atendiendo; es obvio).
+  const arrived = sel.mode === 'upcoming' && !!appt.arrived_at;
 
   // Pill + subtítulo relativo por estado (contra el horario PROGRAMADO).
   let pill: string;
@@ -189,22 +192,32 @@ export default function HeroCard({ appointments, timezone, onMutated, onRegister
   } else {
     pill = 'Sigue';
     pillClass = 'bg-tint-1 text-teal-ink';
-    relative = `Llega en ${formatRel(startMin - nowMin)}`;
+    // Si el próximo YA LLEGÓ (arrived_at, lo marcó recepción o el barbero) → está
+    // sentado esperando. No tiene sentido "Llega en Z" ni el botón Llegó.
+    relative = arrived ? 'Te espera' : `Llega en ${formatRel(startMin - nowMin)}`;
   }
 
-  // Botones por estado: serving/overdue = Terminó / No vino; upcoming = Llegó / No vino.
+  // Botones: serving/overdue = Terminó / No vino; upcoming no-llegó = Llegó / No vino;
+  // upcoming + llegó = solo No vino (Llegó ya no aplica; No vino es el escape si se va).
   const primary =
     sel.mode === 'upcoming'
       ? { label: 'Llegó', onClick: () => run(markArrived, appt.id, 'No se pudo marcar la llegada.') }
       : { label: 'Terminó', onClick: () => run(completeAppointment, appt.id, 'No se pudo completar la cita.') };
   const secondary = { label: 'No vino', onClick: () => run(noShowAppointment, appt.id, 'No se pudo marcar como no asistió.') };
+  const showPrimary = !arrived;  // arrived-upcoming → sin Llegó
 
   const btnH = pinned ? 'h-10' : 'h-[50px]';
 
   return (
     <div className="rounded-card border border-line border-l-4 border-l-teal-border bg-card px-4 py-3 shadow-card">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-pill px-2 py-0.5 text-[10.5px] font-semibold ${pillClass}`}>{pill}</span>
+        {arrived && (
+          <span className="inline-flex items-center gap-1 rounded-pill bg-teal-ink px-2 py-0.5 text-[10.5px] font-semibold text-card">
+            <span className="h-1.5 w-1.5 rounded-full bg-card" aria-hidden="true" />
+            Ya está acá
+          </span>
+        )}
         {!pinned && (
           <span className="text-[11px] tabular-nums text-faint">
             {minutesToHHMM(startMin)}–{minutesToHHMM(endMin)}
@@ -222,13 +235,15 @@ export default function HeroCard({ appointments, timezone, onMutated, onRegister
       )}
 
       <div className="mt-3 flex gap-2">
-        <button
-          onClick={primary.onClick}
-          disabled={isPending}
-          className={`flex-1 ${btnH} rounded-xl bg-teal-ink text-sm font-semibold text-card transition hover:opacity-90 active:opacity-80 disabled:opacity-50`}
-        >
-          {primary.label}
-        </button>
+        {showPrimary && (
+          <button
+            onClick={primary.onClick}
+            disabled={isPending}
+            className={`flex-1 ${btnH} rounded-xl bg-teal-ink text-sm font-semibold text-card transition hover:opacity-90 active:opacity-80 disabled:opacity-50`}
+          >
+            {primary.label}
+          </button>
+        )}
         <button
           onClick={secondary.onClick}
           disabled={isPending}
