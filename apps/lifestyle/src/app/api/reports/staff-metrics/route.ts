@@ -21,7 +21,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { getPeriodRange, toDateStr } from '@/lib/dashboard.types';
 import type { StaffMetrics, StaffMetricsPeriod } from '@/lib/dashboard.types';
@@ -124,8 +124,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   try {
-    // 4. Rango del período — reutiliza el helper existente
-    const { start, end } = getPeriodRange(period, date);
+    // 4. Rango del período — acotado a la tz del negocio (bordes correctos, no UTC)
+    const timeZone = await getBusinessTimezone(businessId);
+    const { start, end } = getPeriodRange(period, date, timeZone);
 
     // 5. Staff activo del negocio
     const { data: staffData, error: staffDataError } = await tenantDb(supabase, businessId)
@@ -149,7 +150,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       .select('staff_id, status, customer_id, price_charged, service:service_id(price)')
       .in('staff_id', staffIds)
       .gte('starts_at', start)
-      .lte('starts_at', end)
+      .lt('starts_at', end)
       .in('status', ['completed', 'no_show', 'cancelled']);
 
     if (apptError) throw new Error(`appointments query failed: ${apptError.message}`);

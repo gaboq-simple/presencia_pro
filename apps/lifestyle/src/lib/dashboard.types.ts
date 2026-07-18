@@ -540,13 +540,21 @@ export async function getPeriodMetrics(
   date: string,
 ): Promise<PeriodMetrics> {
   const supabase = getServiceClient();
-  const { start, end } = getPeriodRange(period, date);
+
+  // tz del negocio → los bordes del período se acotan a la tz local, no a UTC.
+  const { data: bizRow } = await supabase
+    .from('businesses')
+    .select('timezone')
+    .eq('id', businessId)
+    .maybeSingle();
+  const timeZone = (bizRow as { timezone: string | null } | null)?.timezone ?? 'America/Mexico_City';
+  const { start, end } = getPeriodRange(period, date, timeZone);
 
   const { data, error } = await tenantDb(supabase, businessId)
     .table('appointments')
     .select('status, source, starts_at, customer_id, price_charged, service:service_id(price, currency)')
     .gte('starts_at', start)
-    .lte('starts_at', end);
+    .lt('starts_at', end);
 
   if (error) throw new Error(`getPeriodMetrics failed: ${error.message}`);
 
@@ -660,20 +668,27 @@ export async function getPeriodMetrics(
 
 // ─── Helper: rango de fechas por período ─────────────────────────────────────
 
+// Rango de un período (día/semana/mes) como instantes UTC, acotado a la tz del
+// NEGOCIO — no a UTC. `start` = 00:00 local del PRIMER día (inclusivo); `end` =
+// 00:00 local del día SIGUIENTE al ÚLTIMO (exclusivo → los consumidores usan
+// `.lt(end)`). Sin esto, en México (UTC-6) los bordes del período se corrían ~6h y
+// una cita del último día a las 19:00 caía fuera. Devuelve además `startDate`/
+// `endDate` ('YYYY-MM-DD') para los labels del período (weekly los usa; no derivar
+// de `end`, que ahora apunta al día siguiente).
 export function getPeriodRange(
   period: MetricsPeriod,
   date: string,
-): { start: string; end: string } {
+  timezone: string,
+): { start: string; end: string; startDate: string; endDate: string } {
   const d = new Date(`${date}T12:00:00`);  // mediodía para evitar DST edge cases
 
-  if (period === 'day') {
-    return {
-      start: `${date}T00:00:00`,
-      end: `${date}T23:59:59`,
-    };
-  }
+  let firstDate: string;
+  let lastDate: string;
 
-  if (period === 'week') {
+  if (period === 'day') {
+    firstDate = date;
+    lastDate = date;
+  } else if (period === 'week') {
     // Semana: lunes → domingo
     const day = d.getDay();                        // 0=domingo
     const diffToMonday = day === 0 ? -6 : 1 - day;
@@ -681,18 +696,21 @@ export function getPeriodRange(
     monday.setDate(d.getDate() + diffToMonday);
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
-    return {
-      start: `${toDateStr(monday)}T00:00:00`,
-      end: `${toDateStr(sunday)}T23:59:59`,
-    };
+    firstDate = toDateStr(monday);
+    lastDate = toDateStr(sunday);
+  } else {
+    // month
+    const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    firstDate = toDateStr(firstDay);
+    lastDate = toDateStr(lastDay);
   }
 
-  // month
-  const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
-  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
   return {
-    start: `${toDateStr(firstDay)}T00:00:00`,
-    end: `${toDateStr(lastDay)}T23:59:59`,
+    start: localDayRangeUtc(firstDate, timezone).start,   // 00:00 local del primer día
+    end: localDayRangeUtc(lastDate, timezone).end,        // 00:00 local del día siguiente al último (exclusivo)
+    startDate: firstDate,
+    endDate: lastDate,
   };
 }
 

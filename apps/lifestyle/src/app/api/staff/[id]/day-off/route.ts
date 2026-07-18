@@ -26,9 +26,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 import { tenantDb } from '@/lib/tenantDb';
+import { localDayRangeUtc } from '@/lib/dayWindow';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -125,14 +126,20 @@ export async function POST(
     return NextResponse.json({ error: 'Staff no encontrado' }, { status: 404 });
   }
 
+  // Ventana del día en la tz del NEGOCIO (no UTC): sin esto, en México (UTC-6) el
+  // "día" corría de las 18:00 de ayer a las 17:59 de hoy → el chequeo ignoraba las
+  // citas de la tarde y el bloque cubría el día equivocado.
+  const tz = await getBusinessTimezone(businessId);
+  const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, tz);
+
   // 6. Verificar si hay citas confirmadas/pendientes ese dia (si no es force)
   if (!force) {
     const { data: appts } = await db
       .table('appointments')
       .select('id')
       .eq('staff_id', staffId)
-      .gte('starts_at', `${date}T00:00:00`)
-      .lte('starts_at', `${date}T23:59:59`)
+      .gte('starts_at', dayStart)
+      .lt('starts_at', dayEnd)
       .in('status', ['confirmed', 'pending']);
 
     const count = (appts ?? []).length;
@@ -148,16 +155,14 @@ export async function POST(
     }
   }
 
-  // 7. Crear el bloqueo — todo el dia, aprobado directamente
-  const startsAt = `${date}T00:00:00+00:00`;
-  const endsAt   = `${date}T23:59:59+00:00`;
-
+  // 7. Crear el bloqueo — todo el dia (en la tz del negocio), aprobado directamente.
+  //    dayStart..dayEnd = [00:00, 24:00) locales como instantes UTC.
   const { data: block, error: insertError } = await supabase
     .from('staff_blocks')
     .insert({
       staff_id:  staffId,
-      starts_at: startsAt,
-      ends_at:   endsAt,
+      starts_at: dayStart,
+      ends_at:   dayEnd,
       reason:    reason ?? null,
       status:    'approved',
       urgent:    false,

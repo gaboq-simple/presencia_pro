@@ -25,8 +25,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
+import { localDayRangeUtc } from '@/lib/dayWindow';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
 
 // ─── UUID regex ───────────────────────────────────────────────────────────────
@@ -142,16 +143,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     staffId = session.staff_id;
   }
 
-  // ── Date range for the requested day ────────────────────────────────────────
-  const dayStart = `${date}T00:00:00+00:00`;
-  const dayEnd   = `${date}T23:59:59+00:00`;
+  // ── Date range for the requested day — en la tz del NEGOCIO, no UTC ───────────
+  // Sin esto, en México (UTC-6) el "día" corría de las 18:00 de ayer a las 17:59 de
+  // hoy → perdía las citas de la tarde y colaba las de ayer.
+  const tz = await getBusinessTimezone(businessId);
+  const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, tz);
 
   const admin = getAdminClient();
   let query = tenantDb(admin, businessId)
     .table('appointments')
     .select('*')
     .gte('starts_at', dayStart)
-    .lte('starts_at', dayEnd)
+    .lt('starts_at', dayEnd)
     .order('starts_at');
 
   if (staffId) {
