@@ -309,6 +309,9 @@ function SwipeCard({
 
   const name = appt.customer?.name ?? 'Cliente';
   const word = STATE_WORD[state];
+  // Distintivo "Ya está acá": arrived_at seteado y la cita aún activa (en las
+  // resueltas — done/noshow/cancelled — ya no aporta).
+  const arrived = !!appt.arrived_at && state !== 'done' && state !== 'noshow' && state !== 'cancelled';
   const revealRight = dx > 8;  // arrastre a la derecha → Terminó (fondo teal a la izquierda)
   const revealLeft = dx < -8;  // arrastre a la izquierda → No vino (fondo rojo a la derecha)
 
@@ -342,6 +345,14 @@ function SwipeCard({
           <p className={`truncate text-xs ${state === 'done' || state === 'cancelled' ? 'text-past-faint' : 'text-ink-2'}`}>
             {appt.service?.name ?? ''}
           </p>
+          {/* "Ya está acá": arrived_at seteado (recepción o barbero) en una cita aún
+              activa. Es un atributo (no un estado) → la card mantiene su tono. */}
+          {arrived && (
+            <span className="mt-1 inline-flex items-center gap-1 rounded-pill bg-teal-ink px-2 py-0.5 text-[10px] font-semibold text-card">
+              <span className="h-1.5 w-1.5 rounded-full bg-card" aria-hidden="true" />
+              Ya está acá
+            </span>
+          )}
         </div>
         <div className="shrink-0 text-right">
           <p className={`text-sm tabular-nums ${style.ink}`}>{hhmm(appt.starts_at, timezone)}</p>
