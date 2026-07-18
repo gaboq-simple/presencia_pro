@@ -7,7 +7,7 @@
 // servidor). El panorama del negocio es de recepción, no vive aquí.
 //
 // Pestañas:
-//   · Hoy    → "+ Nueva cita", NextClientCard, ClientProfileCard (cliente ≤2h),
+//   · Hoy    → HeroCard (cliente enfrente, fijo, Paso 3), DayBar, "+ Nueva cita",
 //              AssistantDayTimeline (completar / no asistió / reagendar / cancelar / notas).
 //   · Semana → BarberWeekView + BlockRequestForm + RecurringAvailability.
 //   · Cierre → EndOfDaySummary (matriz de fin de jornada).
@@ -25,8 +25,7 @@ import type {
   StaffBlockRequest,
 } from '@/lib/dashboard.types';
 import { refreshStaffDayAppointments } from '@/app/staff/actions';
-import NextClientCard from './NextClientCard';
-import ClientProfileCard from './ClientProfileCard';
+import HeroCard from './HeroCard';
 import DayBar from './DayBar';
 import AssistantDayTimeline from './AssistantDayTimeline';
 import EndOfDaySummary from './EndOfDaySummary';
@@ -96,20 +95,6 @@ function isEndOfDay(appointments: DashboardAppointment[], dateStr: string): bool
   return appointments.every((a) => TERMINAL_STATUSES.has(a.status));
 }
 
-// Cliente con cita en las próximas 2h → ficha contextual en Hoy.
-function deriveUpcomingCustomerId(
-  appointments: DashboardAppointment[],
-): string | null {
-  const now = Date.now();
-  const twoHoursMs = 2 * 60 * 60 * 1000;
-  const found = appointments.find((a) => {
-    if (!a.customer?.id) return false;
-    const startsAt = new Date(a.starts_at).getTime();
-    return startsAt >= now && startsAt <= now + twoHoursMs;
-  });
-  return found?.customer?.id ?? null;
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function StaffLayout({
@@ -135,6 +120,8 @@ export default function StaffLayout({
 
   const [tab, setTab] = useState<Tab>('hoy');
   const [showNewForm, setShowNewForm] = useState(false);
+  // Cita que ocupa el hero → el hilo la muestra como referencia, no duplicada.
+  const [heroApptId, setHeroApptId] = useState<string | null>(null);
 
   // Ref para leer la fecha dentro del intervalo sin re-suscribir el polling.
   const dateRef = useRef(date);
@@ -157,7 +144,6 @@ export default function StaffLayout({
     router.push(`/staff?date=${targetDate}`);
   }
 
-  const upcomingCustomerId = deriveUpcomingCustomerId(appointments);
   const prevDate  = addDays(date, -1);
   const nextDate  = addDays(date, +1);
   const todayDate = new Date().toISOString().slice(0, 10);
@@ -169,7 +155,9 @@ export default function StaffLayout({
   return (
     <div className="min-h-screen bg-canvas bg-grid pb-20">
       {/* ── Header ────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-10 border-b border-line bg-card px-4 py-3">
+      {/* z-20: por encima de la marca del ahora del DayBar (z-10 en <main>), que si no
+          se pinta sobre el hero fijo al scrollear (mismo z → gana el orden del DOM). */}
+      <header className="sticky top-0 z-20 border-b border-line bg-card px-4 py-3">
         <div className="mx-auto max-w-xl">
           <p className="text-xs font-semibold uppercase tracking-wide text-faint">
             {staffName}
@@ -208,6 +196,20 @@ export default function StaffLayout({
               </button>
             </div>
           )}
+
+          {/* Hero — el cliente que tenés enfrente (Paso 3). Fijo (dentro del header
+              sticky) y condensa a barra fina al scrollear. Solo en Hoy. */}
+          {tab === 'hoy' && (
+            <div className="mt-3">
+              <HeroCard
+                appointments={appointments}
+                timezone={timezone}
+                onMutated={() => void refresh()}
+                onRegister={() => setShowNewForm(true)}
+                onHeroAppointmentChange={setHeroApptId}
+              />
+            </div>
+          )}
         </div>
       </header>
 
@@ -232,18 +234,14 @@ export default function StaffLayout({
               Nueva cita
             </button>
 
-            {/* Ficha contextual del cliente — solo si hay cita en las próximas 2h */}
-            {upcomingCustomerId && <ClientProfileCard customerId={upcomingCustomerId} />}
-
-            {/* Próximo cliente */}
-            <NextClientCard appointments={appointments} date={date} />
-
-            {/* Agenda del día — con todas las acciones inline */}
+            {/* Agenda del día — con todas las acciones inline. La cita del hero se
+                muestra como referencia (no duplicada como card completa). */}
             <section aria-label="Agenda del día">
               <AssistantDayTimeline
                 appointments={appointments}
                 date={date}
                 timezone={timezone}
+                heroAppointmentId={heroApptId}
                 onMutated={() => void refresh()}
                 staffOptions={staffOptions}
               />
