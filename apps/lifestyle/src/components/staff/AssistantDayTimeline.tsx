@@ -34,6 +34,7 @@ type Props = {
   timezone: string;             // IANA — para la linea "Ahora"
   onMutated: () => void;
   staffOptions: StaffOption[];  // para el selector de barbero en reagendar
+  heroAppointmentId?: string | null; // cita que ocupa el hero → acá va como referencia
 };
 
 // ─── Config visual ────────────────────────────────────────────────────────────
@@ -495,6 +496,7 @@ export default function AssistantDayTimeline({
   timezone,
   onMutated,
   staffOptions,
+  heroAppointmentId,
 }: Props) {
   // Hora actual (actualiza cada minuto) — solo se usa cuando date === hoy
   const [nowTime, setNowTime] = useState<string | null>(null);
@@ -582,12 +584,24 @@ export default function AssistantDayTimeline({
                   <div className="h-px flex-1 bg-red-400" />
                 </div>
               )}
-              <AssistantAppointmentCard
-                appointment={appt}
-                onMutated={onMutated}
-                date={date}
-                staffOptions={staffOptions}
-              />
+              {appt.id === heroAppointmentId ? (
+                // Referencia: esta cita ocupa el hero (arriba). No se duplica como
+                // card completa. Tocar → sube al hero.
+                <button
+                  onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                  className="flex w-full items-center gap-2 rounded-lg border border-dashed border-line bg-tint-1 px-3 py-2 text-left text-xs font-medium text-teal-ink"
+                >
+                  <span aria-hidden="true">↑</span>
+                  <span className="truncate">{appt.customer?.name ?? 'Cliente'} · lo tenés arriba</span>
+                </button>
+              ) : (
+                <AssistantAppointmentCard
+                  appointment={appt}
+                  onMutated={onMutated}
+                  date={date}
+                  staffOptions={staffOptions}
+                />
+              )}
             </div>
           );
         })}
