@@ -20,7 +20,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { requireOwnerOrAdmin } from '@/lib/auth';
+import { requireOwnerOrAdmin, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { getPeriodRange, toDateStr } from '@/lib/dashboard.types';
 import type { WeeklyReportData } from '@/lib/dashboard.types';
@@ -108,18 +108,21 @@ async function computeWeeklyReport(
   date: string,
 ): Promise<WeeklyReportData> {
   const supabase = getServiceClient();
-  const { start, end } = getPeriodRange('week', date);
+  // Rango de la semana acotado a la tz del negocio (bordes correctos, no UTC).
+  const timeZone = await getBusinessTimezone(businessId);
+  const { start, end, startDate, endDate } = getPeriodRange('week', date, timeZone);
 
-  // Derivar period_start y period_end desde el rango
-  const period_start = start.slice(0, 10);   // 'YYYY-MM-DD'
-  const period_end   = end.slice(0, 10);
+  // Labels del período (lunes/domingo) — de los date labels, NO de `end` (que ahora
+  // apunta al día siguiente al domingo, fin exclusivo).
+  const period_start = startDate;   // 'YYYY-MM-DD' lunes
+  const period_end   = endDate;     // 'YYYY-MM-DD' domingo
 
   // Appointments del período
   const { data: apptData, error: apptError } = await tenantDb(supabase, businessId)
     .table('appointments')
     .select('staff_id, status, customer_id, price_charged, service:service_id(price), staff:staff_id(name)')
     .gte('starts_at', start)
-    .lte('starts_at', end)
+    .lt('starts_at', end)
     .in('status', ['completed', 'no_show']);
 
   if (apptError) throw new Error(`weekly report appointments query: ${apptError.message}`);

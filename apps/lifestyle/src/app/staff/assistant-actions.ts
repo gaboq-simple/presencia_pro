@@ -9,7 +9,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
-import { getDayAppointments, queryStaffBlocksForDay, zonedWallTimeToUtc } from '@/lib/dashboard.types';
+import { getDayAppointments, queryStaffBlocksForDay, zonedWallTimeToUtc, localDayRangeUtc } from '@/lib/dashboard.types';
 import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
@@ -430,12 +430,13 @@ export async function createAssistantAppointment(
   // ── Config del negocio (controles de creación — migración 044) ───────────
   const { data: bizCfgRaw } = await supabase
     .from('businesses')
-    .select('require_customer_phone, max_appointments_per_staff_per_day')
+    .select('require_customer_phone, max_appointments_per_staff_per_day, timezone')
     .eq('id', session.business_id)
     .maybeSingle();
   const bizCfg = bizCfgRaw as {
     require_customer_phone: boolean;
     max_appointments_per_staff_per_day: number;
+    timezone: string | null;
   } | null;
 
   // ── Customer lookup / create ─────────────────────────────────────────────
@@ -481,14 +482,21 @@ export async function createAssistantAppointment(
   // audit trail visible (fase posterior). Es complemento, no reemplazo.
   if (isBarber) {
     const maxPerStaffPerDay = bizCfg?.max_appointments_per_staff_per_day ?? 20;
-    const day = input.startsAt.slice(0, 10); // YYYY-MM-DD (misma convención que getDayAppointments)
+    // El "día" del cap se acota a la tz del NEGOCIO, no a UTC. Dos correcciones:
+    // (1) el día local del instante de la cita (no el slice de un ISO que puede venir
+    //     en UTC), (2) la ventana [00:00, 24:00) locales vía localDayRangeUtc. Sin
+    //     esto el cap medía un día corrido (no contaba las de la tarde / contaba las
+    //     de ayer) → protegía la agenda mal.
+    const tz = bizCfg?.timezone ?? 'America/Mexico_City';
+    const localDay = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(input.startsAt));
+    const { start, end } = localDayRangeUtc(localDay, tz);
     const { count } = await db
       .table('appointments')
       .select('id', { count: 'exact', head: true })
       .eq('staff_id', effectiveStaffId)
       .neq('status', 'cancelled')
-      .gte('starts_at', `${day}T00:00:00`)
-      .lte('starts_at', `${day}T23:59:59`);
+      .gte('starts_at', start)
+      .lt('starts_at', end);
     if ((count ?? 0) >= maxPerStaffPerDay) {
       // Validación de cara al usuario → return (los throw se redactan en prod).
       return { error: 'Alcanzaste el máximo de citas para ese día, contacta al admin' };
