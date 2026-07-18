@@ -8,7 +8,7 @@
 //
 // Pestañas:
 //   · Hoy    → HeroCard (cliente enfrente, fijo, Paso 3), DayBar, "+ Nueva cita",
-//              AssistantDayTimeline (completar / no asistió / reagendar / cancelar / notas).
+//              AppointmentThread (hilo + swipe Terminó/No vino + ficha, Paso 4).
 //   · Semana → BarberWeekView + BlockRequestForm + RecurringAvailability.
 //   · Cierre → EndOfDaySummary (matriz de fin de jornada).
 //
@@ -27,7 +27,7 @@ import type {
 import { refreshStaffDayAppointments } from '@/app/staff/actions';
 import HeroCard from './HeroCard';
 import DayBar from './DayBar';
-import AssistantDayTimeline from './AssistantDayTimeline';
+import AppointmentThread from './AppointmentThread';
 import EndOfDaySummary from './EndOfDaySummary';
 import BarberWeekView from './BarberWeekView';
 import BlockRequestForm from './BlockRequestForm';
@@ -234,10 +234,10 @@ export default function StaffLayout({
               Nueva cita
             </button>
 
-            {/* Agenda del día — con todas las acciones inline. La cita del hero se
-                muestra como referencia (no duplicada como card completa). */}
+            {/* El hilo del día (Paso 4) — cards por tono, swipe Terminó/No vino,
+                tap → ficha con las secundarias. La cita del hero va como referencia. */}
             <section aria-label="Agenda del día">
-              <AssistantDayTimeline
+              <AppointmentThread
                 appointments={appointments}
                 date={date}
                 timezone={timezone}
