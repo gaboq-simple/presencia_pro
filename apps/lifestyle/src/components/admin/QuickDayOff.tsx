@@ -14,25 +14,35 @@
 'use client';
 
 import { useState } from 'react';
+import { todayStrInTz } from '@/lib/dayWindow';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 type Props = {
   staffId:   string;
   staffName: string;
+  /** IANA del negocio — "hoy"/"mañana" son los del negocio, no el día UTC (que
+      post-18:00 MX ya va en mañana y bloqueaba marcar HOY como día libre). */
+  timezone:  string;
   onSaved:   () => void;
   onCancel:  () => void;
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** dateStr + n días — aritmética pura sobre el string (ancla Z, sin tz de nadie). */
+function addDaysStr(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function QuickDayOff({ staffId, staffName, onSaved, onCancel }: Props) {
-  // Fecha por defecto: manana
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-
-  const todayStr = new Date().toISOString().slice(0, 10);
+export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onCancel }: Props) {
+  // "Hoy" del NEGOCIO (min del input: hoy sí se puede marcar libre) y default mañana.
+  const todayStr = todayStrInTz(timezone);
+  const tomorrowStr = addDaysStr(todayStr, 1);
 
   const [date, setDate]               = useState(tomorrowStr);
   const [reason, setReason]           = useState('');

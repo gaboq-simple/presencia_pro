@@ -29,7 +29,7 @@ import { z } from 'zod';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
 import { tenantDb } from '@/lib/tenantDb';
-import { localDayRangeUtc } from '@/lib/dayWindow';
+import { localDayRangeUtc, todayStrInTz } from '@/lib/dayWindow';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -104,8 +104,11 @@ export async function POST(
 
   const { date, reason, force } = parsed.data;
 
-  // 4. Verificar que la fecha no es pasada (permitir hoy y futuro)
-  const today = new Date().toISOString().slice(0, 10);
+  // 4. Verificar que la fecha no es pasada (permitir hoy y futuro).
+  // "Hoy" en la tz del NEGOCIO — con el naive UTC, un admin marcando HOY libre
+  // después de las 18:00 MX recibía "día pasado" (el server ya iba en mañana).
+  const tz = await getBusinessTimezone(businessId);
+  const today = todayStrInTz(tz);
   if (date < today) {
     return NextResponse.json(
       { error: 'No se puede marcar un dia pasado como libre' },
@@ -128,8 +131,8 @@ export async function POST(
 
   // Ventana del día en la tz del NEGOCIO (no UTC): sin esto, en México (UTC-6) el
   // "día" corría de las 18:00 de ayer a las 17:59 de hoy → el chequeo ignoraba las
-  // citas de la tarde y el bloque cubría el día equivocado.
-  const tz = await getBusinessTimezone(businessId);
+  // citas de la tarde y el bloque cubría el día equivocado. (tz ya resuelta arriba,
+  // para el guard de "no pasado".)
   const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, tz);
 
   // 6. Verificar si hay citas confirmadas/pendientes ese dia (si no es force)

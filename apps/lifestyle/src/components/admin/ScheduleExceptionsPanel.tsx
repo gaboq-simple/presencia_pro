@@ -10,6 +10,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useTransition } from 'react';
+import { todayStrInTz } from '@/lib/dayWindow';
 import type { ScheduleException } from '@/app/staff/assistant-actions';
 import {
   getScheduleExceptions,
@@ -21,6 +22,9 @@ import {
 
 type Props = {
   staffId: string;
+  /** IANA del negocio — el min del input es el hoy LOCAL, no el día UTC (que
+      post-18:00 MX ya va en mañana y bloqueaba agregar una excepción para hoy). */
+  timezone: string;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -41,7 +45,7 @@ function trimTime(t: string | null | undefined): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ScheduleExceptionsPanel({ staffId }: Props) {
+export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
   const [exceptions, setExceptions]  = useState<ScheduleException[]>([]);
   const [loading, setLoading]        = useState(true);
   const [loadError, setLoadError]    = useState<string | null>(null);
@@ -180,7 +184,7 @@ export default function ScheduleExceptionsPanel({ staffId }: Props) {
         <input
           type="date"
           value={formDate}
-          min={new Date().toISOString().slice(0, 10)}
+          min={todayStrInTz(timezone)}
           onChange={(e) => { setFormDate(e.target.value); setFormError(null); }}
           className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs text-gray-800 focus:border-gray-400 focus:outline-none"
         />
