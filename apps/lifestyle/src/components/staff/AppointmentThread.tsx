@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
+import type { DriftProjection } from '@/lib/dayDrift';
 import { completeAppointment, noShowAppointment } from '@/app/staff/assistant-actions';
 import AppointmentSheet, { type StaffOption } from './AppointmentSheet';
 
@@ -92,13 +93,16 @@ type Props = {
   staffOptions: StaffOption[];
   heroAppointmentId?: string | null;
   onMutated: () => void;
+  /** El día se corrió (Paso 6): id → proyección. La card muestra la hora vieja
+      tachada y la proyectada al lado. Ya filtradas por el umbral. */
+  projections?: Map<string, DriftProjection>;
 };
 
 type PendingAction = { id: string; kind: 'completed' | 'no_show'; label: string; timer: ReturnType<typeof setTimeout> };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function AppointmentThread({ appointments, date, timezone, staffOptions, heroAppointmentId, onMutated }: Props) {
+export default function AppointmentThread({ appointments, date, timezone, staffOptions, heroAppointmentId, onMutated, projections }: Props) {
   const [nowMin, setNowMin] = useState<number | null>(() => (isToday(date, timezone) ? nowLocalMinutes(timezone) : null));
   const [prevKey, setPrevKey] = useState(`${date}|${timezone}`);
   const key = `${date}|${timezone}`;
@@ -222,6 +226,7 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
                       style={style}
                       timezone={timezone}
                       swipeable={SWIPEABLE.has(state) && !isPendingHere}
+                      projection={projections?.get(appt.id)}
                       onOpen={() => setSheetAppt(appt)}
                       onSwipeRight={() => triggerSwipe(appt, 'completed')}
                       onSwipeLeft={() => triggerSwipe(appt, 'no_show')}
@@ -262,13 +267,14 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
 // ─── SwipeCard ─────────────────────────────────────────────────────────────────
 
 function SwipeCard({
-  appt, state, style, timezone, swipeable, onOpen, onSwipeRight, onSwipeLeft,
+  appt, state, style, timezone, swipeable, projection, onOpen, onSwipeRight, onSwipeLeft,
 }: {
   appt: DashboardAppointment;
   state: BlockState;
   style: { bar: string; bg: string; ink: string; glow: string };
   timezone: string;
   swipeable: boolean;
+  projection?: DriftProjection;
   onOpen: () => void;
   onSwipeRight: () => void;
   onSwipeLeft: () => void;
@@ -355,7 +361,16 @@ function SwipeCard({
           )}
         </div>
         <div className="shrink-0 text-right">
-          <p className={`text-sm tabular-nums ${style.ink}`}>{hhmm(appt.starts_at, timezone)}</p>
+          {/* El día se corrió (Paso 6): hora vieja tachada + la proyectada. Tono
+              neutro — la proyección es un dato, no una alarma. */}
+          {projection ? (
+            <p className={`text-sm tabular-nums ${style.ink}`}>
+              <span className="mr-1.5 text-past-faint line-through">{hhmm(appt.starts_at, timezone)}</span>
+              {hhmm(new Date(projection.projectedStartMs).toISOString(), timezone)}
+            </p>
+          ) : (
+            <p className={`text-sm tabular-nums ${style.ink}`}>{hhmm(appt.starts_at, timezone)}</p>
+          )}
           {word && <p className={`text-[10.5px] font-semibold ${style.ink}`}>{word}</p>}
         </div>
       </button>

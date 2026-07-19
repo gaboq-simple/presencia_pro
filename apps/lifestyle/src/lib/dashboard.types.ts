@@ -121,6 +121,7 @@ export type DashboardAppointment = {
   late_arrival_acknowledged: boolean;  // TRUE si el bot ya procesó un retraso reportado (S6-UI-02 PR-5)
   price_charged: number | null;        // precio SELLADO al completar (migración 049); null si aún no se completó
   arrived_at: string | null;           // timestamp de llegada del cliente (botón "Llegó", Paso 3B); null = no marcado
+  completed_at?: string | null;        // instante REAL del cierre (Paso 6, "el día se corrió"); solo lo trae la query del barbero
 };
 
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
@@ -252,6 +253,7 @@ type RawAppointmentRow = {
   adjusted_starts_at: string | null;
   late_arrival_acknowledged: boolean;
   price_charged: number | null;
+  completed_at?: string | null;  // solo lo selecciona la query del barbero (Paso 6)
 };
 
 // Shape interno del select de staff con availability (one-to-many → array)
@@ -857,6 +859,7 @@ export async function getStaffDayAppointments(
       late_arrival_acknowledged,
       price_charged,
       arrived_at,
+      completed_at,
       staff:staff_id(id, name),
       service:service_id(id, name, duration_minutes, price, currency),
       customer:customer_id(id, name, phone),

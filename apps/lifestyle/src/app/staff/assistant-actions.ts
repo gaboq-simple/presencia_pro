@@ -269,6 +269,10 @@ export async function completeAppointment(appointmentId: string): Promise<{ erro
     .table('appointments')
     .update({
       status:               'completed',
+      // Instante REAL de cierre — fuente única del corrimiento del día (Paso 6).
+      // El early-return idempotente de arriba preserva el timestamp de la PRIMERA
+      // marcación: un re-tap no lo pisa.
+      completed_at:         new Date().toISOString(),
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
     })

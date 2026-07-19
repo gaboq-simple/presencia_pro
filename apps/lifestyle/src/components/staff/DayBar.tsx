@@ -23,6 +23,7 @@
 
 import { useState, useEffect } from 'react';
 import type { DashboardAppointment, StaffAvailabilitySlot } from '@/lib/dashboard.types';
+import type { DriftProjection } from '@/lib/dayDrift';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,9 @@ type Props = {
   availability: StaffAvailabilitySlot[];   // horario semanal recurrente del barbero
   date: string;                             // 'YYYY-MM-DD'
   timezone: string;                         // IANA — tz del negocio
+  /** El día se corrió (Paso 6): id → proyección. El bloque se dibuja en su hora
+      REAL y deja un fantasma punteado donde estaba. Ya filtradas por el umbral. */
+  projections?: Map<string, DriftProjection>;
 };
 
 // ─── Helpers de tiempo ────────────────────────────────────────────────────────
@@ -117,7 +121,7 @@ function occupiedWithin(merged: [number, number][], lo: number, hi: number): num
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function DayBar({ appointments, availability, date, timezone }: Props) {
+export default function DayBar({ appointments, availability, date, timezone, projections }: Props) {
   // Marca del ahora — solo si `date` es hoy en la tz; refresca cada minuto.
   const [nowMin, setNowMin] = useState<number | null>(null);
   const [prevKey, setPrevKey] = useState(`${date}|${timezone}`);
@@ -152,7 +156,22 @@ export default function DayBar({ appointments, availability, date, timezone }: P
         1,
         (new Date(a.ends_at).getTime() - new Date(a.starts_at).getTime()) / 60_000,
       );
-      return { id: a.id, startMin, endMin: startMin + durationMin, status: a.status, appt: a };
+      // El día se corrió (Paso 6): el bloque vive en su hora PROYECTADA (la real)
+      // y el hueco programado queda como fantasma punteado (dispStart ≠ startMin).
+      const proj = projections?.get(a.id);
+      const dispStart = proj
+        ? isoToLocalMinutes(new Date(proj.projectedStartMs).toISOString(), timezone)
+        : startMin;
+      return {
+        id: a.id,
+        startMin,
+        endMin: startMin + durationMin,
+        dispStart,
+        dispEnd: dispStart + durationMin,
+        shifted: dispStart !== startMin,
+        status: a.status,
+        appt: a,
+      };
     })
     .sort((x, y) => x.startMin - y.startMin);
 
@@ -171,12 +190,14 @@ export default function DayBar({ appointments, availability, date, timezone }: P
     );
   }
 
-  // Escala = jornada, EXTENDIDA para que entre cualquier cita fuera de horario.
+  // Escala = jornada, EXTENDIDA para que entre cualquier cita fuera de horario
+  // (incluida la posición PROYECTADA de un bloque corrido — no puede ser invisible).
   let scaleStart = baseStart ?? blocks[0]!.startMin;
   let scaleEnd   = baseEnd   ?? blocks[blocks.length - 1]!.endMin;
   for (const b of blocks) {
     if (b.startMin < scaleStart) scaleStart = b.startMin;
     if (b.endMin > scaleEnd)     scaleEnd   = b.endMin;
+    if (b.dispEnd > scaleEnd)    scaleEnd   = b.dispEnd;
   }
   const span = Math.max(1, scaleEnd - scaleStart);
   const pct = (min: number) => ((min - scaleStart) / span) * 100;
@@ -241,12 +262,27 @@ export default function DayBar({ appointments, availability, date, timezone }: P
           />
         )}
 
-        {/* Bloques de cita */}
-        {blocks.map((b) => {
-          const isLive = nowMin !== null && nowMin >= b.startMin && nowMin < b.endMin && ACTIVE_STATUSES.has(b.status);
+        {/* Fantasmas punteados — el hueco programado que el corrimiento dejó vacío
+            (Paso 6). Debajo de los bloques, no interactivos: son memoria, no cita. */}
+        {blocks.filter((b) => b.shifted).map((b) => {
           const left = pct(b.startMin);
           const width = pct(b.endMin) - left;
-          const label = `${b.appt.customer?.name ?? 'Cita'} · ${minutesToHHMM(b.startMin)}`;
+          return (
+            <div
+              key={`ghost-${b.id}`}
+              className="absolute inset-y-1 rounded-md border border-dashed border-past-line"
+              style={{ left: `${left}%`, width: `max(0.9%, ${width}%)` }}
+              aria-hidden="true"
+            />
+          );
+        })}
+
+        {/* Bloques de cita — en su hora REAL (proyectada si el día se corrió) */}
+        {blocks.map((b) => {
+          const isLive = nowMin !== null && nowMin >= b.dispStart && nowMin < b.dispEnd && ACTIVE_STATUSES.has(b.status);
+          const left = pct(b.dispStart);
+          const width = pct(b.dispEnd) - left;
+          const label = `${b.appt.customer?.name ?? 'Cita'} · ${minutesToHHMM(b.dispStart)}`;
           return (
             <button
               key={b.id}
