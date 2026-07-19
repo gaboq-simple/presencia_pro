@@ -22,18 +22,24 @@ import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
-import { getPeriodRange, toDateStr } from '@/lib/dashboard.types';
+import { getPeriodRange } from '@/lib/dashboard.types';
+import { todayStrInTz } from '@/lib/dayWindow';
 import type { WeeklyReportData } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
 const GetQuerySchema = z.object({
+  // Sin default acá: el ancla default de la semana se resuelve en
+  // computeWeeklyReport, con la tz del NEGOCIO ya cargada. El naive
+  // toDateStr(new Date()) era el día UTC del server — un cron corriendo
+  // domingo ≥18:00 MX (lunes UTC) anclaba la semana NUEVA vacía en vez de
+  // la que acababa de terminar (misma raíz que PR #144).
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
     .refine((s) => !isNaN(Date.parse(`${s}T12:00:00`)), 'date is not valid')
-    .default(() => toDateStr(new Date())),
+    .optional(),
   business_id: z.string().uuid().optional(),
 });
 
@@ -105,12 +111,15 @@ async function resolveAuth(
 
 async function computeWeeklyReport(
   businessId: string,
-  date: string,
+  date?: string,
 ): Promise<WeeklyReportData> {
   const supabase = getServiceClient();
   // Rango de la semana acotado a la tz del negocio (bordes correctos, no UTC).
+  // Sin fecha explícita, el ancla es el "hoy" del NEGOCIO — no el día UTC del
+  // server, que en la frontera (18:00–24:00 MX) cambia de semana entera.
   const timeZone = await getBusinessTimezone(businessId);
-  const { start, end, startDate, endDate } = getPeriodRange('week', date, timeZone);
+  const anchor = date ?? todayStrInTz(timeZone);
+  const { start, end, startDate, endDate } = getPeriodRange('week', anchor, timeZone);
 
   // Labels del período (lunes/domingo) — de los date labels, NO de `end` (que ahora
   // apunta al día siguiente al domingo, fin exclusivo).
@@ -294,7 +303,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     // Si reportes desactivados: retornar sin enviar
     if (!business.report_enabled) {
-      const data = await computeWeeklyReport(auth.businessId, toDateStr(new Date()));
+      const data = await computeWeeklyReport(auth.businessId);
       return NextResponse.json({ sent: false, data });
     }
 
@@ -305,7 +314,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    const data = await computeWeeklyReport(auth.businessId, toDateStr(new Date()));
+    const data = await computeWeeklyReport(auth.businessId);
 
     // Enviar WhatsApp — siempre en try/catch
     let sent = false;

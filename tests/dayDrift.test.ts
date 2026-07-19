@@ -245,6 +245,13 @@ test('todayStrInTz: apenas pasada la medianoche UTC, el hoy de México sigue sie
   assert.equal(todayStrInTz('UTC', instant), '2026-07-19');
 });
 
+test('frontera del cron semanal: lunes 00:30 UTC → el ancla MX sigue siendo domingo', () => {
+  // El reporte semanal ancla su semana en "hoy". Un cron corriendo lunes 00:30
+  // UTC (= domingo 18:30 MX) debe anclar en el DOMINGO (la semana que termina,
+  // con los datos) — el naive daba lunes → la semana nueva, vacía.
+  assert.equal(todayStrInTz('America/Mexico_City', new Date('2026-07-20T00:30:00Z')), '2026-07-19');
+});
+
 test('isTodayInTz se define sobre la misma fuente', () => {
   const instant = new Date('2026-07-19T00:30:00Z');
   assert.equal(isTodayInTz('2026-07-18', 'America/Mexico_City', instant), true);
