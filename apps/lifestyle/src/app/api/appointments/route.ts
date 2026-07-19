@@ -150,9 +150,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { start: dayStart, end: dayEnd } = localDayRangeUtc(date, tz);
 
   const admin = getAdminClient();
+  // Lista explícita = exactamente el shape de AppointmentRow. Nunca select('*'):
+  // una columna nueva en la tabla (completed_at hoy, propinas mañana) NO debe
+  // filtrarse sola por un endpoint (regla de privacidad, Pasos 6–7).
   let query = tenantDb(admin, businessId)
     .table('appointments')
-    .select('*')
+    .select('id, business_id, staff_id, service_id, customer_id, starts_at, ends_at, status, source, notes, price_charged, created_at')
     .gte('starts_at', dayStart)
     .lt('starts_at', dayEnd)
     .order('starts_at');

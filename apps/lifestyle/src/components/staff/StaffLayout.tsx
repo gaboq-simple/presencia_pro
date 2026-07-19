@@ -17,16 +17,18 @@
 
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   DashboardAppointment,
   StaffAvailabilitySlot,
   StaffBlockRequest,
 } from '@/lib/dashboard.types';
+import { computeDayDrift, DRIFT_THRESHOLD_MIN, type DriftProjection } from '@/lib/dayDrift';
 import { refreshStaffDayAppointments } from '@/app/staff/actions';
 import HeroCard from './HeroCard';
 import DayBar from './DayBar';
+import DayDriftNotice from './DayDriftNotice';
 import AppointmentThread from './AppointmentThread';
 import EndOfDaySummary from './EndOfDaySummary';
 import BarberWeekView from './BarberWeekView';
@@ -86,6 +88,12 @@ function isToday(dateStr: string): boolean {
   return dateStr === new Date().toISOString().slice(0, 10);
 }
 
+// Hoy en la TZ DEL NEGOCIO (mismo predicado que DayBar/Thread) — el corrimiento
+// del día solo existe para el hoy local del negocio, nunca del browser.
+function isTodayInTz(dateStr: string, tz: string): boolean {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()) === dateStr;
+}
+
 // Mismo predicado que EndOfDaySummary — para saber si mostrar el resumen o el
 // placeholder de la pestaña Cierre (no toca el componente, solo decide el marco).
 function isEndOfDay(appointments: DashboardAppointment[], dateStr: string): boolean {
@@ -126,6 +134,42 @@ export default function StaffLayout({
   // Ref para leer la fecha dentro del intervalo sin re-suscribir el polling.
   const dateRef = useRef(date);
   useEffect(() => { dateRef.current = date; });
+
+  // ── El día se corrió (Paso 6) ─────────────────────────────────────────────
+  // Tick del ahora (solo cliente, solo si `date` es hoy en la tz del negocio —
+  // null en SSR evita hydration mismatch y el drift aparece tras hidratar).
+  // Reset a null en el sync de render (patrón DayBar) — no setState en el effect.
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  const [prevDriftKey, setPrevDriftKey] = useState(`${date}|${timezone}`);
+  const driftKey = `${date}|${timezone}`;
+  if (prevDriftKey !== driftKey) {
+    setPrevDriftKey(driftKey);
+    if (!isTodayInTz(date, timezone)) setNowMs(null);
+  }
+  useEffect(() => {
+    if (!isTodayInTz(date, timezone)) return;
+    const update = () => setNowMs(Date.now());
+    update();
+    const id = setInterval(update, 30_000);
+    return () => clearInterval(id);
+  }, [date, timezone]);
+
+  // El corrimiento nace SOLO de completed_at (módulo puro dayDrift). El umbral
+  // (10 min) gatea TODAS las superficies: aviso, horas tachadas y fantasma de la
+  // barra — por debajo, el día se muestra como siempre.
+  const drift = useMemo(
+    () => (nowMs === null ? null : computeDayDrift(appointments, nowMs)),
+    [appointments, nowMs],
+  );
+  const driftVisible = drift !== null && drift.driftMin >= DRIFT_THRESHOLD_MIN;
+  const driftProjections = useMemo<DriftProjection[]>(
+    () => (driftVisible ? drift!.projections.filter((p) => p.shiftMin >= DRIFT_THRESHOLD_MIN) : []),
+    [drift, driftVisible],
+  );
+  const projectionById = useMemo(
+    () => new Map(driftProjections.map((p) => [p.apptId, p])),
+    [driftProjections],
+  );
 
   // ── Refresh (scopeado al barbero) ───────────────────────────────────────────
   const refresh = useCallback(async () => {
@@ -217,12 +261,15 @@ export default function StaffLayout({
       <main className="mx-auto max-w-xl space-y-4 px-4 pt-4">
         {tab === 'hoy' && (
           <>
-            {/* Barra del día — el ancho es el tiempo (Paso 2) */}
+            {/* Barra del día — el ancho es el tiempo (Paso 2). Con el día corrido,
+                los bloques futuros se desplazan a su hora real y dejan el fantasma
+                punteado donde estaban (Paso 6). */}
             <DayBar
               appointments={appointments}
               availability={availability}
               date={date}
               timezone={timezone}
+              projections={projectionById}
             />
 
             {/* + Nueva cita */}
@@ -234,8 +281,21 @@ export default function StaffLayout({
               Nueva cita
             </button>
 
+            {/* El día se corrió (Paso 6) — aviso NEUTRO arriba del hilo: sujeto =
+                el día, gris, sin alarma. Solo con corrimiento ≥ umbral. */}
+            {driftVisible && nowMs !== null && (
+              <DayDriftNotice
+                projections={driftProjections}
+                appointments={appointments}
+                timezone={timezone}
+                nowMs={nowMs}
+                driftMin={drift!.driftMin}
+              />
+            )}
+
             {/* El hilo del día (Paso 4) — cards por tono, swipe Terminó/No vino,
-                tap → ficha con las secundarias. La cita del hero va como referencia. */}
+                tap → ficha con las secundarias. La cita del hero va como referencia.
+                Con el día corrido, la hora vieja va tachada y la proyectada al lado. */}
             <section aria-label="Agenda del día">
               <AppointmentThread
                 appointments={appointments}
@@ -244,6 +304,7 @@ export default function StaffLayout({
                 heroAppointmentId={heroApptId}
                 onMutated={() => void refresh()}
                 staffOptions={staffOptions}
+                projections={projectionById}
               />
             </section>
           </>
