@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { getDayAppointments, queryStaffBlocksForDay, zonedWallTimeToUtc, localDayRangeUtc } from '@/lib/dashboard.types';
+import { todayStrInTz } from '@/lib/dayWindow';
 import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
@@ -1356,8 +1357,11 @@ export async function getScheduleExceptions(
     const to = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
     query = query.gte('exception_date', from).lt('exception_date', to);
   } else {
-    const today = new Date().toISOString().slice(0, 10);
-    query = query.gte('exception_date', today);
+    // "Desde hoy en adelante" — hoy del NEGOCIO, no el día UTC del server: con el
+    // naive, post-18:00 MX la lista omitía la excepción de HOY (recién marcada,
+    // desaparecía del panel).
+    const tz = await getBusinessTimezone(session.business_id);
+    query = query.gte('exception_date', todayStrInTz(tz));
   }
 
   const { data, error } = await query;

@@ -40,6 +40,8 @@ type Props = {
   staffId:      string;
   staffName:    string;
   availability: StaffAvailabilitySlot[];
+  /** IANA del negocio — baja a ScheduleExceptionsPanel para el min del input. */
+  timezone:     string;
   onSaved:      () => void;
   onCancel:     () => void;
 };
@@ -83,6 +85,7 @@ export default function StaffScheduleEditor({
   staffId,
   staffName,
   availability,
+  timezone,
   onSaved,
   onCancel,
 }: Props) {
@@ -304,7 +307,7 @@ export default function StaffScheduleEditor({
         <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
           Excepciones de horario
         </p>
-        <ScheduleExceptionsPanel staffId={staffId} />
+        <ScheduleExceptionsPanel staffId={staffId} timezone={timezone} />
       </div>
     </div>
   );

@@ -29,6 +29,8 @@ type Props = {
   initialStaff: AdminStaffManagementRow[];
   /** Servicios activos del negocio — para el editor de "qué servicios hace" el barbero. */
   activeServices: ServiceOption[];
+  /** IANA del negocio — el "hoy" de día libre/excepciones es el hoy LOCAL, no el día UTC. */
+  timezone: string;
 };
 
 // ─── Modal state ──────────────────────────────────────────────────────────────
@@ -58,7 +60,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function StaffManagementPanel({ initialStaff, activeServices }: Props) {
+export default function StaffManagementPanel({ initialStaff, activeServices, timezone }: Props) {
   const [staff, setStaff] = useState<AdminStaffManagementRow[]>(initialStaff);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [pinEditId, setPinEditId]   = useState<string | null>(null);
@@ -465,6 +467,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices }: P
                 staffId={modal.staffId}
                 staffName={modal.staffName}
                 availability={modal.availability}
+                timezone={timezone}
                 onSaved={closeModal}
                 onCancel={closeModal}
               />
@@ -473,6 +476,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices }: P
               <QuickDayOff
                 staffId={modal.staffId}
                 staffName={modal.staffName}
+                timezone={timezone}
                 onSaved={closeModal}
                 onCancel={closeModal}
               />

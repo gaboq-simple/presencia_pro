@@ -252,6 +252,18 @@ test('frontera del cron semanal: lunes 00:30 UTC → el ancla MX sigue siendo do
   assert.equal(todayStrInTz('America/Mexico_City', new Date('2026-07-20T00:30:00Z')), '2026-07-19');
 });
 
+test('cluster de excepciones: el piso "desde hoy" y el min del input no saltan a mañana de noche', () => {
+  // Días libres/excepciones son fechas FUTURAS ancladas en "hoy": a las 18:30 MX
+  // (00:30 UTC) el min del date input y el filtro exception_date >= hoy deben
+  // seguir aceptando/incluyendo el HOY del negocio — el naive UTC lo bloqueaba
+  // (min=mañana) y omitía la excepción de hoy de la lista.
+  const instant = new Date('2026-07-19T00:30:00Z');
+  const floor = todayStrInTz('America/Mexico_City', instant);
+  assert.equal(floor, '2026-07-18');
+  assert.ok('2026-07-18' >= floor, 'hoy MX pasa el guard "no pasado" y el min del input');
+  assert.ok('2026-07-18'.localeCompare(floor) >= 0, 'la excepción de hoy queda en la lista (>= piso)');
+});
+
 test('isTodayInTz se define sobre la misma fuente', () => {
   const instant = new Date('2026-07-19T00:30:00Z');
   assert.equal(isTodayInTz('2026-07-18', 'America/Mexico_City', instant), true);
