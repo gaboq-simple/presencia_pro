@@ -19,6 +19,7 @@ import type {
   AdminServiceRow,
 } from '@/lib/dashboard.types';
 import { toDateStr } from '@/lib/dashboard.types';
+import { isTodayInTz, todayStrInTz } from '@/lib/dayWindow';
 import DashboardRealtimeProvider from './DashboardRealtimeProvider';
 import MetricsSummary from './MetricsSummary';
 import StaffMetricsPanel from './StaffMetricsPanel';
@@ -41,6 +42,8 @@ type Props = {
   businessId: string;
   businessName: string;
   date: string;                          // 'YYYY-MM-DD'
+  /** IANA del negocio — el "hoy" de "Ir a hoy" es el hoy LOCAL, no el día UTC. */
+  timezone: string;
   appointments: DashboardAppointment[];
   staffList: DashboardStaff[];
   dayRevenue: DayRevenue;
@@ -86,6 +89,7 @@ export default function DashboardLayout({
   businessId,
   businessName,
   date,
+  timezone,
   appointments,
   staffList,
   dayRevenue,
@@ -170,9 +174,9 @@ export default function DashboardLayout({
               <span className="text-sm font-medium capitalize text-gray-800">
                 {formatDateDisplay(date)}
               </span>
-              {date !== toDateStr(new Date()) && (
+              {!isTodayInTz(date, timezone) && (
                 <Link
-                  href={`/dashboard?date=${toDateStr(new Date())}${branchParam}`}
+                  href={`/dashboard?date=${todayStrInTz(timezone)}${branchParam}`}
                   className="mt-0.5 text-xs text-gray-400 underline hover:text-gray-600"
                 >
                   Ir a hoy

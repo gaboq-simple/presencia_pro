@@ -18,8 +18,8 @@ import {
   getStaffDayAppointments,
   getStaffRecurringAvailability,
   getStaffBlockRequests,
-  toDateStr,
 } from '@/lib/dashboard.types';
+import { todayStrInTz } from '@/lib/dayWindow';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import StaffLayout from '@/components/staff/StaffLayout';
@@ -41,12 +41,12 @@ export default async function StaffPage({
   searchParams: Promise<{ date?: string; view?: string }>;
 }) {
   const { date: rawDate, view: rawView } = await searchParams;
-  const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
 
   // Shim de compatibilidad — bookmarks/links viejos a /staff?view=manage
-  // se redirigen a la ruta propia /staff/gestion (preservando la fecha).
+  // se redirigen a la ruta propia /staff/gestion (preservando la fecha EXPLÍCITA;
+  // el default de "hoy" lo resuelve el destino, con la tz del negocio).
   if (rawView === 'manage') {
-    redirect(`/staff/gestion?date=${date}`);
+    redirect(isValidDate(rawDate) ? `/staff/gestion?date=${rawDate}` : '/staff/gestion');
   }
 
   // 1. Sesión activa — ls_session (PIN/token) o Supabase Auth
@@ -91,10 +91,13 @@ export default async function StaffPage({
     }
   }
 
-  // La tz del negocio se resuelve PRIMERO: acota el día de las citas a la tz local
-  // (no a UTC) y alimenta la línea "Ahora" del timeline. Sin esto, un negocio UTC-6
-  // perdía sus citas ≥18:00 locales (caían al día UTC siguiente).
+  // La tz del negocio se resuelve PRIMERO: define el "hoy" default, acota el día
+  // de las citas a la tz local (no a UTC) y alimenta la línea "Ahora" del timeline.
+  // Sin esto, un negocio UTC-6 perdía sus citas ≥18:00 locales — y con el default
+  // naive (toDateStr(new Date()) = día UTC del server), un barbero abriendo
+  // después de las 18:00 MX caía directo en el día SIGUIENTE, vacío.
   const timezone = await getBusinessTimezone(businessId);
+  const date = isValidDate(rawDate) ? rawDate : todayStrInTz(timezone);
 
   // Fetch en paralelo — citas del día (modelo rico, solo suyas, día en tz local) +
   // disponibilidad + solicitudes.

@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react';
 import type { DayAppointmentForStaff } from '@/lib/dashboard.types';
 import { getBarberWeekAppointments } from '@/app/staff/actions';
+import { todayStrInTz } from '@/lib/dayWindow';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,8 @@ type Props = {
   anchorDate: string;      // 'YYYY-MM-DD'
   /** Citas ya cargadas para anchorDate — evita fetch duplicado para ese día. */
   todayAppointments: DayAppointmentForStaff[];
+  /** IANA del negocio — el "hoy" resaltado es el hoy LOCAL, no el día UTC del server. */
+  timezone: string;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -44,9 +47,6 @@ function getWeekDates(anchorDate: string): string[] {
   });
 }
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function formatDayLabel(dateStr: string): { abbrev: string; num: number; mon: string } {
   const d = new Date(`${dateStr}T12:00:00`);
@@ -136,8 +136,8 @@ function DayPill({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function BarberWeekView({ anchorDate, todayAppointments }: Props) {
-  const today = todayStr();
+export default function BarberWeekView({ anchorDate, todayAppointments, timezone }: Props) {
+  const today = todayStrInTz(timezone);
   const weekDates = getWeekDates(anchorDate);
 
   const [weekData, setWeekData] = useState<Record<string, DayAppointmentForStaff[]>>(() => {

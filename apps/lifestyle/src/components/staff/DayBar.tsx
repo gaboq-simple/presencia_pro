@@ -24,6 +24,7 @@
 import { useState, useEffect } from 'react';
 import type { DashboardAppointment, StaffAvailabilitySlot } from '@/lib/dashboard.types';
 import type { DriftProjection } from '@/lib/dayDrift';
+import { isTodayInTz } from '@/lib/dayWindow';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -57,10 +58,6 @@ function isoToLocalMinutes(iso: string, timezone: string): number {
 
 function nowLocalMinutes(timezone: string): number {
   return isoToLocalMinutes(new Date().toISOString(), timezone);
-}
-
-function isToday(date: string, timezone: string): boolean {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date()) === date;
 }
 
 /** minutos desde medianoche → 'HH:MM' */
@@ -128,12 +125,12 @@ export default function DayBar({ appointments, availability, date, timezone, pro
   const key = `${date}|${timezone}`;
   if (prevKey !== key) {
     setPrevKey(key);
-    if (!isToday(date, timezone)) setNowMin(null);
+    if (!isTodayInTz(date, timezone)) setNowMin(null);
   }
   useEffect(() => {
     // No-hoy: no arrancar el intervalo. El reset a null lo hace el sync en render
     // (arriba) cuando cambia date/tz — no se llama setState dentro del effect.
-    if (!isToday(date, timezone)) return;
+    if (!isTodayInTz(date, timezone)) return;
     const update = () => setNowMin(nowLocalMinutes(timezone));
     update();
     const id = setInterval(update, 60_000);

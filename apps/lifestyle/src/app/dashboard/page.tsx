@@ -29,9 +29,9 @@ import {
   getActiveStaffWithPhoto,
   getAllStaffForManagement,
   getServicesForManagement,
-  toDateStr,
 } from '@/lib/dashboard.types';
-import { getCurrentSession, getBusinessName, getOrganizationBranches } from '@/lib/auth';
+import { todayStrInTz } from '@/lib/dayWindow';
+import { getCurrentSession, getBusinessName, getBusinessTimezone, getOrganizationBranches } from '@/lib/auth';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import ConsolidatedView from '@/components/admin/ConsolidatedView';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
@@ -118,8 +118,12 @@ export default async function DashboardPage({
     businessId = session.business_id;
   }
 
-  // 2. Resolver fecha desde searchParams (default: hoy)
-  const date = isValidDate(rawDate) ? rawDate : toDateStr(new Date());
+  // 2. Resolver fecha desde searchParams (default: hoy EN LA TZ DEL NEGOCIO).
+  // Con el naive de antes (toDateStr(new Date()) = día UTC del server en Vercel),
+  // el dueño/asistente abriendo después de las 18:00 MX caía en el día siguiente,
+  // vacío. La tz también alimenta el "Ir a hoy" del DashboardLayout.
+  const timezone = await getBusinessTimezone(businessId);
+  const date = isValidDate(rawDate) ? rawDate : todayStrInTz(timezone);
   const dayOfWeek = new Date(`${date}T12:00:00`).getDay(); // 0=dom … 6=sáb
 
   // ── Vista asistente — mesa de control propia (S6-UI-02) ──────────────────
@@ -133,7 +137,9 @@ export default async function DashboardPage({
       getActiveStaffWithAvailability(businessId, dayOfWeek),
       getDayExceptions(businessId, date),
     ]);
-    const { name: businessName, timezone, requireCustomerPhone, maxLateMinutes } = bizConfig;
+    // timezone NO se re-desestructura: ya vive arriba (resolvió el default de
+    // fecha) y es el mismo valor de businesses.timezone.
+    const { name: businessName, requireCustomerPhone, maxLateMinutes } = bizConfig;
 
     // Etapa 2 (paralela): citas + bloqueos del día, reusando la tz y los staffIds
     // ya cargados (evita re-consultar businesses y staff). activeStaffIds = TODOS
@@ -215,6 +221,7 @@ export default async function DashboardPage({
       businessId={businessId}
       businessName={businessName}
       date={date}
+      timezone={timezone}
       appointments={appointments}
       staffList={staffList}
       dayRevenue={dayRevenue}

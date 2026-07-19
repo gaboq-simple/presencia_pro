@@ -14,6 +14,7 @@ import {
   DRIFT_THRESHOLD_MIN,
   type DriftAppt,
 } from '../apps/lifestyle/src/lib/dayDrift';
+import { todayStrInTz, isTodayInTz } from '../apps/lifestyle/src/lib/dayWindow';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -231,4 +232,22 @@ test('adjusted_starts_at manda como inicio efectivo', () => {
 
 test('el umbral exportado es 10 min (decisión cerrada)', () => {
   assert.equal(DRIFT_THRESHOLD_MIN, 10);
+});
+
+// ─── todayStrInTz / isTodayInTz — el "hoy" es el del NEGOCIO, no el del server ─
+// El bug: Vercel corre UTC; a las 00:30 UTC del 19 son las 18:30 del 18 en México.
+// El default naive (toDateStr(new Date())) mandaba al barbero al día siguiente,
+// vacío. La fuente única de "hoy" resuelve en la tz IANA del negocio.
+
+test('todayStrInTz: apenas pasada la medianoche UTC, el hoy de México sigue siendo AYER (UTC)', () => {
+  const instant = new Date('2026-07-19T00:30:00Z'); // 18:30 del 18 en MX
+  assert.equal(todayStrInTz('America/Mexico_City', instant), '2026-07-18');
+  assert.equal(todayStrInTz('UTC', instant), '2026-07-19');
+});
+
+test('isTodayInTz se define sobre la misma fuente', () => {
+  const instant = new Date('2026-07-19T00:30:00Z');
+  assert.equal(isTodayInTz('2026-07-18', 'America/Mexico_City', instant), true);
+  assert.equal(isTodayInTz('2026-07-19', 'America/Mexico_City', instant), false);
+  assert.equal(isTodayInTz('2026-07-19', 'UTC', instant), true);
 });

@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { localDayRangeUtc } from '@/lib/dayWindow';
+import { localDayRangeUtc, isTodayInTz } from '@/lib/dayWindow';
 import type { DayAppointmentForStaff } from '@/lib/dashboard.types';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -64,10 +64,6 @@ const FRASES = [
 
 const TERMINAL_STATUSES = new Set(['completed', 'no_show', 'cancelled']);
 const ACTIVE_STATUSES = new Set(['pending', 'confirmed', 'walkin']);
-
-function isToday(dateStr: string): boolean {
-  return dateStr === new Date().toISOString().slice(0, 10);
-}
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T12:00:00`);
@@ -140,7 +136,9 @@ export default function EndOfDaySummary({ appointments, date, staffId, timezone 
   }, [staffId, date, timezone]);
 
   // ── Gating ──────────────────────────────────────────────────────────────────
-  if (!isToday(date)) return null;
+  // "Hoy" en la tz del NEGOCIO — con el naive UTC, después de las 18:00 MX el
+  // resumen desaparecía (el server ya iba en el día siguiente).
+  if (!isTodayInTz(date, timezone)) return null;
   if (appointments.length === 0) return null;
   if (appointments.some((a) => ACTIVE_STATUSES.has(a.status))) return null;
   if (!appointments.every((a) => TERMINAL_STATUSES.has(a.status))) return null;

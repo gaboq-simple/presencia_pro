@@ -25,6 +25,7 @@ import type {
   StaffBlockRequest,
 } from '@/lib/dashboard.types';
 import { computeDayDrift, DRIFT_THRESHOLD_MIN, type DriftProjection } from '@/lib/dayDrift';
+import { isTodayInTz, todayStrInTz } from '@/lib/dayWindow';
 import { refreshStaffDayAppointments } from '@/app/staff/actions';
 import HeroCard from './HeroCard';
 import DayBar from './DayBar';
@@ -84,20 +85,13 @@ function formatDateHeader(dateStr: string): string {
   });
 }
 
-function isToday(dateStr: string): boolean {
-  return dateStr === new Date().toISOString().slice(0, 10);
-}
-
-// Hoy en la TZ DEL NEGOCIO (mismo predicado que DayBar/Thread) — el corrimiento
-// del día solo existe para el hoy local del negocio, nunca del browser.
-function isTodayInTz(dateStr: string, tz: string): boolean {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()) === dateStr;
-}
-
 // Mismo predicado que EndOfDaySummary — para saber si mostrar el resumen o el
 // placeholder de la pestaña Cierre (no toca el componente, solo decide el marco).
-function isEndOfDay(appointments: DashboardAppointment[], dateStr: string): boolean {
-  if (!isToday(dateStr)) return false;
+// "Hoy" en la tz del NEGOCIO (isTodayInTz canónico) — con el naive de antes, un
+// barbero después de las 18:00 MX nunca veía su cierre (el server UTC ya iba en
+// el día siguiente).
+function isEndOfDay(appointments: DashboardAppointment[], dateStr: string, tz: string): boolean {
+  if (!isTodayInTz(dateStr, tz)) return false;
   if (appointments.length === 0) return false;
   if (appointments.some((a) => ACTIVE_STATUSES.has(a.status))) return false;
   return appointments.every((a) => TERMINAL_STATUSES.has(a.status));
@@ -190,7 +184,8 @@ export default function StaffLayout({
 
   const prevDate  = addDays(date, -1);
   const nextDate  = addDays(date, +1);
-  const todayDate = new Date().toISOString().slice(0, 10);
+  // "Hoy" del NEGOCIO (no del browser/server) — destino del botón "Ir a hoy".
+  const todayDate = todayStrInTz(timezone);
 
   // Navegación de día — relevante en Hoy (Semana tiene su propia navegación
   // interna; Cierre es siempre "hoy").
@@ -221,7 +216,7 @@ export default function StaffLayout({
                 <p className="text-sm font-semibold capitalize text-ink">
                   {formatDateHeader(date)}
                 </p>
-                {!isToday(date) && (
+                {!isTodayInTz(date, timezone) && (
                   <button
                     onClick={() => navigate(todayDate)}
                     className="mt-0.5 text-xs text-teal-ink underline hover:text-teal-border"
@@ -313,7 +308,7 @@ export default function StaffLayout({
         {tab === 'semana' && (
           <>
             <section aria-label="Vista semanal">
-              <BarberWeekView anchorDate={date} todayAppointments={appointments} />
+              <BarberWeekView anchorDate={date} todayAppointments={appointments} timezone={timezone} />
             </section>
 
             <section
@@ -334,7 +329,7 @@ export default function StaffLayout({
 
         {tab === 'cierre' && (
           <section aria-label="Fin de jornada">
-            {isEndOfDay(appointments, date) ? (
+            {isEndOfDay(appointments, date, timezone) ? (
               <EndOfDaySummary appointments={appointments} date={date} staffId={staffId} timezone={timezone} />
             ) : (
               <div className="rounded-card border border-line bg-card px-4 py-8 text-center shadow-card">
