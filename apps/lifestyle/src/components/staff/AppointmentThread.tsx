@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import type { DriftProjection } from '@/lib/dayDrift';
+import { isTodayInTz } from '@/lib/dayWindow';
 import { completeAppointment, noShowAppointment } from '@/app/staff/assistant-actions';
 import AppointmentSheet, { type StaffOption } from './AppointmentSheet';
 
@@ -59,9 +60,6 @@ function isoToLocalMinutes(iso: string, timezone: string): number {
   return (h === 24 ? 0 : h) * 60 + m;
 }
 function nowLocalMinutes(tz: string): number { return isoToLocalMinutes(new Date().toISOString(), tz); }
-function isToday(date: string, tz: string): boolean {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date()) === date;
-}
 function hhmm(iso: string, tz: string): string {
   return new Intl.DateTimeFormat('es-MX', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 }
@@ -103,12 +101,12 @@ type PendingAction = { id: string; kind: 'completed' | 'no_show'; label: string;
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AppointmentThread({ appointments, date, timezone, staffOptions, heroAppointmentId, onMutated, projections }: Props) {
-  const [nowMin, setNowMin] = useState<number | null>(() => (isToday(date, timezone) ? nowLocalMinutes(timezone) : null));
+  const [nowMin, setNowMin] = useState<number | null>(() => (isTodayInTz(date, timezone) ? nowLocalMinutes(timezone) : null));
   const [prevKey, setPrevKey] = useState(`${date}|${timezone}`);
   const key = `${date}|${timezone}`;
-  if (prevKey !== key) { setPrevKey(key); if (!isToday(date, timezone)) setNowMin(null); }
+  if (prevKey !== key) { setPrevKey(key); if (!isTodayInTz(date, timezone)) setNowMin(null); }
   useEffect(() => {
-    if (!isToday(date, timezone)) return;
+    if (!isTodayInTz(date, timezone)) return;
     const update = () => setNowMin(nowLocalMinutes(timezone));
     update();
     const id = setInterval(update, 30_000);

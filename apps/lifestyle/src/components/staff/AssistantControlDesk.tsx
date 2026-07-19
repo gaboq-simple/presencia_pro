@@ -54,6 +54,7 @@ import {
   availableIntervals,
   overlapAt,
 } from './panoramaEngine';
+import { isTodayInTz, todayStrInTz } from '@/lib/dayWindow';
 
 const POLL_MS = 20_000; // 20s — auto-refresh de la mesa de control (se pausa en gesto)
 
@@ -131,15 +132,6 @@ function formatDateHeader(dateStr: string): string {
   return d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-// Hoy en la tz del NEGOCIO (no UTC): entre 18:00 y 24:00 en México, la fecha UTC
-// ya es "mañana" y rompería el "Hoy" del header. 'en-CA' → 'YYYY-MM-DD'.
-function isTodayInTz(dateStr: string, timeZone: string): boolean {
-  return dateStr === new Date().toLocaleDateString('en-CA', { timeZone });
-}
-
-function todayInTz(timeZone: string): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone });
-}
 
 // Instante UTC ISO de una hora-de-pared (min desde medianoche) en la tz del negocio.
 // Espejo de zonedWallTimeToUtc de dashboard.types.ts — para el update optimista del drop.
@@ -858,7 +850,7 @@ export default function AssistantControlDesk({
               {/* Siempre presente para reservar su espacio; invisible en Hoy (no
                   reflowea la nav de día al cambiar de fecha). */}
               <button
-                onClick={() => navigate(todayInTz(timezone))}
+                onClick={() => navigate(todayStrInTz(timezone))}
                 disabled={today}
                 aria-hidden={today}
                 tabIndex={today ? -1 : undefined}

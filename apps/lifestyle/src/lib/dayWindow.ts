@@ -42,6 +42,30 @@ export function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: s
 }
 
 /**
+ * "Hoy" ('YYYY-MM-DD') en la timezone del NEGOCIO — la única fuente de verdad.
+ *
+ * Nunca `new Date().toISOString().slice(0,10)` ni `toDateStr(new Date())`: esos
+ * leen la tz del proceso (Vercel = UTC) o del browser, y después de las 18:00 en
+ * México (UTC-6) ya devuelven el día SIGUIENTE — el barbero abría /staff de noche
+ * y veía su día vacío. Nombre IANA siempre, jamás un offset hardcodeado.
+ *
+ * `now` es inyectable solo para tests deterministas.
+ */
+export function todayStrInTz(timeZone: string, now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+/** ¿`dateStr` es hoy en la tz del negocio? Definido sobre todayStrInTz (una sola fuente). */
+export function isTodayInTz(dateStr: string, timeZone: string, now: Date = new Date()): boolean {
+  return dateStr === todayStrInTz(timeZone, now);
+}
+
+/**
  * Rango `[inicio, fin)` del día `date` en la tz del negocio, como instantes UTC ISO.
  * El día local va de 00:00 a 00:00 del día siguiente. Exportado para que otras
  * queries del día (bloqueos, etc.) usen los mismos límites tz-correctos.
