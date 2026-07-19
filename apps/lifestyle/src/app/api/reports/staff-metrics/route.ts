@@ -23,7 +23,8 @@ import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
-import { getPeriodRange, toDateStr } from '@/lib/dashboard.types';
+import { getPeriodRange } from '@/lib/dashboard.types';
+import { todayStrInTz } from '@/lib/dayWindow';
 import type { StaffMetrics, StaffMetricsPeriod } from '@/lib/dashboard.types';
 
 // ─── Validación de input ──────────────────────────────────────────────────────
@@ -32,11 +33,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const QuerySchema = z.object({
   period: z.enum(['week', 'month']).default('week'),
+  // Sin default acá: el "hoy" default se resuelve DESPUÉS de conocer el negocio,
+  // en su tz (todayStrInTz) — el naive toDateStr(new Date()) es el día UTC del
+  // server, que post-18:00 MX ya va en mañana (misma raíz que PR #144).
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
     .refine((s) => !isNaN(Date.parse(`${s}T12:00:00`)), 'date is not valid')
-    .default(() => toDateStr(new Date())),
+    .optional(),
   business_id: z.string().regex(UUID_RE).optional(),
 });
 
@@ -103,7 +107,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     );
   }
 
-  const { period, date, business_id: requestedId } = parsed.data;
+  const { period, date: rawDate, business_id: requestedId } = parsed.data;
 
   // 3. Resolver business_id autorizado
   let businessId: string;
@@ -124,8 +128,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   try {
-    // 4. Rango del período — acotado a la tz del negocio (bordes correctos, no UTC)
+    // 4. Rango del período — acotado a la tz del negocio (bordes correctos, no UTC).
+    // El ancla default también: "hoy" del NEGOCIO, no el día UTC del server.
     const timeZone = await getBusinessTimezone(businessId);
+    const date = rawDate ?? todayStrInTz(timeZone);
     const { start, end } = getPeriodRange(period, date, timeZone);
 
     // 5. Staff activo del negocio
