@@ -14,7 +14,11 @@ import {
   type ServiceRef,
   type CustomerRef,
 } from '@/lib/dashboard.types';
-import { getBarberDayAppointments, type BarberDayAppointment } from '@/lib/barberDay';
+import {
+  getBarberDayAppointments,
+  getBarberWeekTipTotal,
+  type BarberDayAppointment,
+} from '@/lib/barberDay';
 
 function getServiceClient() {
   const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
@@ -163,6 +167,22 @@ export async function setAppointmentTip(
   }
 
   revalidatePath('/staff');
+}
+
+// ─── refreshBarberWeekTipTotal ────────────────────────────────────────────────
+// Acumulado semanal de propinas para el bloque "Tus propinas" de Cierre.
+// Mismo gate barbero-only que setAppointmentTip: la propina no tiene lectura
+// fuera del módulo barbero (dueño/asistente → Forbidden).
+
+export async function refreshBarberWeekTipTotal(anchorDate: string): Promise<number> {
+  const session = await getCurrentSession();
+  if (!session || session.type !== 'business') throw new Error('Unauthorized');
+  if (session.role !== 'barber') throw new Error('Forbidden');
+  const staffId = session.staff_id;
+  if (!staffId) throw new Error('No staff_id en la sesión');
+
+  const timezone = await getBusinessTimezone(session.business_id);
+  return getBarberWeekTipTotal(session.business_id, staffId, anchorDate, timezone);
 }
 
 // ─── getBarberWeekAppointments ────────────────────────────────────────────────

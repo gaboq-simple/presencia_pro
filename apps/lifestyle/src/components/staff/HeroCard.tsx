@@ -101,11 +101,13 @@ type Props = {
   onMutated: () => void;                              // refresh tras acción
   onRegister: () => void;                             // abre "+ Nueva cita" (estado vacío)
   onHeroAppointmentChange?: (id: string | null) => void; // para la referencia en el hilo
+  /** Terminó exitoso → el shell abre la hoja de propina (Paso 7). */
+  onCompleted?: (id: string) => void;
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function HeroCard({ appointments, timezone, onMutated, onRegister, onHeroAppointmentChange }: Props) {
+export default function HeroCard({ appointments, timezone, onMutated, onRegister, onHeroAppointmentChange, onCompleted }: Props) {
   const [nowMin, setNowMin] = useState<number>(() => nowLocalMinutes(timezone));
   useEffect(() => {
     const update = () => setNowMin(nowLocalMinutes(timezone));
@@ -139,13 +141,14 @@ export default function HeroCard({ appointments, timezone, onMutated, onRegister
     }
   }, [heroId, onHeroAppointmentChange]);
 
-  function run(action: (id: string) => Promise<{ error?: string } | void>, id: string, failMsg: string) {
+  function run(action: (id: string) => Promise<{ error?: string } | void>, id: string, failMsg: string, after?: (id: string) => void) {
     setActionError(null);
     startTransition(async () => {
       try {
         const res = await action(id);
         if (res?.error) { setActionError(res.error); return; }
         onMutated();
+        after?.(id);
       } catch {
         setActionError(failMsg);
       }
@@ -202,7 +205,8 @@ export default function HeroCard({ appointments, timezone, onMutated, onRegister
   const primary =
     sel.mode === 'upcoming'
       ? { label: 'Llegó', onClick: () => run(markArrived, appt.id, 'No se pudo marcar la llegada.') }
-      : { label: 'Terminó', onClick: () => run(completeAppointment, appt.id, 'No se pudo completar la cita.') };
+      // El Terminó exitoso encadena la hoja de propina (Paso 7) vía onCompleted.
+      : { label: 'Terminó', onClick: () => run(completeAppointment, appt.id, 'No se pudo completar la cita.', onCompleted) };
   const secondary = { label: 'No vino', onClick: () => run(noShowAppointment, appt.id, 'No se pudo marcar como no asistió.') };
   const showPrimary = !arrived;  // arrived-upcoming → sin Llegó
 

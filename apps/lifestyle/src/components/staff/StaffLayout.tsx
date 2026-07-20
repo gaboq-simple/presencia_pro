@@ -24,6 +24,7 @@ import type {
   StaffAvailabilitySlot,
   StaffBlockRequest,
 } from '@/lib/dashboard.types';
+import type { BarberDayAppointment } from '@/lib/barberDay';
 import { computeDayDrift, DRIFT_THRESHOLD_MIN, type DriftProjection } from '@/lib/dayDrift';
 import { isTodayInTz, todayStrInTz } from '@/lib/dayWindow';
 import { refreshStaffDayAppointments } from '@/app/staff/actions';
@@ -32,6 +33,8 @@ import DayBar from './DayBar';
 import DayDriftNotice from './DayDriftNotice';
 import AppointmentThread from './AppointmentThread';
 import EndOfDaySummary from './EndOfDaySummary';
+import TipSheet from './TipSheet';
+import TipsSummary from './TipsSummary';
 import BarberWeekView from './BarberWeekView';
 import BlockRequestForm from './BlockRequestForm';
 import RecurringAvailability from './RecurringAvailability';
@@ -47,7 +50,7 @@ export type StaffLayoutProps = {
   businessId: string;
   date: string;                              // 'YYYY-MM-DD'
   timezone: string;                          // IANA — para la línea "Ahora" del timeline
-  initialAppointments: DashboardAppointment[];
+  initialAppointments: BarberDayAppointment[];  // modelo barbero: CON tipAmount (Paso 7)
   availability: StaffAvailabilitySlot[];
   initialBlockRequests: StaffBlockRequest[];
   staffOptions: StaffOption[];               // [el propio barbero] — se agenda solo a sí mismo
@@ -113,7 +116,7 @@ export default function StaffLayout({
   const router = useRouter();
 
   const [appointments, setAppointments] =
-    useState<DashboardAppointment[]>(initialAppointments);
+    useState<BarberDayAppointment[]>(initialAppointments);
   const [syncedDate, setSyncedDate] = useState(date);
   if (syncedDate !== date) {
     setSyncedDate(date);
@@ -124,6 +127,19 @@ export default function StaffLayout({
   const [showNewForm, setShowNewForm] = useState(false);
   // Cita que ocupa el hero → el hilo la muestra como referencia, no duplicada.
   const [heroApptId, setHeroApptId] = useState<string | null>(null);
+
+  // ── La hoja de propina (Paso 7) ───────────────────────────────────────────
+  // Sube al confirmarse un Terminó (hero / ficha / swipe post-Deshacer) y al
+  // tocar un cabo suelto ("+ propina"). Cierra SOLO por acción explícita.
+  const [tipAppt, setTipAppt] = useState<BarberDayAppointment | null>(null);
+  const openTip = useCallback((appt: BarberDayAppointment) => { setTipAppt(appt); }, []);
+  const appointmentsRef = useRef(appointments);
+  useEffect(() => { appointmentsRef.current = appointments; });
+  // El hero solo conoce el id — se resuelve contra el estado vigente.
+  const openTipById = useCallback((id: string) => {
+    const appt = appointmentsRef.current.find((a) => a.id === id);
+    if (appt) setTipAppt(appt);
+  }, []);
 
   // Ref para leer la fecha dentro del intervalo sin re-suscribir el polling.
   const dateRef = useRef(date);
@@ -246,6 +262,7 @@ export default function StaffLayout({
                 onMutated={() => void refresh()}
                 onRegister={() => setShowNewForm(true)}
                 onHeroAppointmentChange={setHeroApptId}
+                onCompleted={openTipById}
               />
             </div>
           )}
@@ -298,6 +315,8 @@ export default function StaffLayout({
                 timezone={timezone}
                 heroAppointmentId={heroApptId}
                 onMutated={() => void refresh()}
+                onCompleted={openTip}
+                onOpenTip={openTip}
                 staffOptions={staffOptions}
                 projections={projectionById}
               />
@@ -328,7 +347,15 @@ export default function StaffLayout({
         )}
 
         {tab === 'cierre' && (
-          <section aria-label="Fin de jornada">
+          <section aria-label="Fin de jornada" className="space-y-4">
+            {/* Tus propinas (Paso 7) — aparece en cuanto hay una cita terminada;
+                junta los cabos sueltos y el acumulado. Se auto-oculta sin citas. */}
+            <TipsSummary
+              appointments={appointments}
+              date={date}
+              timezone={timezone}
+              onOpenTip={openTip}
+            />
             {isEndOfDay(appointments, date, timezone) ? (
               <EndOfDaySummary appointments={appointments} date={date} staffId={staffId} timezone={timezone} />
             ) : (
@@ -365,6 +392,15 @@ export default function StaffLayout({
           })}
         </div>
       </nav>
+
+      {/* ── La hoja de propina (Paso 7) ───────────────────────────────────── */}
+      {tipAppt && (
+        <TipSheet
+          appt={tipAppt}
+          onClose={() => setTipAppt(null)}
+          onSaved={() => { setTipAppt(null); void refresh(); }}
+        />
+      )}
 
       {/* ── Modal Nueva cita ──────────────────────────────────────────────── */}
       {showNewForm && (

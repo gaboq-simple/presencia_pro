@@ -10,6 +10,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { tenantDb } from '@/lib/tenantDb';
+import { localDayRangeUtc } from '@/lib/dayWindow';
 import { getStaffDayAppointments, type DashboardAppointment } from '@/lib/dashboard.types';
 
 // El tipo extendido vive ACÁ, no en DashboardAppointment (compartido con las
@@ -63,4 +64,52 @@ export async function getBarberDayAppointments(
     ...a,
     tipAmount: tipByAppointment.has(a.id) ? (tipByAppointment.get(a.id) as number) : null,
   }));
+}
+
+/**
+ * Acumulado semanal de propinas del barbero (bloque "Tus propinas" de Cierre).
+ * Semana lunes→domingo que contiene anchorDate, acotada a la tz del negocio.
+ * Dos pasos (ids de la semana → suma de tips) en vez de un join embebido: la
+ * membresía la definen las citas del barbero, y el `.eq('staff_id')` en tips es
+ * el mismo cinturón doble que arriba.
+ */
+export async function getBarberWeekTipTotal(
+  businessId: string,
+  staffId: string,
+  anchorDate: string,
+  timezone: string,
+): Promise<number> {
+  const anchor = new Date(`${anchorDate}T12:00:00`);
+  const monday = new Date(anchor);
+  monday.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const toStr = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const { start } = localDayRangeUtc(toStr(monday), timezone);
+  const { end } = localDayRangeUtc(toStr(sunday), timezone);
+
+  const db = tenantDb(getServiceClient(), businessId);
+
+  const { data: appts, error: apptsError } = await db
+    .table('appointments')
+    .select('id')
+    .eq('staff_id', staffId)
+    .gte('starts_at', start)
+    .lt('starts_at', end);
+  if (apptsError) throw new Error(`getBarberWeekTipTotal appts failed: ${apptsError.message}`);
+  const ids = ((appts ?? []) as Array<{ id: string }>).map((r) => r.id);
+  if (ids.length === 0) return 0;
+
+  const { data, error } = await db
+    .table('appointment_tips')
+    .select('amount')
+    .eq('staff_id', staffId)
+    .in('appointment_id', ids);
+  if (error) throw new Error(`getBarberWeekTipTotal tips failed: ${error.message}`);
+
+  return ((data ?? []) as Array<{ amount: string | number }>).reduce(
+    (sum, r) => sum + Number(r.amount),
+    0,
+  );
 }

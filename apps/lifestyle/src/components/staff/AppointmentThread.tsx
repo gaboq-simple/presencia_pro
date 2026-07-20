@@ -20,11 +20,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DashboardAppointment } from '@/lib/dashboard.types';
+import type { BarberDayAppointment } from '@/lib/barberDay';
 import type { DriftProjection } from '@/lib/dayDrift';
 import { isTodayInTz } from '@/lib/dayWindow';
 import { completeAppointment, noShowAppointment } from '@/app/staff/assistant-actions';
 import AppointmentSheet, { type StaffOption } from './AppointmentSheet';
+import { fmtTip } from './TipSheet';
 
 // ─── Estado visual (paridad con AssistantVerticalCalendar / la mesa) ──────────
 
@@ -64,7 +65,7 @@ function hhmm(iso: string, tz: string): string {
   return new Intl.DateTimeFormat('es-MX', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 }
 
-function stateOf(a: DashboardAppointment, nowM: number | null, tz: string): BlockState {
+function stateOf(a: BarberDayAppointment, nowM: number | null, tz: string): BlockState {
   if (a.status === 'cancelled') return 'cancelled';
   if (a.status === 'completed') return 'done';
   if (a.status === 'no_show') return 'noshow';
@@ -85,22 +86,28 @@ const UNDO_MS = 5000;         // ventana de Deshacer antes de commitear
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 type Props = {
-  appointments: DashboardAppointment[];
+  appointments: BarberDayAppointment[];
   date: string;
   timezone: string;
   staffOptions: StaffOption[];
   heroAppointmentId?: string | null;
   onMutated: () => void;
+  /** Terminó COMMITEADO (post-ventana de Deshacer) → el shell abre la hoja de
+      propina (Paso 7). En el swipe esto corre al expirar el Deshacer: el gate de
+      setAppointmentTip exige status 'completed', que recién existe al commitear. */
+  onCompleted?: (appt: BarberDayAppointment) => void;
+  /** Cabo suelto ("+ propina" en una card cerrada) → reabrir la hoja. */
+  onOpenTip?: (appt: BarberDayAppointment) => void;
   /** El día se corrió (Paso 6): id → proyección. La card muestra la hora vieja
       tachada y la proyectada al lado. Ya filtradas por el umbral. */
   projections?: Map<string, DriftProjection>;
 };
 
-type PendingAction = { id: string; kind: 'completed' | 'no_show'; label: string; timer: ReturnType<typeof setTimeout> };
+type PendingAction = { appt: BarberDayAppointment; kind: 'completed' | 'no_show'; label: string; timer: ReturnType<typeof setTimeout> };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function AppointmentThread({ appointments, date, timezone, staffOptions, heroAppointmentId, onMutated, projections }: Props) {
+export default function AppointmentThread({ appointments, date, timezone, staffOptions, heroAppointmentId, onMutated, onCompleted, onOpenTip, projections }: Props) {
   const [nowMin, setNowMin] = useState<number | null>(() => (isTodayInTz(date, timezone) ? nowLocalMinutes(timezone) : null));
   const [prevKey, setPrevKey] = useState(`${date}|${timezone}`);
   const key = `${date}|${timezone}`;
@@ -114,7 +121,7 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
   }, [date, timezone]);
 
   // Ficha abierta (tap en una card)
-  const [sheetAppt, setSheetAppt] = useState<DashboardAppointment | null>(null);
+  const [sheetAppt, setSheetAppt] = useState<BarberDayAppointment | null>(null);
 
   // Delay-commit del swipe: optimista local + toast Deshacer; el server action se
   // dispara al expirar la ventana. Un solo pendiente por vez (el más reciente).
@@ -123,10 +130,16 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
   useEffect(() => { pendingRef.current = pending; }, [pending]);
   const onMutatedRef = useRef(onMutated);
   useEffect(() => { onMutatedRef.current = onMutated; });
+  const onCompletedRef = useRef(onCompleted);
+  useEffect(() => { onCompletedRef.current = onCompleted; });
 
   const commit = useCallback((p: PendingAction) => {
     const action = p.kind === 'completed' ? completeAppointment : noShowAppointment;
-    void action(p.id).then(() => onMutatedRef.current());
+    void action(p.appt.id).then(() => {
+      onMutatedRef.current();
+      // El Terminó ya es real en el server → sube la hoja de propina (Paso 7).
+      if (p.kind === 'completed') onCompletedRef.current?.(p.appt);
+    });
   }, []);
   function flushPending() {
     const p = pendingRef.current;
@@ -135,14 +148,14 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
   // Al desmontar, no perder el pendiente: commitea.
   useEffect(() => () => { const p = pendingRef.current; if (p) { clearTimeout(p.timer); commit(p); } }, [commit]);
 
-  function triggerSwipe(appt: DashboardAppointment, kind: 'completed' | 'no_show') {
+  function triggerSwipe(appt: BarberDayAppointment, kind: 'completed' | 'no_show') {
     flushPending(); // si había otro pendiente, commitealo antes de encolar el nuevo
     const label = kind === 'completed' ? 'Terminó' : 'No vino';
     const timer = setTimeout(() => {
       const p = pendingRef.current;
       if (p) { commit(p); setPending(null); }
     }, UNDO_MS);
-    setPending({ id: appt.id, kind, label, timer });
+    setPending({ appt, kind, label, timer });
   }
   function undo() {
     const p = pendingRef.current;
@@ -182,7 +195,7 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
         <div className="space-y-2">
           {sorted.map((appt, idx) => {
             // Estado — con override optimista del pendiente (delay-commit).
-            const isPendingHere = pending?.id === appt.id;
+            const isPendingHere = pending?.appt.id === appt.id;
             const baseState = stateOf(appt, nowMin, timezone);
             const state: BlockState = isPendingHere ? (pending!.kind === 'completed' ? 'done' : 'noshow') : baseState;
             const style = STATE_STYLE[state];
@@ -224,8 +237,17 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
                       style={style}
                       timezone={timezone}
                       swipeable={SWIPEABLE.has(state) && !isPendingHere}
+                      optimistic={isPendingHere}
                       projection={projections?.get(appt.id)}
-                      onOpen={() => setSheetAppt(appt)}
+                      onOpen={() => {
+                        // Cabo suelto (Terminó sin propina resuelta) → directo a
+                        // la hoja; el resto de las cards abren la ficha.
+                        if (state === 'done' && !isPendingHere && appt.tipAmount === null && onOpenTip) {
+                          onOpenTip(appt);
+                        } else {
+                          setSheetAppt(appt);
+                        }
+                      }}
                       onSwipeRight={() => triggerSwipe(appt, 'completed')}
                       onSwipeLeft={() => triggerSwipe(appt, 'no_show')}
                     />
@@ -241,7 +263,7 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
       {pending && (
         <div className="fixed inset-x-0 bottom-16 z-30 mx-auto flex max-w-xl items-center justify-between gap-3 px-4">
           <div className="flex flex-1 items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3 text-sm text-card shadow-card">
-            <span>{pending.label} — {sorted.find((a) => a.id === pending.id)?.customer?.name ?? 'cita'}</span>
+            <span>{pending.label} — {pending.appt.customer?.name ?? 'cita'}</span>
             <button onClick={undo} className="shrink-0 font-semibold text-tint-2 underline">Deshacer</button>
           </div>
         </div>
@@ -256,6 +278,8 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
           staffOptions={staffOptions}
           onClose={() => setSheetAppt(null)}
           onMutated={() => { setSheetAppt(null); onMutated(); }}
+          onCompleted={(a) => { setSheetAppt(null); onCompleted?.(a); }}
+          onOpenTip={(a) => { setSheetAppt(null); onOpenTip?.(a); }}
         />
       )}
     </div>
@@ -265,13 +289,14 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
 // ─── SwipeCard ─────────────────────────────────────────────────────────────────
 
 function SwipeCard({
-  appt, state, style, timezone, swipeable, projection, onOpen, onSwipeRight, onSwipeLeft,
+  appt, state, style, timezone, swipeable, optimistic, projection, onOpen, onSwipeRight, onSwipeLeft,
 }: {
-  appt: DashboardAppointment;
+  appt: BarberDayAppointment;
   state: BlockState;
   style: { bar: string; bg: string; ink: string; glow: string };
   timezone: string;
   swipeable: boolean;
+  optimistic: boolean;   // pendiente de commit (ventana de Deshacer) — sin estado de propina aún
   projection?: DriftProjection;
   onOpen: () => void;
   onSwipeRight: () => void;
@@ -285,10 +310,14 @@ function SwipeCard({
   const dxRef = useRef(0);  // fuente de verdad del arrastre (ref → no depende del flush del estado)
 
   function onPointerDown(e: React.PointerEvent) {
+    // Cada gesto arranca limpio — TAMBIÉN en cards no swipeables: si el reset
+    // quedara tras el early-return, una card swipeada (moved=true) que pasa a
+    // 'done' nunca volvería a aceptar taps (el click gatea por moved) — y el tap
+    // del cabo suelto "+ propina" (Paso 7) es exactamente ese caso.
+    moved.current = false;
     if (!swipeable) return;
     activeId.current = e.pointerId;
     startX.current = e.clientX;
-    moved.current = false;
     dxRef.current = 0;
     setDragging(true);
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* pointer sintético */ }
@@ -313,6 +342,13 @@ function SwipeCard({
 
   const name = appt.customer?.name ?? 'Cliente';
   const word = STATE_WORD[state];
+  // Los tres estados de la cita cerrada (Paso 7): +$monto (resuelta) / "Hecha"
+  // (dijo sin propina — monto 0) / "+ propina" (cabo suelto, tocable). Durante la
+  // ventana de Deshacer (optimistic) todavía no hay estado de propina → "Hecha".
+  const tipState: 'amount' | 'none' | 'loose' | null =
+    state === 'done' && !optimistic
+      ? appt.tipAmount === null ? 'loose' : appt.tipAmount > 0 ? 'amount' : 'none'
+      : null;
   // Distintivo "Ya está acá": arrived_at seteado y la cita aún activa (en las
   // resueltas — done/noshow/cancelled — ya no aporta).
   const arrived = !!appt.arrived_at && state !== 'done' && state !== 'noshow' && state !== 'cancelled';
@@ -369,7 +405,15 @@ function SwipeCard({
           ) : (
             <p className={`text-sm tabular-nums ${style.ink}`}>{hhmm(appt.starts_at, timezone)}</p>
           )}
-          {word && <p className={`text-[10.5px] font-semibold ${style.ink}`}>{word}</p>}
+          {tipState === 'amount' ? (
+            <p className="text-[11px] font-semibold tabular-nums text-teal-ink">+{fmtTip(appt.tipAmount!)}</p>
+          ) : tipState === 'loose' ? (
+            <span className="mt-0.5 inline-block rounded-pill border border-dashed border-teal-border px-1.5 py-px text-[10px] font-semibold text-teal-ink">
+              + propina
+            </span>
+          ) : (
+            word && <p className={`text-[10.5px] font-semibold ${style.ink}`}>{word}</p>
+          )}
         </div>
       </button>
     </div>
