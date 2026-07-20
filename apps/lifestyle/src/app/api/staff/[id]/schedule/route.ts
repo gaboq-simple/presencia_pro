@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { getCurrentSession } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { logManagementAudit } from '@/lib/managementAudit';
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -205,7 +206,14 @@ export async function PATCH(
     return NextResponse.json({ error: 'Staff no encontrado' }, { status: 404 });
   }
 
-  // 5. DELETE todos los registros actuales del staff
+  // 5. Snapshot del horario actual ANTES del replace (before del audit).
+  const { data: beforeRows } = await supabase
+    .from('staff_availability')
+    .select('day_of_week, start_time, end_time, break_start, break_end, is_active')
+    .eq('staff_id', staffId)
+    .order('day_of_week');
+
+  // 5b. DELETE todos los registros actuales del staff
   const { error: deleteError } = await supabase
     .from('staff_availability')
     .delete()
@@ -242,7 +250,20 @@ export async function PATCH(
     }
   }
 
-  // 7. Invalidar cache del bot
+  // 7. Auditoría (best-effort — mismo patrón que las demás rutas de gestión; un fallo
+  //    del audit NO revierte el horario ya guardado). Firma con el staff_id del dueño.
+  await logManagementAudit(supabase, {
+    entity:        'staff',
+    entityId:      staffId,
+    action:        'updated',
+    businessId,
+    actorStaffId:  session.staff_id,
+    oldData:       { availability: beforeRows ?? [] },
+    newData:       { availability },
+    changedFields: ['availability'],
+  });
+
+  // 8. Invalidar cache del bot
   invalidateBusinessCache(businessId);
 
   return NextResponse.json({ ok: true, days_saved: availability.length });

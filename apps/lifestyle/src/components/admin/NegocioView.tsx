@@ -10,8 +10,10 @@ import type { OccupancyResult } from '@/lib/occupancy';
 import type { StaffRecompraResult, StaffRecompraRow, RecompraTone } from '@/lib/staffRecompra';
 import type { PulsoHoy as PulsoHoyData } from '@/lib/pulsoHoy';
 import type { SemanaProxima as SemanaData } from '@/lib/pulsoSemana';
+import type { AdminServiceRow, AdminStaffManagementRow } from '@/lib/dashboard.types';
 import PulsoHoy from '@/components/admin/PulsoHoy';
 import SemanaProxima from '@/components/admin/SemanaProxima';
+import AdminInlinePanel from '@/components/admin/AdminInlinePanel';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 function money(n: number): string {
@@ -276,7 +278,7 @@ function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElem
   );
 }
 
-export default function NegocioView({ revenue, occupancy, barberos, pulso, semana }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData }): React.ReactElement {
+export default function NegocioView({ revenue, occupancy, barberos, pulso, semana, services, staff }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData; services: AdminServiceRow[]; staff: AdminStaffManagementRow[] }): React.ReactElement {
   const { thisMonth, comparison, months, hasAnyRevenue } = revenue;
 
   return (
@@ -288,6 +290,9 @@ export default function NegocioView({ revenue, occupancy, barberos, pulso, seman
 
       {/* ── La semana que viene (Paso 2) — la pieza accionable ── */}
       <SemanaProxima data={semana} />
+
+      {/* ── Administración rápida inline (Paso 3) — atajo a lo más tocado ── */}
+      <AdminInlinePanel services={services} staff={staff} />
 
       {/* ── Ingresos (héroe) ── */}
       <section className="mt-2 rounded-xl bg-card p-4 shadow-card">

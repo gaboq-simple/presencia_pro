@@ -241,7 +241,7 @@ export default async function DashboardPage({
   return (
     <OwnerTabs
       hoy={<HoyFeed feed={retentionFeed} contactados={contactados} />}
-      negocio={<NegocioView revenue={negocioRevenue} occupancy={negocioOccupancy} barberos={negocioStaff} pulso={pulsoHoy} semana={pulsoSemana} />}
+      negocio={<NegocioView revenue={negocioRevenue} occupancy={negocioOccupancy} barberos={negocioStaff} pulso={pulsoHoy} semana={pulsoSemana} services={servicesForManagement} staff={staffForManagement} />}
       clientela={<ClientelaView stats={clientelaStats} />}
       panel={dashboardPanel}
       actividad={<ActividadView initialEvents={activityPage.events} initialCursor={activityPage.nextCursor} />}
