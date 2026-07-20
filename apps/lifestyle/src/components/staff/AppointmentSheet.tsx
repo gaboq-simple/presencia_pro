@@ -12,7 +12,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import type { DashboardAppointment } from '@/lib/dashboard.types';
+import type { BarberDayAppointment } from '@/lib/barberDay';
 import {
   cancelAppointment,
   completeAppointment,
@@ -20,23 +20,28 @@ import {
   updateAppointmentNotes,
   rescheduleAppointment,
 } from '@/app/staff/assistant-actions';
+import { fmtTip } from './TipSheet';
 
 export type StaffOption = { id: string; name: string };
 
 const ACTIVE = new Set(['pending', 'confirmed', 'walkin']);
 
 type Props = {
-  appt: DashboardAppointment;
+  appt: BarberDayAppointment;
   date: string;
   timezone: string;
   staffOptions: StaffOption[];
   onClose: () => void;
   onMutated: () => void;
+  /** Terminó exitoso desde la ficha → el shell abre la hoja de propina (Paso 7). */
+  onCompleted?: (appt: BarberDayAppointment) => void;
+  /** Agregar/corregir la propina de una cita terminada → reabrir la hoja. */
+  onOpenTip?: (appt: BarberDayAppointment) => void;
 };
 
 type Panel = 'none' | 'reschedule' | 'cancel' | 'notes';
 
-export default function AppointmentSheet({ appt, date, timezone, staffOptions, onClose, onMutated }: Props) {
+export default function AppointmentSheet({ appt, date, timezone, staffOptions, onClose, onMutated, onCompleted, onOpenTip }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>('none');
@@ -56,13 +61,14 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
     timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatRange(new Date(appt.starts_at), new Date(appt.ends_at));
 
-  function run(fn: () => Promise<{ error?: string } | void>, failMsg: string) {
+  function run(fn: () => Promise<{ error?: string } | void>, failMsg: string, after?: () => void) {
     setError(null);
     startTransition(async () => {
       try {
         const res = await fn();
         if (res?.error) { setError(res.error); return; }
         onMutated();
+        after?.();
       } catch {
         setError(failMsg);
       }
@@ -152,11 +158,37 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
           </div>
         )}
 
-        {/* Fallback accesible al swipe: Terminó / No vino */}
+        {/* Fallback accesible al swipe: Terminó / No vino. El Terminó exitoso
+            encadena la hoja de propina (Paso 7) vía onCompleted. */}
         {isActive && (
           <div className="mt-4 flex gap-2 border-t border-line pt-4">
-            <button disabled={isPending} onClick={() => run(() => completeAppointment(appt.id), 'No se pudo completar.')} className="min-h-[44px] flex-1 rounded-xl bg-teal-ink text-sm font-semibold text-card disabled:opacity-50">Terminó</button>
+            <button disabled={isPending} onClick={() => run(() => completeAppointment(appt.id), 'No se pudo completar.', () => onCompleted?.(appt))} className="min-h-[44px] flex-1 rounded-xl bg-teal-ink text-sm font-semibold text-card disabled:opacity-50">Terminó</button>
             <button disabled={isPending} onClick={() => run(() => noShowAppointment(appt.id), 'No se pudo marcar No vino.')} className="min-h-[44px] flex-1 rounded-xl border border-line bg-card text-sm font-semibold text-ink-2 disabled:opacity-50">No vino</button>
+          </div>
+        )}
+
+        {/* Propina (Paso 7) — solo en citas terminadas y solo para el barbero
+            (esta ficha vive en su vista). Cambiar/agregar reabre la hoja. */}
+        {appt.status === 'completed' && onOpenTip && (
+          <div className="mt-4 flex items-center justify-between gap-2 border-t border-line pt-4">
+            <span className="text-sm text-ink-2">
+              Propina{' '}
+              {appt.tipAmount !== null && (
+                appt.tipAmount > 0
+                  ? <span className="font-semibold tabular-nums text-teal-ink">+{fmtTip(appt.tipAmount)}</span>
+                  : <span className="text-faint">— sin propina</span>
+              )}
+            </span>
+            <button
+              onClick={() => onOpenTip(appt)}
+              className={`rounded-xl px-3 py-2 text-sm font-semibold ${
+                appt.tipAmount === null
+                  ? 'border border-dashed border-teal-border text-teal-ink hover:bg-tint-1'
+                  : 'border border-line text-ink-2 hover:bg-tint-1'
+              }`}
+            >
+              {appt.tipAmount === null ? '+ Agregar' : 'Cambiar'}
+            </button>
           </div>
         )}
 

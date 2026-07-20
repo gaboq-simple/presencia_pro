@@ -15,11 +15,11 @@
 // El método público se llama .table() (NO .from()) a propósito: así la lint rule
 // puede prohibir `.from('<tabla de tenant>')` crudo sin marcar el uso del helper.
 //
-// Qué cubre: las 13 tablas con columna `business_id` (TENANT_TABLES). Las 5 tablas
+// Qué cubre: las 14 tablas con columna `business_id` (TENANT_TABLES). Las 5 tablas
 // indirectas (staff_availability/blocks/services vía staff_id; businesses/organizations
 // que SON la raíz) NO tienen columna business_id → no las cubre este helper; su
 // aislamiento es transitivo por un staff_id tenant-scopeado (patrón existente). La
-// lint rule (eslint no-restricted-syntax) sólo guarda las 13 directas.
+// lint rule (eslint no-restricted-syntax) sólo guarda las 14 directas.
 //
 // Escape hatch para los casos legítimos que NO son "olvido" (lookup cross-tenant real,
 // scan por lote del cron): un `// eslint-disable-next-line no-restricted-syntax -- <motivo>`
@@ -39,7 +39,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ver arriba
 type AnyFilterBuilder = any;
 
-// Las 13 tablas con columna `business_id`. Fuente de verdad para el helper Y la lint.
+// Las 14 tablas con columna `business_id`. Fuente de verdad para el helper Y la lint.
 export const TENANT_TABLES = [
   'appointments',
   'customers',
@@ -54,6 +54,7 @@ export const TENANT_TABLES = [
   'arco_requests',
   'appointment_audit',
   'management_audit',
+  'appointment_tips',
 ] as const;
 
 export type TenantTable = (typeof TENANT_TABLES)[number];
