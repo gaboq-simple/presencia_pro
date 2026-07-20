@@ -8,6 +8,10 @@
 import type { NegocioRevenue } from '@/lib/negocioMetrics';
 import type { OccupancyResult } from '@/lib/occupancy';
 import type { StaffRecompraResult, StaffRecompraRow, RecompraTone } from '@/lib/staffRecompra';
+import type { PulsoHoy as PulsoHoyData } from '@/lib/pulsoHoy';
+import type { SemanaProxima as SemanaData } from '@/lib/pulsoSemana';
+import PulsoHoy from '@/components/admin/PulsoHoy';
+import SemanaProxima from '@/components/admin/SemanaProxima';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 function money(n: number): string {
@@ -272,12 +276,18 @@ function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElem
   );
 }
 
-export default function NegocioView({ revenue, occupancy, barberos }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult }): React.ReactElement {
+export default function NegocioView({ revenue, occupancy, barberos, pulso, semana }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData }): React.ReactElement {
   const { thisMonth, comparison, months, hasAnyRevenue } = revenue;
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-5">
       <p className="px-1 text-xs text-faint">Tu operación — ingresos reales, sin promesas.</p>
+
+      {/* ── Pulso de hoy (Paso 1) — arriba de todo ── */}
+      <PulsoHoy data={pulso} />
+
+      {/* ── La semana que viene (Paso 2) — la pieza accionable ── */}
+      <SemanaProxima data={semana} />
 
       {/* ── Ingresos (héroe) ── */}
       <section className="mt-2 rounded-xl bg-card p-4 shadow-card">
