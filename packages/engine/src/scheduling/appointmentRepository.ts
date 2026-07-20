@@ -6,6 +6,12 @@
 // DB schema source of truth: ARCHITECTURE.md § 4 (appointments table).
 // Date objects are the canonical internal format; ISO string conversion happens
 // only at the Supabase API boundary (in this file).
+//
+// ⚠️ CÓDIGO MUERTO para lifestyle (verificado Paso 7 rediseño barbero, 2026-07-20):
+// usa el schema viejo client_id/specialist_id — esas columnas NO existen en el
+// `appointments` de lifestyle y apps/lifestyle no importa este módulo. Los
+// select('*') de acá NO son fuga de la regla de privacidad de propinas (la tabla
+// de propinas es aparte y barbero-only); se anotan y no se migran a propósito.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Appointment, AppointmentStatus } from './types';

@@ -19,7 +19,7 @@ const TENANT_TABLES = [
   'appointments', 'customers', 'services', 'staff', 'waitlist',
   'scheduled_notifications', 'bot_conversations', 'conversation_messages',
   'staff_schedule_exceptions', 'bot_logs', 'arco_requests',
-  'appointment_audit', 'management_audit',
+  'appointment_audit', 'management_audit', 'appointment_tips',
 ].join('|');
 
 export default [
@@ -35,6 +35,14 @@ export default [
           selector: `CallExpression[callee.property.name='from'][arguments.0.value=/^(${TENANT_TABLES})$/]`,
           message:
             "Aislamiento multi-tenant: no uses .from('<tabla de tenant>') crudo. Usá tenantDb(businessId).table(...) (packages/engine/src/tenantDb.ts). Para un caso legítimo cross-tenant, agregá `// eslint-disable-next-line no-restricted-syntax -- <motivo>`.",
+        },
+        // Privacidad de propinas (Paso 7 rediseño barbero): el bot/engine JAMÁS
+        // toca appointment_tips — es barbero-only (apps/lifestyle: staff/actions.ts
+        // + lib/barberDay.ts + components/staff). Respaldo: tests/tipsPrivacy.test.ts.
+        {
+          selector: "Literal[value='appointment_tips']",
+          message:
+            'Privacidad de propinas: appointment_tips es barbero-only (app lifestyle). El engine/bot no la referencia.',
         },
       ],
     },

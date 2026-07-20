@@ -1575,6 +1575,14 @@ Clasificación de throws (reportada a Gabriel antes de convertir):
 
 ---
 
+#### RB-P7 — Rediseño barbero Paso 7: propinas privadas del dueño 🔵 in-progress (2026-07-20)
+**Origen:** plan del rediseño barbero (Pasos 1–6 = PRs #136–#143 + fixes TZ #138/#142/#144/#145/#146; registro histórico en memoria `barbero-shell-tabs`). Spec aprobado por Gabriel 2026-07-20 tras orientación read-only.
+**Decisión que gobierna (cerrada):** la propina vive en tabla aparte `appointment_tips`, NO como columna de `appointments`. Hallazgo de orientación: el Realtime del dueño (`DashboardRealtimeProvider`) recibe la fila COMPLETA de `appointments` en `payload.new` — una columna ahí viajaría a su browser en cada update. La tabla aparte hace el aislamiento estructural: el Realtime no la emite, las queries del dueño no pueden fugar lo que no está en la tabla que leen, y el lint + repo-check rompen el build ante cualquier referencia fuera del módulo barbero.
+**Alcance:** migración `20260720000000_appointment_tips` (raíz, aplicada en prod; RLS deny-all) + write `setAppointmentTip` (`staff/actions.ts`, gate barbero+`completed`, `{error}` canónico S6-SEC-02, `null` borra) + read `getBarberDayAppointments` (`lib/barberDay.ts`, tipo `BarberDayAppointment` — el compartido `DashboardAppointment` NO gana el campo) + UI captura/display (hilo + `AppointmentSheet`; fuera de la ventana de undo del swipe) + lint `appointment_tips` allowlisted (patrón tenantDb) + repo-check `tests/tipsPrivacy.test.ts`. 🔴 Sin escritura del monto en ningún audit admin-legible. UN PR, sin merge (lo dispara Gabriel).
+**Notas de ejecución:** (en curso)
+
+---
+
 ## Backlog post-sprint (NO trabajar en este sprint)
 
 Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra al sprint sin renegociación.

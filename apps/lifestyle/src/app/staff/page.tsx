@@ -15,10 +15,11 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import {
-  getStaffDayAppointments,
   getStaffRecurringAvailability,
   getStaffBlockRequests,
 } from '@/lib/dashboard.types';
+// Read barbero-only: el día CON tipAmount (Paso 7). Solo esta ruta trae la propina.
+import { getBarberDayAppointments } from '@/lib/barberDay';
 import { todayStrInTz } from '@/lib/dayWindow';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
@@ -102,7 +103,7 @@ export default async function StaffPage({
   // Fetch en paralelo — citas del día (modelo rico, solo suyas, día en tz local) +
   // disponibilidad + solicitudes.
   const [appointments, availability, blockRequests] = await Promise.all([
-    getStaffDayAppointments(businessId, staffId, date, timezone),
+    getBarberDayAppointments(businessId, staffId, date, timezone),
     getStaffRecurringAvailability(staffId),
     getStaffBlockRequests(staffId),
   ]);

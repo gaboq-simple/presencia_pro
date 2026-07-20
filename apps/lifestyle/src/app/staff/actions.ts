@@ -10,12 +10,11 @@ import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { localDayRangeUtc } from '@/lib/dayWindow';
 import {
-  getStaffDayAppointments,
-  type DashboardAppointment,
   type DayAppointmentForStaff,
   type ServiceRef,
   type CustomerRef,
 } from '@/lib/dashboard.types';
+import { getBarberDayAppointments, type BarberDayAppointment } from '@/lib/barberDay';
 
 function getServiceClient() {
   const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
@@ -28,18 +27,19 @@ function getServiceClient() {
 // Recarga las citas del día del BARBERO autenticado (solo las suyas) para el
 // polling y el refresh post-mutación del shell. Análogo a
 // refreshAssistantAppointments, pero acotado a session.staff_id — nunca devuelve
-// citas del negocio que no sean del barbero.
+// citas del negocio que no sean del barbero. Desde el Paso 7 devuelve el modelo
+// barbero (con tipAmount) vía getBarberDayAppointments — solo esta ruta lo trae.
 
 export async function refreshStaffDayAppointments(
   date: string,
-): Promise<DashboardAppointment[]> {
+): Promise<BarberDayAppointment[]> {
   const session = await getCurrentSession();
   if (!session || session.type !== 'business') throw new Error('Unauthorized');
   if (session.role !== 'barber') throw new Error('Forbidden');
   const staffId = session.staff_id;
   if (!staffId) throw new Error('No staff_id en la sesión');
 
-  return getStaffDayAppointments(session.business_id, staffId, date);
+  return getBarberDayAppointments(session.business_id, staffId, date);
 }
 
 /**
@@ -88,6 +88,79 @@ export async function updateAppointmentStatusAsBarber(
     .eq('staff_id', staffId);
 
   if (error) throw new Error(`updateAppointmentStatusAsBarber failed: ${error.message}`);
+
+  revalidatePath('/staff');
+}
+
+// ─── setAppointmentTip ────────────────────────────────────────────────────────
+// Propina de una cita (Paso 7). PRIVADA del dueño/asistente — ver lib/barberDay.ts
+// y la migración 20260720000000_appointment_tips (aislamiento estructural).
+// Gate espejo de assertBarberOwnsAppointment (patrón S6-SEC-02): el rechazo
+// ESPERADO devuelve { error } (no throw — Next redacta los throw en prod); el bug
+// real throwea. Gate: cita del negocio de la sesión + del barbero + status
+// 'completed'. "Del día" NO es parte del gate — es de la superficie (la UI solo
+// ofrece el día); el dato es del barbero sin importar la fecha.
+// tipAmount === null = des-registrar (borra la fila). 0 = propina de $0.
+// 🔴 Sin traza en ningún audit admin-legible: el monto no debe aparecer en
+// registros que el dueño pueda leer (v1: sin traza alguna).
+
+const MAX_TIP = 99_999_999.99; // techo de NUMERIC(10,2)
+
+export async function setAppointmentTip(
+  appointmentId: string,
+  tipAmount: number | null,
+): Promise<{ error?: string } | void> {
+  const session = await getCurrentSession();
+  if (!session || session.type !== 'business') throw new Error('Unauthorized');
+  if (session.role !== 'barber') throw new Error('Forbidden');
+  const staffId = session.staff_id;
+  if (!staffId) throw new Error('No staff_id en la sesión');
+
+  if (
+    tipAmount !== null &&
+    (!Number.isFinite(tipAmount) || tipAmount < 0 || tipAmount > MAX_TIP)
+  ) {
+    return { error: 'Monto de propina inválido' };
+  }
+
+  const db = tenantDb(getServiceClient(), session.business_id);
+
+  const { data: appt, error: apptError } = await db
+    .table('appointments')
+    .select('id, staff_id, status')
+    .eq('id', appointmentId)
+    .maybeSingle();
+
+  if (apptError) throw new Error(`setAppointmentTip lookup failed: ${apptError.message}`);
+  if (!appt) return { error: 'Cita no encontrada' };
+  const row = appt as { id: string; staff_id: string; status: string };
+  if (row.staff_id !== staffId) return { error: 'Solo puedes modificar tus propias citas' };
+  if (row.status !== 'completed') {
+    return { error: 'Solo se registra propina en citas terminadas' };
+  }
+
+  if (tipAmount === null) {
+    const { error } = await db
+      .table('appointment_tips')
+      .delete()
+      .eq('appointment_id', appointmentId)
+      .eq('staff_id', staffId);
+    if (error) throw new Error(`setAppointmentTip delete failed: ${error.message}`);
+  } else {
+    const amount = Math.round(tipAmount * 100) / 100; // centavos exactos, sin ruido float
+    const { error } = await db
+      .table('appointment_tips')
+      .upsert(
+        {
+          appointment_id: appointmentId,
+          staff_id: staffId,
+          amount,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'appointment_id' },
+      );
+    if (error) throw new Error(`setAppointmentTip upsert failed: ${error.message}`);
+  }
 
   revalidatePath('/staff');
 }
