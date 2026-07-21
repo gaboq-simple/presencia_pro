@@ -89,13 +89,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
   }
 
-  if (session.type === 'organization') {
-    return NextResponse.json(
-      { error: 'Usa el token de sucursal para gestionar el staff' },
-      { status: 403 },
-    );
-  }
-
   const businessId = session.business_id;
 
   // 2. Validar body

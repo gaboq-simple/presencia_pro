@@ -16,26 +16,20 @@ export type SessionRole = 'owner' | 'assistant' | 'barber';
 /**
  * SessionPayload — unión discriminada por `type`.
  *
- * · 'business'     → acceso directo a una sucursal (token de businesses).
- *                    Backward-compatible: cookies antiguas sin `type` se
- *                    normalizan a este variant en verifySession().
- * · 'organization' → acceso a un grupo de sucursales (token de organizations).
- *                    Incluye la lista completa de business_ids del grupo.
- * · 'staff'        → sesión de barbero autenticado por PIN.
+ * · 'business' → acceso directo a una sucursal (dueño por email, asistente por PIN).
+ *                Backward-compatible: cookies antiguas sin `type` se normalizan a
+ *                este variant en verifySession().
+ * · 'staff'    → sesión de barbero autenticado por PIN.
+ *
+ * El variant 'organization' (token compartido de `organizations.access_token`, sin
+ * identidad → audit ciego) fue RETIRADO: era la última puerta por token compartido.
+ * Ver proxy.ts. La tabla/columnas de la DB se borran en migración aparte (0 filas).
  */
 export type SessionPayload =
   | {
       type: 'business';
       business_id: string;
       role: 'owner' | 'assistant';
-      staff_id?: undefined;
-      exp: number;
-    }
-  | {
-      type: 'organization';
-      organization_id: string;
-      business_ids: string[];
-      role: 'owner';
       staff_id?: undefined;
       exp: number;
     }
@@ -105,9 +99,10 @@ function hex2buf(hex: string): Uint8Array<ArrayBuffer> {
 function normalizeLegacyPayload(raw: Record<string, unknown>): SessionPayload | null {
   if (typeof raw['exp'] !== 'number') return null;
 
-  // Ya tiene type — payload nuevo
+  // Ya tiene type — payload nuevo. (El variant 'organization' fue retirado: un token
+  // viejo de organización deja de ser una sesión válida → cae al /login normal.)
   const t = raw['type'];
-  if (t === 'business' || t === 'organization' || t === 'staff') {
+  if (t === 'business' || t === 'staff') {
     return raw as unknown as SessionPayload;
   }
 

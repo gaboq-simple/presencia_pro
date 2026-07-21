@@ -53,13 +53,6 @@ export async function PATCH(
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
   }
 
-  if (session.type === 'organization') {
-    return NextResponse.json(
-      { error: 'Usa el token de sucursal para gestionar el catálogo' },
-      { status: 403 },
-    );
-  }
-
   const businessId = session.business_id;
 
   // 2. Validar ID del path

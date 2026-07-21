@@ -53,14 +53,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
   }
 
-  // Sesiones de organización no tienen business_id implícito (igual que /manage).
-  if (session.type === 'organization') {
-    return NextResponse.json(
-      { error: 'Usa el token de sucursal para gestionar el catálogo' },
-      { status: 403 },
-    );
-  }
-
   const businessId = session.business_id;
 
   // 2. Validar body

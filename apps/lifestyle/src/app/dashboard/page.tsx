@@ -2,18 +2,14 @@
 // Server Component — ruta protegida por middleware.
 //
 // Responsabilidades:
-//   1. Obtiene sesión activa via getCurrentSession() — soporta ls_session
-//      (acceso por token/PIN) y Supabase Auth (operadores con email+password).
+//   1. Obtiene sesión activa via getCurrentSession() — ls_session (PIN) o Supabase
+//      Auth (dueño por email+password). Siempre de UNA sucursal (el token de
+//      organización fue retirado): el business_id sale de la sesión.
 //   2. Guard de rol — barbers van a /staff.
 //   3. Resuelve la fecha del día desde searchParams (?date=YYYY-MM-DD).
-//   4. Multi-sucursal: si la sesión es type='organization', carga la lista de
-//      sucursales y usa ?branch=UUID para seleccionar la activa.
-//      - ?branch=all (o ausente) → ConsolidatedView (vista consolidada de org).
-//      - ?branch=<UUID> válido   → DashboardLayout para esa sucursal.
-//      - Otro valor              → redirect a ?branch=all.
-//   5. Fetch en paralelo: citas del día + staff activo + solicitudes + fotos.
-//   6. Calcula ingresos del día.
-//   7. Pasa todo como props serializables a DashboardLayout.
+//   4. Fetch en paralelo: citas del día + staff activo + solicitudes + fotos.
+//   5. Calcula ingresos del día.
+//   6. Pasa todo como props serializables a DashboardLayout.
 //
 // REGLA: service_role_key nunca sale al cliente.
 
@@ -31,9 +27,8 @@ import {
   getServicesForManagement,
 } from '@/lib/dashboard.types';
 import { todayStrInTz } from '@/lib/dayWindow';
-import { getCurrentSession, getBusinessName, getBusinessTimezone, getOrganizationBranches } from '@/lib/auth';
+import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
 import DashboardLayout from '@/components/admin/DashboardLayout';
-import ConsolidatedView from '@/components/admin/ConsolidatedView';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
 import OwnerTabs from '@/components/admin/OwnerTabs';
 import ClientelaView from '@/components/admin/ClientelaView';
@@ -57,17 +52,12 @@ function isValidDate(s: string | undefined): s is string {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(`${s}T12:00:00`));
 }
 
-function isValidUUID(s: string | undefined): s is string {
-  if (!s) return false;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; branch?: string }>;
+  searchParams: Promise<{ date?: string }>;
 }) {
   // 1. Sesión activa — ls_session (token) o Supabase Auth
   const session = await getCurrentSession();
@@ -80,46 +70,12 @@ export default async function DashboardPage({
   const ALLOWED = ['owner', 'assistant', 'admin'] as const;
   if (!ALLOWED.includes(session.role as typeof ALLOWED[number])) redirect('/login');
 
-  const { date: rawDate, branch: rawBranch } = await searchParams;
+  const { date: rawDate } = await searchParams;
 
   // ── Resolución de business_id ──────────────────────────────────────────────
-
-  let businessId: string;
-  let branches: Array<{ id: string; name: string }> = [];
-  let organizationId: string | undefined;
-
-  if (session.type === 'organization') {
-    organizationId = session.organization_id;
-    branches = await getOrganizationBranches(session.business_ids);
-
-    // branch=all (o sin ?branch) → vista consolidada de organización
-    if (!rawBranch || rawBranch === 'all') {
-      if (branches.length === 0) redirect('/login'); // organización sin sucursales activas
-      return (
-        <ConsolidatedView
-          organizationId={organizationId}
-          businessIds={session.business_ids}
-          branches={branches}
-        />
-      );
-    }
-
-    // branch=<UUID> válido → DashboardLayout para esa sucursal
-    const validBranch =
-      isValidUUID(rawBranch) && session.business_ids.includes(rawBranch)
-        ? rawBranch
-        : null;
-
-    if (!validBranch) {
-      // Cualquier otro valor → redirigir a vista consolidada
-      redirect('/dashboard?branch=all');
-    }
-
-    businessId = validBranch;
-  } else {
-    // Sesión de negocio directo — funciona exactamente como antes
-    businessId = session.business_id;
-  }
+  // Siempre una sola sucursal (el token de organización fue retirado): el business_id
+  // sale de la sesión.
+  const businessId = session.business_id;
 
   // 2. Resolver fecha desde searchParams (default: hoy EN LA TZ DEL NEGOCIO).
   // Con el naive de antes (toDateStr(new Date()) = día UTC del server en Vercel),
@@ -235,8 +191,6 @@ export default async function DashboardPage({
       staffForPhotos={staffForPhotos}
       staffForManagement={staffForManagement}
       servicesForManagement={servicesForManagement}
-      branches={branches.length > 1 ? branches : undefined}
-      organizationId={organizationId}
     />
   );
 
