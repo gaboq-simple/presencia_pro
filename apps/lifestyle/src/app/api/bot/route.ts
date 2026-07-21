@@ -538,14 +538,17 @@ async function processTwilioMessage(
       business.id,
     );
 
-    const response = await handleLifestyleMessage({ msg, business, supabase, anthropicKey });
-
-    if (response.message) {
-      await sendMessage({
-        to:      customerPhone,
-        message: response.message,
+    // AUD-05: mismo patrón que el camino Meta — enviar antes de persistir.
+    const response = await handleLifestyleMessage({
+      msg, business, supabase, anthropicKey,
+      send: async (text) => {
         // from no se requiere en Twilio (usa TWILIO_WHATSAPP_FROM del env)
-      });
+        await sendMessage({ to: customerPhone, message: text });
+      },
+    });
+
+    if (!response.sent && !response.sendFailed && response.message) {
+      await sendMessage({ to: customerPhone, message: response.message });
     }
   } catch (err) {
     console.error(JSON.stringify({
@@ -864,9 +867,23 @@ async function processMetaMessage(
       business.id,
     );
 
-    const response = await handleLifestyleMessage({ msg, business, supabase, anthropicKey });
+    // AUD-05: el handler envía ANTES de persistir el estado del FSM. Si el
+    // envío falla, NO persiste (sin pregunta fantasma) y NO debe mandarse
+    // nada más — un fallback sobre un canal caído casi seguro también falla,
+    // y si llega, "no te entendí" es el mensaje equivocado.
+    const response = await handleLifestyleMessage({
+      msg, business, supabase, anthropicKey,
+      send: async (text) => {
+        await sendMessage({
+          to:      customerPhone,
+          message: text,
+          from:    business.whatsappPhoneNumberId,
+        });
+      },
+    });
 
-    if (response.message) {
+    // Caminos que el handler no envía por sí mismo (away message, etc.).
+    if (!response.sent && !response.sendFailed && response.message) {
       await sendMessage({
         to:      customerPhone,
         message: response.message,

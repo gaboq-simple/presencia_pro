@@ -40,6 +40,10 @@ export type { LifestyleIncomingMessage, LifestyleBusinessConfig } from './types'
 
 export type LifestyleBotResponse = {
   readonly message: string;
+  /** AUD-05: true si el handler YA envió `message` vía `send` — el caller no debe re-enviarlo. */
+  readonly sent?: boolean;
+  /** AUD-05: true si `send` falló — el estado NO se persistió y no debe enviarse nada más. */
+  readonly sendFailed?: boolean;
 };
 
 export type HandleLifestyleMessageOptions = {
@@ -47,6 +51,17 @@ export type HandleLifestyleMessageOptions = {
   readonly business: LifestyleBusinessConfig;
   readonly supabase: SupabaseClient;
   readonly anthropicKey: string;
+  /**
+   * AUD-05: envío de la respuesta al cliente, inyectado por el caller. Cuando
+   * está presente, el handler envía ANTES de persistir el nuevo estado del FSM:
+   * si el envío falla, el estado NO avanza — la conversación queda consistente
+   * con lo que el cliente realmente vio (antes: el FSM quedaba esperando el
+   * "sí" a una pregunta que nunca llegó, y el catch del route mandaba encima el
+   * fallbackMessage "no te entendí" — pregunta fantasma + mensaje equivocado).
+   * Sin `send` (tests, camino síncrono de Twilio dev), el comportamiento es el
+   * histórico: persistir y devolver el texto al caller.
+   */
+  readonly send?: (text: string) => Promise<void>;
 };
 
 // ─── Tipo DB ──────────────────────────────────────────────────────────────────
@@ -64,7 +79,7 @@ type ConversationRow = {
 export async function handleLifestyleMessage(
   opts: HandleLifestyleMessageOptions,
 ): Promise<LifestyleBotResponse> {
-  const { msg, business, supabase, anthropicKey } = opts;
+  const { msg, business, supabase, anthropicKey, send } = opts;
 
   const startMs = Date.now();
   let errorInfo: { code: string; message: string } | null = null;
@@ -164,46 +179,81 @@ export async function handleLifestyleMessage(
       }
     : dispatchedResult;
 
-  // ── 5. Persistir nuevo estado ─────────────────────────────────────────────
+  // ── 4c. Enviar ANTES de persistir (AUD-05) ────────────────────────────────
+  // Con `send` inyectado, la respuesta viaja al cliente ANTES de avanzar el
+  // FSM. Si el envío falla: NO se persiste (la conversación queda en el estado
+  // que el cliente sí vio — sin pregunta fantasma), NO se manda nada más (un
+  // fallback tras un send caído casi seguro también falla, y si llega, "no te
+  // entendí" es el mensaje equivocado), y el fallo queda en logs + bot_logs.
+  // El próximo mensaje del cliente re-corre desde el estado consistente; como
+  // last_message_id tampoco se actualizó, un retry del webhook de Meta del
+  // MISMO mensaje se reprocesa completo — segunda oportunidad de entrega.
 
-  const serializedContext = serializeContext(result.newContext);
+  let sendFailed = false;
+  if (send && result.responseText) {
+    try {
+      await send(result.responseText);
+    } catch (err) {
+      sendFailed = true;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      errorInfo = { code: 'send_failed', message: errMsg };
+      logBotError({
+        ts:             new Date().toISOString(),
+        service:        'bot',
+        business_id:    msg.businessId,
+        customer_phone: msg.customerPhone,
+        state_from:     currentState,
+        state_to:       result.newState,
+        model_used:     model,
+        error_code:     'send_failed',
+        error_message:  errMsg,
+        recovered:      false,
+      });
+    }
+  }
 
-  try {
-    await withRetry(
-      async () => {
-        const { error } = await tenantDb(supabase, msg.businessId)
-          .table('bot_conversations')
-          .upsert(
-            {
-              customer_phone:  msg.customerPhone,
-              state:           result.newState,
-              context:         serializedContext,
-              last_message:    msg.timestamp.toISOString(),
-              last_message_id: msg.messageId ?? null,
-            },
-            { onConflict: 'business_id,customer_phone' },
-          );
-        if (error) throw error;
-      },
-      3,
-      300,
-    );
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    errorInfo = { code: 'supabase_upsert_failed', message: errMsg };
-    logBotError({
-      ts:             new Date().toISOString(),
-      service:        'bot',
-      business_id:    msg.businessId,
-      customer_phone: msg.customerPhone,
-      state_from:     currentState,
-      state_to:       result.newState,
-      model_used:     model,
-      error_code:     'supabase_upsert_failed',
-      error_message:  errMsg,
-      recovered:      true,
-    });
-    // Continuar — el mensaje ya se envió al usuario
+  // ── 5. Persistir nuevo estado (solo si el cliente recibió la respuesta) ───
+
+  if (!sendFailed) {
+    const serializedContext = serializeContext(result.newContext);
+
+    try {
+      await withRetry(
+        async () => {
+          const { error } = await tenantDb(supabase, msg.businessId)
+            .table('bot_conversations')
+            .upsert(
+              {
+                customer_phone:  msg.customerPhone,
+                state:           result.newState,
+                context:         serializedContext,
+                last_message:    msg.timestamp.toISOString(),
+                last_message_id: msg.messageId ?? null,
+              },
+              { onConflict: 'business_id,customer_phone' },
+            );
+          if (error) throw error;
+        },
+        3,
+        300,
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      errorInfo = { code: 'supabase_upsert_failed', message: errMsg };
+      logBotError({
+        ts:             new Date().toISOString(),
+        service:        'bot',
+        business_id:    msg.businessId,
+        customer_phone: msg.customerPhone,
+        state_from:     currentState,
+        state_to:       result.newState,
+        model_used:     model,
+        error_code:     'supabase_upsert_failed',
+        error_message:  errMsg,
+        recovered:      true,
+      });
+      // Continuar — el mensaje ya se envió al usuario
+    }
   }
 
   // ── 6. Escribir a bot_logs — best-effort ──────────────────────────────────
@@ -258,7 +308,12 @@ export async function handleLifestyleMessage(
     }
   })();
 
-  return { message: result.responseText };
+  if (sendFailed) {
+    return { message: '', sendFailed: true };
+  }
+  return send
+    ? { message: result.responseText, sent: result.responseText.length > 0 }
+    : { message: result.responseText };
 }
 
 // ─── Verificación de horario ──────────────────────────────────────────────────
