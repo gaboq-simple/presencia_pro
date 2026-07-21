@@ -558,7 +558,11 @@ function buildRejectionResult(
   const rejections = context.rejection_attempts ?? 0;
   const tz         = business.timezone;
 
-  // Cuarto "no" → handoff a humano (estado terminal ESCALATED).
+  // Cuarto "no" → handoff a humano (ESCALATED). La notificación al admin la
+  // dispara dispatch() en este MISMO turno al ver la transición (AUD-03) —
+  // antes se sembraba fallbackAttempts:2 esperando que el próximo mensaje
+  // notificara vía handleFallback, pero el reset de terminales lo impedía:
+  // el aviso no salía nunca.
   if (rejections >= 3) {
     return {
       newState:   'ESCALATED',
@@ -567,7 +571,6 @@ function buildRejectionResult(
         rejection_attempts:     0,
         clarification_attempts: 0,
         nearestOfferSlot:       null,
-        fallbackAttempts:       2,
       },
       responseText:
         'Dejame conectarte con el equipo para que te ayuden a encontrar lo que buscas. ' +

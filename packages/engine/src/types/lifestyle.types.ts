@@ -270,6 +270,20 @@ export const LifestyleBotContextSchema = z.object({
    */
   pendingCancelType: z.enum(['cancellation', 'modification']).optional(),
 
+  /**
+   * AUD-03: true cuando el aviso al admin de ESTA escalada ya se disparó.
+   * Lo setea dispatch() al detectar la transición a ESCALATED — dedup para que
+   * los mensajes siguientes del cliente (ESCALATED pegajoso) no re-notifiquen.
+   */
+  escalation_notified: z.boolean().optional(),
+
+  /**
+   * AUD-03: mensajes del cliente sostenidos en ESCALATED pegajoso. El 1º recibe
+   * "el equipo ya está enterado"; a partir del 2º sin respuesta humana, el bot
+   * retoma la atención (vía GREETING) para no dejar al cliente colgado.
+   */
+  escalation_holds: z.number().int().nonnegative().optional(),
+
   // ── Clasificador de intenciones ───────────────────────────────────────────
 
   /**

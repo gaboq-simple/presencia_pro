@@ -1381,7 +1381,8 @@ export type ConversationSummary = {
 
 /**
  * Retorna las conversaciones activas del negocio, ordenadas:
- *   human → paused → bot. Dentro de cada grupo, por last_message DESC.
+ *   human → escaladas (bot con FSM en ESCALATED, AUD-03) → paused → bot.
+ * Dentro de cada grupo, por last_message DESC.
  */
 export async function getActiveConversations(): Promise<ConversationSummary[]> {
   const { business_id } = await requireAssistantSession();
@@ -1409,9 +1410,14 @@ export async function getActiveConversations(): Promise<ConversationSummary[]> {
     taken_by_staff:  { name: string } | null;
   }>;
 
-  // Ordenar: human primero, paused segundo, bot al final
-  const ORDER: Record<string, number> = { human: 0, paused: 1, bot: 2 };
-  rows.sort((a, b) => (ORDER[a.session_mode] ?? 3) - (ORDER[b.session_mode] ?? 3));
+  // Ordenar: human primero; escaladas después (el bot prometió un humano —
+  // necesitan atención antes que cualquier pausada); paused; bot al final.
+  const rank = (r: { session_mode: string; state: string }): number =>
+    r.session_mode === 'human'  ? 0 :
+    r.state === 'ESCALATED'     ? 1 :
+    r.session_mode === 'paused' ? 2 :
+    r.session_mode === 'bot'    ? 3 : 4;
+  rows.sort((a, b) => rank(a) - rank(b));
 
   return rows.map((r) => ({
     customerPhone: r.customer_phone,

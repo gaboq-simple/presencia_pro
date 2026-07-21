@@ -17,7 +17,7 @@ import { handleConfirmingAppointment } from './states/confirmingAppointment';
 import { handleAwaitingConfirmation }  from './states/awaitingConfirmation';
 import { handleAwaitingBookingName }   from './states/awaitingBookingName';
 import { handleConfirmed }             from './states/confirmed';
-import { handleFallback }             from './states/fallback';
+import { handleFallback, notifyAdminOfEscalation } from './states/fallback';
 import { handleGreeting }              from './states/greeting';
 import { handleQualifyingDatetime }    from './states/qualifyingDatetime';
 import { handleQualifyingService }     from './states/qualifyingService';
@@ -150,6 +150,27 @@ export async function dispatch(
       responseText: deps.business.fallbackMessage,
     };
   }
+
+  result = applyStructuralCap(state, context, result);
+
+  // ── Notificación atómica de escalado (AUD-03) ───────────────────────────────
+  // Cualquier camino que transiciona a ESCALATED (fallback ×2, rechazo ×4, cap
+  // estructural) notifica al admin EN ESTE MISMO TURNO — la promesa "te comunico
+  // con el equipo" y el aviso son atómicos. Dedup con escalation_notified para
+  // que los mensajes sostenidos en ESCALATED pegajoso no re-notifiquen.
+  if (result.newState === 'ESCALATED' && state !== 'ESCALATED' && !context.escalation_notified) {
+    await notifyAdminOfEscalation(msg, handlerDeps);   // best-effort, nunca lanza
+    result = { ...result, newContext: { ...result.newContext, escalation_notified: true } };
+  }
+
+  return result;
+}
+
+function applyStructuralCap(
+  state:   LifestyleBotState,
+  context: LifestyleBotContext,
+  result:  StateHandlerResult,
+): StateHandlerResult {
 
   // ── Contador de escape estructural (S5-BOT-12) ──────────────────────────────
   // Solo aplica cuando el turno se RECIBIÓ dentro de la costura de agendamiento.
@@ -384,8 +405,40 @@ async function routeToHandler(
       };
 
     case 'FALLBACK':
-    case 'ESCALATED':
       return handleFallback(msg, context, deps);
+
+    case 'ESCALATED': {
+      // AUD-03: ESCALATED pegajoso (ya no es terminal). El bot prometió "te
+      // comunico con el equipo" — sostener la promesa en vez de re-saludar.
+      // 1er mensaje del cliente tras la escalada: acuse de espera (sin
+      // re-notificar — dispatch dedupea con escalation_notified).
+      // 2º mensaje sin respuesta humana: el bot retoma vía GREETING para no
+      // dejar al cliente colgado indefinidamente (preserva solo customerId).
+      // Si el staff toma control antes, el handoff gate intercepta aguas
+      // arriba y este case nunca corre. Red de seguridad: reset >24h.
+      const holds = context.escalation_holds ?? 0;
+      if (holds < 1) {
+        return {
+          newState:     'ESCALATED',
+          newContext:   { ...context, escalation_holds: holds + 1 },
+          responseText:
+            'El equipo ya esta enterado y te contactan en breve. Gracias por tu paciencia. ' +
+            'Si mientras tanto quieres que te siga atendiendo yo, dime que necesitas.',
+        };
+      }
+      const resumed = await routeToHandler(
+        'GREETING',
+        msg,
+        { ...(context.customerId ? { customerId: context.customerId } : {}) },
+        deps,
+      );
+      return {
+        ...resumed,
+        responseText: ['Mientras el equipo te contacta, te sigo atendiendo.', resumed.responseText]
+          .filter((s) => s.trim().length > 0)
+          .join('\n'),
+      };
+    }
 
     case 'AWAITING_CANCEL_CONFIRMATION':
       // AUD-02: el cliente respondió a "¿cancelo/muevo tu cita?" — el handler
