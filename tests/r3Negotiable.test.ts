@@ -132,7 +132,7 @@ test('día con VARIAS horas libres (autoAssign) → muestra honesta de amplitud,
   assert.match(r.responseText, /desde temprano hasta la noche/i, 'amplitud honesta (ambas franjas)');
   assert.match(r.responseText, /busca[rs]?\s+otra/i, 'Versión C: deja la puerta abierta');
   // Ya NO es la propuesta de slot único de R3 (esa quedó acotada a una sola hora).
-  assert.doesNotMatch(r.responseText, /¿te sirve o preferis otra hora\?/i);
+  assert.doesNotMatch(r.responseText, /¿te sirve o prefieres otra hora\?/i);
   // presentBy ausente → el cliente elige HORA, no barbero → sin nombres.
   assert.doesNotMatch(r.responseText, /Carlos|Andres/);
 });
@@ -146,7 +146,7 @@ test('día con UNA sola hora libre (autoAssign) → propuesta negociable de R3 (
 
   assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
   assert.equal(r.newContext.pendingSlots?.length, 1, 'una sola hora → un solo ancla');
-  assert.match(r.responseText, /¿te sirve o preferis otra hora\?/i, 'propuesta negociable de R3');
+  assert.match(r.responseText, /¿te sirve o prefieres otra hora\?/i, 'propuesta negociable de R3');
   assert.doesNotMatch(r.responseText, /te asigno/i);
   assert.doesNotMatch(r.responseText, /nombre/i);
   assert.equal(r.newContext.selectedSlot, undefined, 'no cierra todavía (espera el "sí")');
@@ -207,5 +207,5 @@ test('varios barberos con distinto arranque (autoAssign) → muestra honesta de 
 
   assert.equal(r.newState, 'CONFIRMING_APPOINTMENT');
   assert.ok((r.newContext.pendingSlots?.length ?? 0) > 1, 'muestra varias horas');
-  assert.doesNotMatch(r.responseText, /¿te sirve o preferis otra hora\?/i, 'no es la propuesta de slot único');
+  assert.doesNotMatch(r.responseText, /¿te sirve o prefieres otra hora\?/i, 'no es la propuesta de slot único');
 });

@@ -149,7 +149,7 @@ test('Bug2: "a las 4" — 16:00 libre (no mostrado) → ofrece 16:00 y ESPERA co
   assert.equal(r.newContext.nearestOfferSlot, localISO('16:00'));
   // Mensaje de oferta con confirmación pendiente (anti Bug-B), no "agendada".
   assert.match(r.responseText, /agendo/i);
-  assert.doesNotMatch(r.responseText, /lo mas cercano/i);
+  assert.doesNotMatch(r.responseText, /lo m[aá]s cercano/i);
 });
 
 // ─── Bug 2: aceptación "sí" tras la oferta funciona ──────────────────────────
@@ -182,7 +182,7 @@ test('Bug2: "5 de la tarde" con 17:00 ocupado → ofrece 16:30 real (antes), no 
   // El ofrecido NO es ninguno de los slots de la mañana mostrados (matcher real).
   const morningISOs = MORNING.map((s) => s.startsAt);
   assert.ok(!morningISOs.includes(r.newContext.nearestOfferSlot!));
-  assert.match(r.responseText, /lo mas cercano/i);
+  assert.match(r.responseText, /lo m[aá]s cercano/i);
 });
 
 // ─── Bug 2: hora NO disponible → ofrece la real más cercana (dirección DESPUÉS) ─
@@ -198,7 +198,7 @@ test('Bug2: "a las 12" con 11:00–13:00 ocupado → ofrece 13:00 real (después
   // 13:00 (después de las 12) no estaba entre los slots de la mañana mostrados.
   const morningISOs = MORNING.map((s) => s.startsAt);
   assert.ok(!morningISOs.includes(localISO('13:00')));
-  assert.match(r.responseText, /lo mas cercano/i);
+  assert.match(r.responseText, /lo m[aá]s cercano/i);
 });
 
 // ─── Regresión: selección directa entre los mostrados (S5-BOT-01, caso a/b) ───

@@ -27,6 +27,7 @@
 
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
 import { getCatalog, getStaffForService } from '../catalog';
+import { SCHEDULING_ERROR_MESSAGE, SERVICE_QUESTION_RESET, DAYS_ES, MONTHS_ES } from '../copy';
 import {
   formatTimeHumanFromDate,
   formatTimeHuman,
@@ -54,15 +55,7 @@ import type { LifestyleIncomingMessage, SlotCandidate, StateHandlerDeps, StateHa
 
 // Mensaje al usuario cuando los queries de disponibilidad fallan (reusa el
 // patrón de presentingSlots.ts).
-const SCHEDULING_ERROR_MESSAGE =
-  'No pude verificar la disponibilidad en este momento. ' +
-  'Intenta de nuevo en unos minutos o escribenos directamente.';
-
-const DAYS_ES   = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-const MONTHS_ES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
+// DAYS_ES/MONTHS_ES y SCHEDULING_ERROR_MESSAGE viven en copy.ts (AUD-06).
 
 // NO_PREFERENCE_KEYWORDS se movió a interpreter.ts (R4.2): fuente ÚNICA compartida
 // con qualifyingStaff. Aquí se usa como fallback del estrangulamiento; el guard
@@ -113,7 +106,7 @@ export async function handleConfirmingAppointment(
     return {
       newState: 'QUALIFYING_SERVICE',
       newContext: { ...context, ...clearBookingSelection() },
-      responseText: 'Sin problema. Cual servicio te interesa?',
+      responseText: SERVICE_QUESTION_RESET,
     };
   }
 
@@ -122,7 +115,7 @@ export async function handleConfirmingAppointment(
     return {
       newState:     'QUALIFYING_DATETIME',
       newContext:   { ...context, nearestOfferSlot: null },
-      responseText: 'Para que dia quieres tu cita?',
+      responseText: '¿Para qué día quieres tu cita?',
     };
   }
 
@@ -284,7 +277,7 @@ export async function handleConfirmingAppointment(
       return {
         newState:   'CONFIRMING_APPOINTMENT',
         newContext: { ...context, clarification_attempts: 0, nearestOfferSlot: null },
-        responseText: `Tengo ${byBarber}. Con quien prefieres?`,
+        responseText: `Tengo ${byBarber}. ¿Con quién prefieres?`,
       };
     }
 
@@ -366,7 +359,7 @@ export async function handleConfirmingAppointment(
     return {
       newState:   'CONFIRMING_APPOINTMENT',
       newContext: { ...context, clarification_attempts: attempts + 1, nearestOfferSlot: null },
-      responseText: `Perdona la confusion. Tengo ${offer}. Cual prefieres?`,
+      responseText: `Perdona la confusión. Tengo ${offer}. ¿Cuál prefieres?`,
     };
   }
 
@@ -408,9 +401,8 @@ export async function handleConfirmingAppointment(
       nearestOfferSlot:       null,
     },
     responseText:
-      'Disculpa, no te segui bien. Solo dime a que hora te gustaria, ' +
-      'por ejemplo "a las 5" o "la mas temprano". Si cualquiera te sirve, ' +
-      'dime "cualquiera" y te asigno la primera.',
+      'Disculpa, no te seguí bien. ¿A qué hora te acomoda? ' +
+      'Puedes decirme "a las 5", "la más temprana" o "cualquiera" y te asigno la primera.',
   };
 }
 
@@ -501,9 +493,9 @@ async function handleOfferNearest(
     // El slot ofrecido queda en pendingSlots[0] = nearestOfferSlot, donde
     // la rama de aceptación (isAffirmation) lo recoge.
     const responseText = isExact
-      ? `Si, tengo disponible a las ${offeredTime}${staffPart}. Te la agendo?`
+      ? `Sí, tengo disponible a las ${offeredTime}${staffPart}. ¿Te la agendo?`
       : `A las ${reqLabel} no tengo disponible${staffPart}. ` +
-        `Lo mas cercano es a las ${offeredTime}. Te sirve?`;
+        `Lo más cercano es a las ${offeredTime}. ¿Te sirve?`;
 
     return {
       newState:   'CONFIRMING_APPOINTMENT',
@@ -538,7 +530,7 @@ async function handleOfferNearest(
       rejection_attempts:     0,
     },
     responseText:
-      `A las ${reqLabel} no tengo disponible${staffPart} ese dia. ¿Para que otro dia te gustaria?`,
+      `A las ${reqLabel} no tengo disponible${staffPart} ese día. ¿Para qué otro día te gustaría?`,
   };
 }
 
@@ -573,7 +565,7 @@ function buildRejectionResult(
         nearestOfferSlot:       null,
       },
       responseText:
-        'Dejame conectarte con el equipo para que te ayuden a encontrar lo que buscas. ' +
+        'Déjame conectarte con el equipo para que te ayuden a encontrar lo que buscas. ' +
         'Gracias por tu paciencia.',
     };
   }
@@ -586,14 +578,14 @@ function buildRejectionResult(
       .slice(0, 2)
       .map((s) => formatTimeHumanFromDate(new Date(s.startsAt), tz));
     responseText = alts.length > 0
-      ? `Sin problema. Tambien tengo a las ${alts.join(' o a las ')}. Cual te acomoda?`
-      : 'Sin problema. Que hora te vendria mejor?';
+      ? `Sin problema. También tengo a las ${alts.join(' o a las ')}. ¿Cuál te acomoda?`
+      : 'Sin problema. ¿Qué hora te vendría mejor?';
   } else if (rejections === 1) {
     // B: reconocer + preguntar abierto sobre la hora.
-    responseText = 'Entiendo. Que hora te vendria mejor?';
+    responseText = 'Entiendo. ¿Qué hora te vendría mejor?';
   } else {
     // C: reconocer + cambiar de eje (no repetir lo de la hora).
-    responseText = 'Va. Prefieres quizas otro dia, o buscas algo en particular?';
+    responseText = 'Va. ¿Prefieres quizás otro día, o buscas algo en particular?';
   }
 
   return {
@@ -1033,7 +1025,7 @@ async function buildConfirmationResult(
   return {
     newState:     'AWAITING_BOOKING_NAME',
     newContext,
-    responseText: `Perfecto, aqui los detalles:\n\n${summary}\n\n${nameQuestion}`,
+    responseText: `Perfecto, aquí los detalles:\n\n${summary}\n\n${nameQuestion}`,
   };
 }
 
@@ -1119,7 +1111,7 @@ async function buildBarberMismatchResult(
         clarification_attempts: 0,
         rejection_attempts:     0,
       },
-      responseText: `Con ${reqName} no tengo a esa hora, pero si lo tengo ${offer}. Te acomoda alguna?`,
+      responseText: `Con ${reqName} no tengo a esa hora, pero sí lo tengo ${offer}. ¿Te acomoda alguna?`,
     };
   }
 
@@ -1133,8 +1125,8 @@ async function buildBarberMismatchResult(
       rejection_attempts:     0,
     },
     responseText:
-      `No tengo a ${reqName} disponible ese dia. ${chosen.staffName} si esta a las ${chosenTime}. ` +
-      `Te la agendo con ${chosen.staffName}?`,
+      `No tengo a ${reqName} disponible ese día. ${chosen.staffName} sí está a las ${chosenTime}. ` +
+      `¿Te la agendo con ${chosen.staffName}?`,
   };
 }
 

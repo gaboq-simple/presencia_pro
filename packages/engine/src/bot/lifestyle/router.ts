@@ -370,7 +370,7 @@ async function routeToHandler(
         return {
           newState:     'GREETING',
           newContext:   {},
-          responseText: 'Gracias a ti! Aqui andamos para lo que necesites.',
+          responseText: '¡Gracias a ti! Aquí andamos para lo que necesites.',
         };
       }
       // AUD-04: mismo flujo con confirmación que GREETING (AUD-02). Antes,
@@ -425,8 +425,8 @@ async function routeToHandler(
           newState:     'ESCALATED',
           newContext:   { ...context, escalation_holds: holds + 1 },
           responseText:
-            'El equipo ya esta enterado y te contactan en breve. Gracias por tu paciencia. ' +
-            'Si mientras tanto quieres que te siga atendiendo yo, dime que necesitas.',
+            'El equipo ya está enterado y te contactan en breve. Gracias por tu paciencia. ' +
+            'Si mientras tanto quieres que te siga atendiendo yo, dime qué necesitas.',
         };
       }
       const resumed = await routeToHandler(
@@ -504,7 +504,7 @@ async function answerSideQuestion(
       model:     deps.model,
       maxTokens: 120,
       system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      messages:  [{ role: 'user', content: `${apptCtx} Ahora pregunta: "${question}". Responde en 1-2 lineas. Sin markdown. Sin signos de interrogacion ni exclamaciones al inicio.` }],
+      messages:  [{ role: 'user', content: `${apptCtx} Ahora pregunta: "${question}". Responde en 1-2 líneas. Sin markdown. Ortografía correcta: acentos y signos de apertura (¿ ¡).` }],
       timeoutMs: TIMEOUT_SONNET_MS,
       context:   { businessId: deps.business.id, customerPhone: '', state: 'CONFIRMED' },
     });

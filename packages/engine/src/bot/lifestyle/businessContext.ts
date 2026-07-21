@@ -220,7 +220,7 @@ export function answerSideQuestion(
     }
     case 'location': {
       if (!business.address?.trim()) return deriva(business, opts);
-      const map = business.mapUrl?.trim() ? ` Aquí el mapa: ${business.mapUrl}` : '';
+      const map = business.mapUrl?.trim() ? ` Aquí el mapa:\n${business.mapUrl}` : '';
       return `Estamos en ${business.address}.${map}`;
     }
     case 'duration': {
@@ -234,7 +234,7 @@ export function answerSideQuestion(
     }
     case 'reviews': {
       if (!business.reviewUrl?.trim()) return deriva(business, opts);
-      return `Nos ayudas un montón con tu reseña aquí: ${business.reviewUrl}`;
+      return `Nos ayudas mucho con tu reseña aquí:\n${business.reviewUrl}`;
     }
     case 'other':
     default:
@@ -246,7 +246,7 @@ export function answerSideQuestion(
 function deriva(business: LifestyleBusinessConfig, opts?: BusinessContextOptions): string {
   const minisite = buildMinisiteUrl(business, opts);
   if (minisite) {
-    return `Puedes ver todos los detalles en nuestro sitio: ${minisite}`;
+    return `Puedes ver todos los detalles en nuestro sitio:\n${minisite}`;
   }
   return 'Con gusto lo consulto con el equipo y te confirmo.';
 }

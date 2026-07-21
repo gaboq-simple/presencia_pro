@@ -92,7 +92,7 @@ export async function handleFallback(
       newState:     'ESCALATED',
       newContext:   { ...context, fallbackAttempts: attempts },
       responseText:
-        'Enseguida te comunico con nuestro equipo para que te ayuden personalmente. Gracias por tu paciencia! 🙏',
+        'Enseguida te comunico con nuestro equipo para que te ayuden personalmente. ¡Gracias por tu paciencia!',
     };
   }
 

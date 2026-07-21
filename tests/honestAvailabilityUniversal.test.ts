@@ -272,7 +272,7 @@ test('(b) fallback honesto: requery del día VACÍO → NO reofrece un slot viej
 
   assert.equal(r.newState, 'QUALIFYING_DATETIME', 'pivota a pedir otro día (no finge un slot)');
   assert.equal(r.newContext.pendingSlots, undefined, 'limpia los pendingSlots viejos');
-  assert.match(r.responseText, /otro dia/i, 'pregunta honestamente por otro día');
+  assert.match(r.responseText, /otro d[ií]a/i, 'pregunta honestamente por otro día');
   assert.doesNotMatch(r.responseText, /lo mas cercano/i, 'NO finge un "lo más cercano" con un slot viejo');
   assert.doesNotMatch(r.responseText, /16:00|4 de la tarde/i, 'no reofrece el slot viejo (16:00)');
 });

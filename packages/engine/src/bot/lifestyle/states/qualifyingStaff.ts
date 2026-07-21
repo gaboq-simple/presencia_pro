@@ -30,6 +30,7 @@ import { parseDate } from './qualifyingDatetime';
 import { getTodayStr } from '../tzUtils';
 import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE } from '../copy';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -41,7 +42,7 @@ export const MAX_TOTAL_ATTEMPTS = 5;
 // con confirmingAppointment. El saneo S5-BOT-04 (sin 'disponible'/'libre' sueltos)
 // vive allá. Aquí solo se usa como fallback del estrangulamiento.
 
-const FLOW_QUESTION = 'Con quien te gustaria agendar?';
+const FLOW_QUESTION = '¿Con quién te gustaría agendar?';
 
 export async function handleQualifyingStaff(
   msg: LifestyleIncomingMessage,
@@ -63,7 +64,7 @@ export async function handleQualifyingStaff(
         ambiguous_service_candidates: undefined,
         clarification_attempts:       0,
       },
-      responseText: 'Sin problema. Cual servicio te interesa?',
+      responseText: SERVICE_QUESTION_RESET,
     };
   }
 
@@ -71,7 +72,7 @@ export async function handleQualifyingStaff(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context },
-      responseText: 'Que servicio te interesa?',
+      responseText: '¿Qué servicio te interesa?',
     };
   }
 
@@ -258,7 +259,7 @@ export async function handleQualifyingStaff(
     return {
       newState:     'FALLBACK',
       newContext:   { ...effectiveContext, clarification_attempts: 0 },
-      responseText: 'Parece que no estamos conectando. Dejame pasarte con alguien del equipo para ayudarte mejor.',
+      responseText: ESCALATION_TO_TEAM_MESSAGE,
     };
   }
 
@@ -335,7 +336,7 @@ function buildStaffQuestion(activeStaff: StaffRow[], favStaffId: string | undefi
   if (favStaffId) {
     const fav = activeStaff.find((s) => s.id === favStaffId);
     if (fav) {
-      return `Con ${fav.name} como la vez anterior, o prefieres otro?\n\n${staffList}\n\nO escribe "cualquiera" si da igual.`;
+      return `¿Con ${fav.name} como la vez anterior, o prefieres otro?\n\n${staffList}\n\nO escribe "cualquiera" si da igual.`;
     }
   }
 
@@ -343,7 +344,7 @@ function buildStaffQuestion(activeStaff: StaffRow[], favStaffId: string | undefi
 }
 
 function buildDatetimeQuestion(): string {
-  return 'Para que dia prefieres tu cita? Puedes decirme el dia de la semana o fecha, y si prefieres manana o tarde.';
+  return DATE_QUESTION_MESSAGE;
 }
 
 // ─── Búsqueda flexible de staff ───────────────────────────────────────────────

@@ -24,6 +24,7 @@ import { isAvailabilityQuestion } from '../availabilityIntent';
 import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import { utcToLocalDateStr, getTodayStr, noonUTCDate } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE } from '../copy';
 
 // ─── Keywords walk-in ─────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ const DAY_MAP: Record<string, number> = {
   jueves: 4, viernes: 5, sábado: 6, sabado: 6,
 };
 
-const FLOW_QUESTION = 'Para que dia prefieres tu cita? Puedes decirme el dia de la semana o fecha, y si prefieres manana o tarde.';
+const FLOW_QUESTION = DATE_QUESTION_MESSAGE;
 
 // Intentos totales de clarificación antes de escalar a FALLBACK.
 // Exportado para el test de relación de caps (S5-BOT-12).
@@ -121,7 +122,7 @@ export async function handleQualifyingDatetime(
         ambiguous_service_candidates: undefined,
         clarification_attempts:       0,
       },
-      responseText: 'Sin problema. Cual servicio te interesa?',
+      responseText: SERVICE_QUESTION_RESET,
     };
   }
 
@@ -372,7 +373,7 @@ export async function handleQualifyingDatetime(
     return {
       newState:     'FALLBACK',
       newContext:   { ...context, clarification_attempts: 0 },
-      responseText: 'Parece que no estamos conectando. Dejame pasarte con alguien del equipo para ayudarte mejor.',
+      responseText: ESCALATION_TO_TEAM_MESSAGE,
     };
   }
 
@@ -380,7 +381,7 @@ export async function handleQualifyingDatetime(
     newState:     'QUALIFYING_DATETIME',
     newContext:   clarResult.updatedContext,
     responseText:
-      'No entendi bien que dia prefieres. Puedes decirme algo como "este viernes", "el martes" o una fecha como "23 de abril"?',
+      'No entendí bien qué día prefieres. ¿Puedes decirme algo como "este viernes", "el martes" o una fecha como "23 de abril"?',
   };
 }
 
@@ -453,7 +454,7 @@ function detectPeriodFromReply(body: string): 'morning' | 'afternoon' | null {
 }
 
 function buildDayOnlyQuestion(): string {
-  return 'Perfecto. Para que dia te gustaria? Puedes decirme el dia de la semana o una fecha (ej. "este viernes").';
+  return 'Perfecto. ¿Para qué día te gustaría? Puedes decirme el día de la semana o una fecha (ej. "este viernes").';
 }
 
 // ─── Parseo de fecha ──────────────────────────────────────────────────────────

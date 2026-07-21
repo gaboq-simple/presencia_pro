@@ -187,7 +187,7 @@ test('AWAITING_CANCEL_CONFIRMATION + "no" NO toca la BD y la cita queda', async 
   const r = await dispatch('AWAITING_CANCEL_CONFIRMATION', makeMsg('no'), askCtx('cancellation'), deps);
 
   assert.equal(r.newState, 'GREETING');
-  assert.match(r.responseText, /queda como esta/);
+  assert.match(r.responseText, /queda como está/);
   assert.equal(rpcCalls.length, 0);
 });
 
@@ -198,12 +198,12 @@ test('respuestas ambiguas: 1 clarify y al 2º sale SIN cancelar', async () => {
 
   const r1 = await dispatch('AWAITING_CANCEL_CONFIRMATION', makeMsg('a ver dejame checar'), askCtx('cancellation'), deps);
   assert.equal(r1.newState, 'AWAITING_CANCEL_CONFIRMATION');
-  assert.match(r1.responseText, /si o no/);
+  assert.match(r1.responseText, /sí o no/);
   assert.equal(r1.newContext.clarification_attempts, 1);
 
   const r2 = await dispatch('AWAITING_CANCEL_CONFIRMATION', makeMsg('mmm bueno este'), r1.newContext, deps);
   assert.equal(r2.newState, 'GREETING');
-  assert.match(r2.responseText, /queda como esta/);
+  assert.match(r2.responseText, /queda como está/);
   assert.equal(rpcCalls.length, 0);
 });
 
@@ -214,7 +214,7 @@ test('GREETING + cancelar SIN cita futura responde honesto y no agenda', async (
   const r = await dispatch('GREETING', makeMsg('cancela mi cita'), {}, deps);
 
   assert.equal(r.newState, 'GREETING');
-  assert.match(r.responseText, /No encontre una cita/);
+  assert.match(r.responseText, /No encontré una cita/);
   assert.doesNotMatch(r.responseText, /Perfecto|barbero/i);
   assert.equal(rpcCalls.length, 0);
 });
@@ -235,7 +235,7 @@ test('GREETING + "quiero cambiar mi cita" → confirmar → QUALIFYING_DATETIME 
   // NO re-pregunta el servicio/barbero que ya conoce (hallazgo del audit).
   assert.equal(r.newContext.serviceId, SVC);
   assert.equal(r.newContext.staffId, CARLOS);
-  assert.match(r.responseText, /que dia/i);
+  assert.match(r.responseText, /qué día/i);
   assert.equal(rpcCalls.length, 1);
   assert.equal(rpcCalls[0]!.args['p_status'], 'cancelled');
 });

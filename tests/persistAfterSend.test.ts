@@ -129,7 +129,7 @@ test('sin send inyectado: comportamiento histórico — persiste y devuelve el t
     anthropicKey: '',
   });
 
-  assert.match(r.message, /queda como esta/);
+  assert.match(r.message, /queda como está/);
   assert.equal(r.sent, undefined);
   const ups = convUpserts(writes);
   assert.equal(ups.length, 1);
@@ -156,7 +156,7 @@ test('send exitoso: envía el texto, persiste después y marca sent:true', async
   assert.equal(r.sent, true);
   assert.equal(r.sendFailed, undefined);
   assert.equal(sends.length, 1);
-  assert.match(sends[0]!, /queda como esta/);
+  assert.match(sends[0]!, /queda como está/);
   const ups = convUpserts(writes);
   assert.equal(ups.length, 1);
   assert.equal(ups[0]!.payload['state'], 'GREETING');

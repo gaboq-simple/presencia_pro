@@ -350,8 +350,8 @@ export async function handleGreeting(
         nextState: 'SHOWING_SLOTS',
         sonnetInstruction:
           `El cliente quiere ${resolvedService!.name} con ${resolvedStaff!.name} para ${dateLabel}. `
-          + `Confirma servicio, barbero y dia en una sola linea. No anuncies que vas a revisar horarios — los horarios se presentan a continuacion en el mismo mensaje. `
-          + `Maximo 2 lineas. Sin signos de interrogacion al inicio ni exclamaciones al inicio.`,
+          + `Confirma servicio, barbero y día en una sola línea. No anuncies que vas a revisar horarios — los horarios se presentan a continuación en el mismo mensaje. `
+          + `Máximo 2 líneas. Ortografía correcta: acentos y signos de apertura (¿ ¡).`,
         deterministicFallback:
           `${resolvedService!.name} con ${resolvedStaff!.name} para ${dateLabel}, anotado.`,
       };
@@ -362,10 +362,10 @@ export async function handleGreeting(
         nextState: 'QUALIFYING_DATETIME',
         sonnetInstruction:
           `El cliente quiere ${resolvedService!.name} con ${resolvedStaff!.name}. `
-          + `Confirma servicio y barbero brevemente. Pregunta para que dia quiere su cita. `
-          + `Maximo 2 lineas. Sin signos de interrogacion al inicio ni exclamaciones al inicio.`,
+          + `Confirma servicio y barbero brevemente. Pregunta para qué día quiere su cita. `
+          + `Máximo 2 líneas. Ortografía correcta: acentos y signos de apertura (¿ ¡).`,
         deterministicFallback:
-          `${resolvedService!.name} con ${resolvedStaff!.name}, anotado. Para que dia lo quieres?`,
+          `${resolvedService!.name} con ${resolvedStaff!.name}, anotado. ¿Para qué día lo quieres?`,
       };
       break;
     }
@@ -379,9 +379,9 @@ export async function handleGreeting(
         sonnetInstruction:
           `El cliente quiere ${resolvedService!.name} para ${dateLabel3} a las ${timeLabel}. `
           + `Confirma servicio, fecha y hora brevemente. Pregunta si tiene barbero de preferencia o le asignas uno disponible. `
-          + `Maximo 2 lineas. Sin signos de interrogacion al inicio ni exclamaciones al inicio.`,
+          + `Máximo 2 líneas. Ortografía correcta: acentos y signos de apertura (¿ ¡).`,
         deterministicFallback:
-          `${resolvedService!.name} para ${dateLabel3} a las ${timeLabel}. Tienes barbero de preferencia o te asigno uno disponible?`,
+          `${resolvedService!.name} para ${dateLabel3} a las ${timeLabel}. ¿Tienes barbero de preferencia o te asigno uno disponible?`,
       };
       break;
     }
@@ -392,9 +392,9 @@ export async function handleGreeting(
         sonnetInstruction:
           `El cliente quiere ${resolvedService!.name} para ${dateLabel2}. `
           + `Confirma servicio y fecha brevemente. Pregunta si tiene barbero de preferencia o le asignas uno disponible. `
-          + `Maximo 2 lineas. Sin signos de interrogacion al inicio ni exclamaciones al inicio.`,
+          + `Máximo 2 líneas. Ortografía correcta: acentos y signos de apertura (¿ ¡).`,
         deterministicFallback:
-          `${resolvedService!.name} para ${dateLabel2}. Tienes barbero de preferencia o te asigno uno disponible?`,
+          `${resolvedService!.name} para ${dateLabel2}. ¿Tienes barbero de preferencia o te asigno uno disponible?`,
       };
       break;
     }
@@ -404,9 +404,9 @@ export async function handleGreeting(
         sonnetInstruction:
           `El cliente quiere ${resolvedService!.name}. `
           + `Confirma el servicio brevemente. Pregunta si tiene barbero de preferencia o le asignas uno disponible. `
-          + `Maximo 2 lineas. Sin signos de interrogacion al inicio ni exclamaciones al inicio.`,
+          + `Máximo 2 líneas. Ortografía correcta: acentos y signos de apertura (¿ ¡).`,
         deterministicFallback:
-          `${resolvedService!.name}, con gusto. Tienes barbero de preferencia o te asigno uno disponible?`,
+          `${resolvedService!.name}, con gusto. ¿Tienes barbero de preferencia o te asigno uno disponible?`,
       };
       break;
     }
@@ -504,7 +504,7 @@ export async function handleGreeting(
 /** Aviso de privacidad para clientes nuevos (LFPDPPP Art. 8). Consentimiento tácito. */
 function buildPrivacyNotice(): string {
   const privacyUrl = process.env['PRIVACY_POLICY_URL'] ?? 'https://zentriq.mx/aviso-de-privacidad';
-  return `Al continuar, aceptas nuestro aviso de privacidad: ${privacyUrl}`;
+  return `Al continuar, aceptas nuestro aviso de privacidad:\n${privacyUrl}`;
 }
 
 /**

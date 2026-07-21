@@ -163,7 +163,7 @@ test('CONFIRMED/cancel: "cancelar" → COMPLETED + texto de cancelación + 1 mut
 
   assert.ok(r, 'debe manejar el mensaje (no null)');
   assert.equal(r!.newState, 'COMPLETED');
-  assert.equal(r!.responseText, 'Entendido, cancelamos tu cita. Cuando quieras reagendar aqui estamos.');
+  assert.equal(r!.responseText, 'Entendido, cancelamos tu cita. Cuando quieras reagendar aquí estamos.');
   assert.equal(mutationCount(rec), 1, 'exactamente una mutación de la cita');
 });
 
