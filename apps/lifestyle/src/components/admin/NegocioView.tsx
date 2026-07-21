@@ -14,9 +14,11 @@ import type { StaffRecompraResult, StaffRecompraRow, RecompraTone } from '@/lib/
 import type { PulsoHoy as PulsoHoyData } from '@/lib/pulsoHoy';
 import type { SemanaProxima as SemanaData } from '@/lib/pulsoSemana';
 import type { RetentionFeed } from '@/lib/cadence';
+import type { Fuga as FugaData } from '@/lib/fugaData';
 import PulsoHoy from '@/components/admin/PulsoHoy';
 import SemanaProxima from '@/components/admin/SemanaProxima';
 import HoyFeed from '@/components/admin/HoyFeed';
+import Fuga from '@/components/admin/Fuga';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 function money(n: number): string {
@@ -311,7 +313,7 @@ function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElem
   );
 }
 
-export default function NegocioView({ revenue, occupancy, barberos, pulso, semana, feed, contactados }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData; feed: RetentionFeed; contactados: number }): React.ReactElement {
+export default function NegocioView({ revenue, occupancy, barberos, pulso, semana, feed, contactados, fuga }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData; feed: RetentionFeed; contactados: number; fuga: FugaData }): React.ReactElement {
   const { thisMonth, comparison, months, hasAnyRevenue } = revenue;
 
   return (
@@ -324,11 +326,14 @@ export default function NegocioView({ revenue, occupancy, barberos, pulso, seman
       {/* ── La semana que viene (Paso 2) — la pieza accionable ── */}
       <SemanaProxima data={semana} />
 
-      {/* ── El rescate (feed RFM, ex-pestaña "Hoy") — lugar de "la fuga" (se rediseña
-           en un paso posterior; por ahora se preserva tal cual). ── */}
+      {/* ── El rescate (feed RFM, ex-pestaña "Hoy"). ── */}
       <div className="mt-6">
         <HoyFeed feed={feed} contactados={contactados} embedded />
       </div>
+
+      {/* ── La fuga (Paso 5): capacidad sin usar + faltas repetidas. Dónde hay espacio,
+           no reproche. Ámbar tenue, nunca rojo. ── */}
+      <Fuga data={fuga} />
 
       {/* ── BI histórico — plegado abajo: el "cómo viene el mes" no compite con el hoy. ── */}
       <details className="group mt-6">

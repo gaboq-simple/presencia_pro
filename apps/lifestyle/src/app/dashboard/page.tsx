@@ -48,6 +48,7 @@ import { getNegocioOccupancy } from '@/lib/negocioOccupancy';
 import { getNegocioStaffRecompra } from '@/lib/negocioStaff';
 import { getPulsoHoy } from '@/lib/pulsoHoy';
 import { getPulsoSemana } from '@/lib/pulsoSemana';
+import { getFuga } from '@/lib/fugaData';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -208,7 +209,7 @@ export default async function DashboardPage({
 
   // 6. Feed de retención (pestaña "Hoy") + pulso + agregados de Clientela (pestaña 3)
   //    — todo scopeado por el businessId de la sesión.
-  const [retentionFeed, contactados, clientelaStats, negocioRevenue, negocioOccupancy, negocioStaff, pulsoHoy, pulsoSemana, activityPage] = await Promise.all([
+  const [retentionFeed, contactados, clientelaStats, negocioRevenue, negocioOccupancy, negocioStaff, pulsoHoy, pulsoSemana, fuga, activityPage] = await Promise.all([
     getRetentionFeed(businessId),
     getContactadosCount(businessId),
     getClientelaStats(businessId),
@@ -217,6 +218,7 @@ export default async function DashboardPage({
     getNegocioStaffRecompra(businessId),
     getPulsoHoy(businessId),
     getPulsoSemana(businessId),
+    getFuga(businessId),
     getActivityFeed(businessId),
   ]);
 
@@ -249,6 +251,7 @@ export default async function DashboardPage({
           semana={pulsoSemana}
           feed={retentionFeed}
           contactados={contactados}
+          fuga={fuga}
         />
       }
       clientela={<ClientelaView stats={clientelaStats} />}
