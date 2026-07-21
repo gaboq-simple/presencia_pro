@@ -35,6 +35,19 @@ const MODE_LABEL: Record<string, string> = {
   bot:    'Bot',
 };
 
+// AUD-03: conversación en modo bot cuyo FSM quedó en ESCALATED — el bot le
+// prometió un humano al cliente. Badge ámbar propio para que no se pierda
+// entre las "Bot" normales (el server action ya las ordena arriba).
+function badgeFor(conv: { sessionMode: string; state: string }): { cls: string; label: string } {
+  if (conv.sessionMode === 'bot' && conv.state === 'ESCALATED') {
+    return { cls: 'bg-amber-tint text-amber', label: 'Escalada' };
+  }
+  return {
+    cls:   MODE_BADGE[conv.sessionMode] ?? 'bg-past-bg text-past-ink',
+    label: MODE_LABEL[conv.sessionMode] ?? conv.sessionMode,
+  };
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatPhone(phone: string): string {
@@ -167,11 +180,9 @@ export default function ConversationList({ onClose }: Props) {
                           {formatPhone(conv.customerPhone)}
                         </p>
                         <span
-                          className={`shrink-0 rounded-pill px-2 py-0.5 text-[10px] font-semibold ${
-                            MODE_BADGE[conv.sessionMode] ?? 'bg-past-bg text-past-ink'
-                          }`}
+                          className={`shrink-0 rounded-pill px-2 py-0.5 text-[10px] font-semibold ${badgeFor(conv).cls}`}
                         >
-                          {MODE_LABEL[conv.sessionMode] ?? conv.sessionMode}
+                          {badgeFor(conv).label}
                         </span>
                       </div>
 

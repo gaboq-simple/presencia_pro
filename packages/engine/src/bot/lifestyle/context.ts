@@ -67,12 +67,18 @@ export function shouldResetConversation(lastMessageAt: Date): boolean {
 // ─── Terminal state check ─────────────────────────────────────────────────────
 
 /**
- * Estados terminales: conversación que llegó a su fin o fue escalada.
+ * Estados terminales: conversación que llegó a su fin.
  * Si el usuario escribe después de llegar a uno de estos estados,
  * la conversación se reinicia a GREETING sin importar el tiempo de inactividad.
+ *
+ * AUD-03: ESCALATED ya NO es terminal. Era el hoyo de la promesa vacía: el bot
+ * decía "te comunico con el equipo" y el siguiente mensaje reseteaba a GREETING
+ * — el bot re-saludaba como si nada y el case ESCALATED del router jamás
+ * ejecutaba (la notificación diferida al admin moría ahí). Ahora ESCALATED es
+ * pegajoso: el router sostiene la promesa un turno y luego retoma; el reset por
+ * inactividad >24h sigue aplicando como red de seguridad.
  */
 const TERMINAL_STATES = new Set<string>([
-  'ESCALATED',
   'COMPLETED',
 ]);
 
