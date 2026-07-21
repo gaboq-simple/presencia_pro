@@ -22,15 +22,24 @@
 export function tileCapacity(
   slots: ReadonlyArray<{ startsAtMs: number; endsAtMs: number }>,
 ): number {
+  return tileCapacitySlots(slots).length;
+}
+
+// Igual que tileCapacity pero devuelve los slots TOMADOS (no solo el conteo). Sirve
+// para bucketearlos después por franja (la fuga: capacidad sin usar por día×franja).
+// Genérico: preserva cualquier campo extra del slot (p.ej. su Date de inicio).
+export function tileCapacitySlots<T extends { startsAtMs: number; endsAtMs: number }>(
+  slots: readonly T[],
+): T[] {
   const sorted = [...slots].sort((a, b) => a.startsAtMs - b.startsAtMs);
-  let count = 0;
+  const kept: T[] = [];
   let lastEndMs = -Infinity;
   for (const s of sorted) {
     if (s.startsAtMs < lastEndMs) continue; // se solapa con el anterior tomado
     lastEndMs = s.endsAtMs;
-    count++;
+    kept.push(s);
   }
-  return count;
+  return kept;
 }
 
 // ── Ocupación de un día ───────────────────────────────────────────────────────
