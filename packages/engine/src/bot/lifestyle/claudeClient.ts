@@ -87,6 +87,24 @@ export async function callClaude(params: CallClaudeParams): Promise<Anthropic.Me
         timeout_ms:     timeoutMs,
         // TODO: implementar alerta si 429s son frecuentes (sesión de monitoreo)
       }));
+    } else {
+      // Sin este log, un modelo retirado (404), timeout o 5xx degrada TODAS las
+      // respuestas generativas a plantilla determinista sin ningún síntoma —
+      // pasó en prod con claude-sonnet-4-20250514 (AUD-01, 2026-07-20).
+      const e = err as { name?: string; status?: number; message?: string };
+      console.error(JSON.stringify({
+        ts:             new Date().toISOString(),
+        service:        'bot',
+        event:          'claude_api_error',
+        error_name:     e?.name ?? 'unknown',
+        error_status:   typeof e?.status === 'number' ? e.status : null,
+        error_message:  typeof e?.message === 'string' ? e.message.slice(0, 300) : null,
+        business_id:    context.businessId,
+        customer_phone: maskPhone(context.customerPhone),
+        state:          context.state,
+        model,
+        timeout_ms:     timeoutMs,
+      }));
     }
     throw err;
   }

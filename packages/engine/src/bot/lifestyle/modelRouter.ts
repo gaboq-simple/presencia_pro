@@ -12,7 +12,9 @@ import type { LifestyleBotState } from '../../types/lifestyle.types';
 // ─── Constantes de modelos ────────────────────────────────────────────────────
 
 const HAIKU_MODEL  = 'claude-haiku-4-5-20251001';
-const SONNET_MODEL = 'claude-sonnet-4-20250514';
+// claude-sonnet-4-20250514 fue retirado por Anthropic (~2026-06-15) y devuelve 404;
+// verificado en vivo 2026-07-20. claude-sonnet-5 es el reemplazo vigente (alias sin fecha).
+const SONNET_MODEL = 'claude-sonnet-5';
 
 // ─── Clasificación de estados ─────────────────────────────────────────────────
 
