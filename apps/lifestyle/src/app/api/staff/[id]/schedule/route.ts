@@ -99,13 +99,6 @@ export async function GET(
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
   }
 
-  if (session.type === 'organization') {
-    return NextResponse.json(
-      { error: 'Usa el token de sucursal' },
-      { status: 403 },
-    );
-  }
-
   const businessId = session.business_id;
   const { id: rawId } = await params;
   const parsedId = StaffIdSchema.safeParse(rawId);
@@ -154,13 +147,6 @@ export async function PATCH(
 
   if (session.role !== 'owner' && session.role !== 'admin') {
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
-  }
-
-  if (session.type === 'organization') {
-    return NextResponse.json(
-      { error: 'Usa el token de sucursal para gestionar horarios' },
-      { status: 403 },
-    );
   }
 
   const businessId = session.business_id;

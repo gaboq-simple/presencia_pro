@@ -55,9 +55,6 @@ async function guard(rawId: string): Promise<Guarded> {
   if (session.role !== 'owner' && session.role !== 'admin') {
     return { ok: false, res: NextResponse.json({ error: 'Prohibido' }, { status: 403 }) };
   }
-  if (session.type === 'organization') {
-    return { ok: false, res: NextResponse.json({ error: 'Usa el token de sucursal para gestionar el staff' }, { status: 403 }) };
-  }
 
   const parsedId = StaffIdSchema.safeParse(rawId);
   if (!parsedId.success) {

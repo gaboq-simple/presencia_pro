@@ -101,27 +101,12 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const { month, business_id: requestedId } = parsed.data;
 
-  // 3. Resolver business_id autorizado
-  let businessId: string;
-
-  if (session.type === 'organization') {
-    if (!requestedId) {
-      return NextResponse.json(
-        { error: 'business_id requerido para sesiones de organizacion' },
-        { status: 400 },
-      );
-    }
-    if (!session.business_ids.includes(requestedId)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-    businessId = requestedId;
-  } else {
-    // Sesion de negocio directo — si se pasa business_id, debe ser el propio
-    if (requestedId && requestedId !== session.business_id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-    businessId = session.business_id;
+  // 3. business_id de la sesión (siempre una sucursal). Si el query pasa uno, debe
+  //    coincidir con el propio.
+  if (requestedId && requestedId !== session.business_id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  const businessId = session.business_id;
 
   try {
     const supabase = getServiceClient();

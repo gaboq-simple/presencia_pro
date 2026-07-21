@@ -24,30 +24,18 @@ import { verifySession, SESSION_COOKIE } from '@/lib/session';
 export type AuthRole = 'owner' | 'assistant' | 'barber' | 'admin';
 
 /**
- * Sesión activa del usuario — independiente del mecanismo de auth.
- *
- * · 'business'     → acceso a una sola sucursal (token de businesses o Supabase Auth).
- * · 'organization' → acceso al grupo de sucursales (token de organizations).
- *                    El dashboard muestra selector y filtra por business_id seleccionado.
+ * Sesión activa del usuario — independiente del mecanismo de auth. Siempre es de una
+ * sola sucursal ('business'): dueño por email (Supabase Auth), asistente/barbero por
+ * PIN. El variant 'organization' (token compartido, sin identidad) fue retirado.
  */
-export type CurrentSession =
-  | {
-      type: 'business';
-      business_id: string;
-      role: AuthRole;
-      staff_id: string | null;
-      name: string | null;
-      auth_type: 'token' | 'supabase';
-    }
-  | {
-      type: 'organization';
-      organization_id: string;
-      business_ids: string[];
-      role: 'owner';
-      staff_id: null;
-      name: string | null;
-      auth_type: 'token';
-    };
+export type CurrentSession = {
+  type: 'business';
+  business_id: string;
+  role: AuthRole;
+  staff_id: string | null;
+  name: string | null;
+  auth_type: 'token' | 'supabase';
+};
 
 // ─── Service client ───────────────────────────────────────────────────────────
 
@@ -78,18 +66,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   if (lsCookieValue) {
     const payload = await verifySession(lsCookieValue);
     if (payload) {
-      if (payload.type === 'organization') {
-        return {
-          type: 'organization',
-          organization_id: payload.organization_id,
-          business_ids: payload.business_ids,
-          role: 'owner',
-          staff_id: null,
-          name: null,
-          auth_type: 'token',
-        };
-      }
-      // 'business' | 'staff'
+      // 'business' | 'staff' (el variant 'organization' fue retirado)
       return {
         type: 'business',
         business_id: payload.business_id,
@@ -165,13 +142,6 @@ export async function requireOwnerOrAdmin(): Promise<OwnerAdminAuth> {
   if (!session) {
     return { ok: false, status: 401, error: 'No autorizado' };
   }
-  if (session.type === 'organization') {
-    return {
-      ok: false,
-      status: 403,
-      error: 'Esta acción requiere una sucursal específica, no una sesión de organización.',
-    };
-  }
   if (session.role !== 'owner' && session.role !== 'admin') {
     return { ok: false, status: 403, error: 'Requiere permisos de administrador del negocio.' };
   }
@@ -206,13 +176,6 @@ export async function requireBusinessSession(): Promise<BusinessSessionAuth> {
   const session = await getCurrentSession();
   if (!session) {
     return { ok: false, status: 401, error: 'No autorizado' };
-  }
-  if (session.type === 'organization') {
-    return {
-      ok: false,
-      status: 403,
-      error: 'Esta acción requiere una sucursal específica, no una sesión de organización.',
-    };
   }
   const ALLOWED: readonly AuthRole[] = ['owner', 'admin', 'barber', 'assistant'];
   if (!ALLOWED.includes(session.role)) {
@@ -256,21 +219,3 @@ export async function getBusinessTimezone(businessId: string): Promise<string> {
   return (data as { timezone: string } | null)?.timezone ?? 'America/Mexico_City';
 }
 
-/**
- * Carga id + name de todas las sucursales de una organización.
- * Usado por el dashboard para renderizar el BranchSelector.
- */
-export async function getOrganizationBranches(
-  businessIds: string[],
-): Promise<Array<{ id: string; name: string }>> {
-  if (businessIds.length === 0) return [];
-  const supabase = getServiceClient();
-  const { data } = await supabase
-    .from('businesses')
-    .select('id, name')
-    .in('id', businessIds)
-    .eq('active', true)
-    .order('name');
-
-  return (data ?? []) as Array<{ id: string; name: string }>;
-}

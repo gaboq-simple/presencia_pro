@@ -32,11 +32,8 @@ import ReportsConfigPanel  from './ReportsConfigPanel';
 import ReviewConfigPanel   from './ReviewConfigPanel';
 import BusinessHoursPanel  from './BusinessHoursPanel';
 import WaitlistPanel       from './WaitlistPanel';
-import BranchSelector      from './BranchSelector';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
-
-type Branch = { id: string; name: string };
 
 type Props = {
   businessId: string;
@@ -51,10 +48,6 @@ type Props = {
   staffForPhotos: AdminStaffPhotoRow[];
   staffForManagement: AdminStaffManagementRow[];
   servicesForManagement: AdminServiceRow[];
-  /** Lista de sucursales — solo presente en sesiones de organización con >1 sucursal */
-  branches?: Branch[];
-  /** ID de la organización — presente solo en sesiones de organización */
-  organizationId?: string;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -97,17 +90,12 @@ export default function DashboardLayout({
   staffForPhotos,
   staffForManagement,
   servicesForManagement,
-  branches,
-  organizationId,
 }: Props) {
   const prevDate = offsetDay(date, -1);
   const nextDate = offsetDay(date, +1);
 
   const pendingCount  = pendingBlockRequests.length;
   const hasUrgent     = pendingBlockRequests.some((r) => r.urgent);
-
-  // Preservar ?branch= en los links de navegación de días para sesiones de org
-  const branchParam = organizationId ? `&branch=${businessId}` : '';
 
   return (
     <div className="min-h-screen bg-white">
@@ -116,17 +104,12 @@ export default function DashboardLayout({
       <header className="sticky top-0 z-10 border-b border-gray-200 bg-white px-4 py-3">
         <div className="mx-auto max-w-2xl">
 
-          {/* Negocio + selector de sucursal (org) + badge solicitudes + link vista barbero */}
+          {/* Negocio + badge solicitudes + link vista barbero */}
           <div className="flex items-center justify-between">
             <div className="flex min-w-0 items-center gap-2">
-              {branches && branches.length > 1 ? (
-                /* Selector de sucursal — sesión de organización */
-                <BranchSelector branches={branches} currentBranchId={businessId} />
-              ) : (
-                <span className="text-sm font-semibold text-gray-900 truncate">
-                  {businessName}
-                </span>
-              )}
+              <span className="text-sm font-semibold text-gray-900 truncate">
+                {businessName}
+              </span>
             </div>
 
             <div className="ml-3 flex shrink-0 items-center gap-3">
@@ -164,7 +147,7 @@ export default function DashboardLayout({
           {/* Navegación de días */}
           <div className="mt-2 flex items-center gap-2">
             <Link
-              href={`/dashboard?date=${prevDate}${branchParam}`}
+              href={`/dashboard?date=${prevDate}`}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-200 text-base text-gray-600 hover:bg-gray-50"
               aria-label="Dia anterior"
             >
@@ -176,7 +159,7 @@ export default function DashboardLayout({
               </span>
               {!isTodayInTz(date, timezone) && (
                 <Link
-                  href={`/dashboard?date=${todayStrInTz(timezone)}${branchParam}`}
+                  href={`/dashboard?date=${todayStrInTz(timezone)}`}
                   className="mt-0.5 text-xs text-gray-400 underline hover:text-gray-600"
                 >
                   Ir a hoy
@@ -184,7 +167,7 @@ export default function DashboardLayout({
               )}
             </div>
             <Link
-              href={`/dashboard?date=${nextDate}${branchParam}`}
+              href={`/dashboard?date=${nextDate}`}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-200 text-base text-gray-600 hover:bg-gray-50"
               aria-label="Dia siguiente"
             >

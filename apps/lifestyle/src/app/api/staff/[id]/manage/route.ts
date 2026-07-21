@@ -58,12 +58,6 @@ export async function PATCH(
     return NextResponse.json({ error: 'Prohibido' }, { status: 403 });
   }
 
-  // Sesiones de organización no tienen business_id implícito en esta versión.
-  // El soporte de mutaciones multi-sucursal se completa en Sesión 15.
-  if (session.type === 'organization') {
-    return NextResponse.json({ error: 'Usa el token de sucursal para gestionar staff' }, { status: 403 });
-  }
-
   const businessId = session.business_id;
 
   // 2. Validar staff ID del path

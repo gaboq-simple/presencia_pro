@@ -54,7 +54,6 @@ async function requireAssistantSession(): Promise<{
 }> {
   const session = await getCurrentSession();
   if (!session) throw new Error('Unauthorized');
-  if (session.type === 'organization') throw new Error('Forbidden');
   return {
     business_id: session.business_id,
     role: session.role,
