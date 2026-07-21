@@ -26,11 +26,9 @@ import { handleShowingSlots }          from './states/presentingSlots';
 import { startCancelFlow, handleAwaitingCancelConfirmation } from './states/awaitingCancelConfirmation';
 import { isModificationIntent, isCancellationIntent, wantsToModifyExistingAppointment } from './cancelIntent';
 import { getCatalog }                  from './catalog';
-import { tenantDb }                    from '../../tenantDb';
 import { interpret }                   from './interpreter';
 import { buildSystemPrompt }           from './prompt';
 import { answerSideQuestion as buildDerivaAnswer } from './businessContext';
-import { formatTimeHumanFromDate }     from './utils';
 import type { LifestyleIncomingMessage, ServiceRow, StateHandlerDeps, StateHandlerResult } from './types';
 
 // ─── Contador de escape estructural (S5-BOT-12) ───────────────────────────────
@@ -364,8 +362,8 @@ async function routeToHandler(
       // Orden de detección (importa — modificación debe ir ANTES de containsSideQuestion
       // porque "puedo cambiar la hora?" tiene "?" y sería capturado como side question):
       //   1. isClosingMessage       → cierre cálido + reset a GREETING
-      //   2. isModificationIntent   → cancelar cita + GREETING para reagendar
-      //   3. isCancellationIntent   → cancelar cita + confirmación + GREETING
+      //   2. isModificationIntent   → preguntar antes de mover (AUD-04)
+      //   3. isCancellationIntent   → preguntar antes de cancelar (AUD-04)
       //   4. containsSideQuestion   → Claude responde; mantener CONFIRMED
       //   5. fallthrough            → handleGreeting (nuevo agendamiento)
       if (isClosingMessage(msg.body)) {
@@ -375,11 +373,16 @@ async function routeToHandler(
           responseText: 'Gracias a ti! Aqui andamos para lo que necesites.',
         };
       }
+      // AUD-04: mismo flujo con confirmación que GREETING (AUD-02). Antes,
+      // "puedo cambiar la hora?" ejecutaba el UPDATE a cancelled DE INMEDIATO
+      // — acción destructiva sin confirmar (si el cliente solo preguntaba, o
+      // ningún horario nuevo le servía, ya había perdido su slot) — y
+      // reiniciaba el flujo desde cero re-preguntando el servicio.
       if (isModificationIntent(msg.body)) {
-        return handleModificationOrCancellation('modification', msg, context, deps);
+        return startCancelFlow('modification', msg, context, deps);
       }
       if (isCancellationIntent(msg.body)) {
-        return handleModificationOrCancellation('cancellation', msg, context, deps);
+        return startCancelFlow('cancellation', msg, context, deps);
       }
       if (containsSideQuestion(msg.body)) {
         const catalog = await getCatalog(deps.business.id, deps.supabase);
@@ -553,98 +556,3 @@ function isArcoIntent(body: string): boolean {
   return ARCO_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
-/**
- * Busca la cita activa del usuario (status=confirmed, starts_at > now)
- * y la cancela. Para modificación: transita a GREETING para reagendar.
- * Para cancelación: confirma la cancelación y transita a GREETING.
- *
- * La cancelación es UPDATE (no DELETE) — el registro se conserva para métricas.
- * Envuelto en try/catch — si falla, escala con fallbackMessage.
- */
-async function handleModificationOrCancellation(
-  type:    'modification' | 'cancellation',
-  msg:     LifestyleIncomingMessage,
-  context: LifestyleBotContext,
-  deps:    StateHandlerDeps,
-): Promise<StateHandlerResult> {
-  const { business, supabase } = deps;
-
-  try {
-    // ── Obtener customerId (del contexto o query) ─────────────────────────
-    let customerId = context.customerId;
-    if (!customerId) {
-      const { data: customerData } = await tenantDb(supabase, business.id)
-        .table('customers')
-        .select('id')
-        .eq('phone', msg.customerPhone)
-        .maybeSingle();
-      customerId = (customerData as { id: string } | null)?.id;
-    }
-
-    if (!customerId) {
-      return {
-        newState:     'GREETING',
-        newContext:   {},
-        responseText: 'No encontre una cita activa. Si quieres agendar una nueva, con gusto te ayudo.',
-      };
-    }
-
-    // ── Buscar cita confirmada futura ─────────────────────────────────────
-    const now = new Date();
-    const { data: apptData } = await tenantDb(supabase, business.id)
-      .table('appointments')
-      .select(`id, starts_at, staff:staff_id(name)`)
-      .eq('customer_id', customerId)
-      .eq('status', 'confirmed')
-      .gt('starts_at', now.toISOString())
-      .order('starts_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (!apptData) {
-      return {
-        newState:     'GREETING',
-        newContext:   {},
-        responseText: 'No encontre una cita activa. Si quieres agendar una nueva, con gusto te ayudo.',
-      };
-    }
-
-    const appt      = apptData as unknown as { id: string; starts_at: string; staff: Array<{ name: string }> | { name: string } | null };
-    const startsAt  = new Date(appt.starts_at);
-    const staffRaw  = appt.staff;
-    const staffName = (Array.isArray(staffRaw) ? staffRaw[0]?.name : (staffRaw as { name: string } | null)?.name) ?? 'tu barbero';
-    const timeStr   = formatTimeHumanFromDate(startsAt, business.timezone);
-
-    // ── Cancelar la cita (UPDATE — no DELETE) ─────────────────────────────
-    // Vía RPC (2c-ii): set_config('app.actor_type','bot',true) + UPDATE atómicos
-    // → el audit atribuye 'bot'. Shape { error } idéntico al .update() → el throw
-    // en error se preserva exacto.
-    const { error: cancelError } = await supabase.rpc('bot_set_appointment_status', {
-      p_appointment_id: appt.id,
-      p_status:         'cancelled',
-    });
-
-    if (cancelError) throw cancelError;
-
-    // ── Respuesta según tipo ──────────────────────────────────────────────
-    if (type === 'modification') {
-      return {
-        newState:     'GREETING',
-        newContext:   { customerId },
-        responseText: `Listo, cancele tu cita de las ${timeStr} con ${staffName}. Vamos a agendar una nueva. Que servicio necesitas?`,
-      };
-    }
-
-    return {
-      newState:     'GREETING',
-      newContext:   { customerId },
-      responseText: `Listo, tu cita de las ${timeStr} con ${staffName} queda cancelada. Si necesitas agendar otra, aqui estoy.`,
-    };
-  } catch {
-    return {
-      newState:     'FALLBACK',
-      newContext:   context,
-      responseText: deps.business.fallbackMessage,
-    };
-  }
-}

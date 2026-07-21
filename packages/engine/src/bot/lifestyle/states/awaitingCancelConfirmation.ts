@@ -26,7 +26,7 @@ import { tenantDb } from '../../../tenantDb';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { isCancellationIntent } from '../cancelIntent';
 import { formatTimeHumanFromDate } from '../utils';
-import { utcToLocalDateStr, weekdayFromDateStr } from '../tzUtils';
+import { utcToLocalDateStr, weekdayFromDateStr, localTimeToUTC, noonUTCDate } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 // Duplicado #4 en el bot (confirmed/confirmingAppointment/presentingSlots) —
@@ -52,6 +52,12 @@ type FutureAppointment = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function nextDayStr(dateStr: string): string {
+  const d = noonUTCDate(dateStr);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function humanDayLabel(startsAt: Date, tz: string): string {
   const dateStr = utcToLocalDateStr(startsAt, tz);          // YYYY-MM-DD local
   const dayName = DAYS_ES[weekdayFromDateStr(dateStr)]!;
@@ -64,12 +70,37 @@ function describeAppointment(appt: FutureAppointment, tz: string): string {
   return `el ${humanDayLabel(appt.startsAt, tz)} a las ${formatTimeHumanFromDate(appt.startsAt, tz)} con ${appt.staffName}`;
 }
 
-/** Próxima cita confirmada futura del cliente, o null. Solo SELECT — nunca escribe. */
-async function findNextFutureAppointment(
-  msg:     LifestyleIncomingMessage,
-  context: LifestyleBotContext,
-  deps:    StateHandlerDeps,
-): Promise<{ customerId: string; appt: FutureAppointment } | null> {
+type RawAppt = {
+  id: string; starts_at: string; service_id: string | null; staff_id: string | null;
+  staff: Array<{ name: string }> | { name: string } | null;
+};
+
+function toFutureAppointment(raw: RawAppt): FutureAppointment {
+  const staffRaw  = raw.staff;
+  const staffName = (Array.isArray(staffRaw) ? staffRaw[0]?.name : staffRaw?.name) ?? 'tu barbero';
+  return {
+    id:        raw.id,
+    startsAt:  new Date(raw.starts_at),
+    serviceId: raw.service_id,
+    staffId:   raw.staff_id,
+    staffName,
+  };
+}
+
+/**
+ * Cita a cancelar/mover del cliente, o null. Solo SELECT — nunca escribe.
+ *
+ * AUD-04: si el cliente nombró un día ("cancelar mi cita del viernes"),
+ * apunta a LA cita de ese día; sin día (o sin cita ese día), la próxima
+ * futura. `hasOthers` = tiene más de una cita futura y NO nombró día —
+ * el ask lo usa para invitar a desambiguar en vez de asumir en silencio.
+ */
+async function findCancelTarget(
+  msg:       LifestyleIncomingMessage,
+  context:   LifestyleBotContext,
+  deps:      StateHandlerDeps,
+  targetDay: string | null,
+): Promise<{ customerId: string; appt: FutureAppointment; hasOthers: boolean } | null> {
   const { business, supabase } = deps;
 
   let customerId = context.customerId;
@@ -83,34 +114,41 @@ async function findNextFutureAppointment(
   }
   if (!customerId) return null;
 
-  const { data: apptData } = await tenantDb(supabase, business.id)
+  const baseQuery = () => tenantDb(supabase, business.id)
     .table('appointments')
     .select('id, starts_at, service_id, staff_id, staff:staff_id(name)')
-    .eq('customer_id', customerId)
+    .eq('customer_id', customerId!)
     .eq('status', 'confirmed')
-    .gt('starts_at', msg.timestamp.toISOString())
+    .gt('starts_at', msg.timestamp.toISOString());
+
+  if (targetDay) {
+    const dayStart = localTimeToUTC(targetDay, '00:00', business.timezone);
+    const dayEnd   = localTimeToUTC(nextDayStr(targetDay), '00:00', business.timezone);
+    const { data } = await baseQuery()
+      .gte('starts_at', dayStart.toISOString())
+      .lt('starts_at', dayEnd.toISOString())
+      .order('starts_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (data) {
+      // El cliente nombró el día — no hace falta invitar a desambiguar.
+      return { customerId, appt: toFutureAppointment(data as unknown as RawAppt), hasOthers: false };
+    }
+    // Sin cita ese día → cae a la próxima futura; el ask describe la fecha
+    // real, así el cliente ve la discrepancia y puede corregir.
+  }
+
+  const { data: rows } = await baseQuery()
     .order('starts_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .limit(2);
 
-  if (!apptData) return null;
-
-  const raw = apptData as unknown as {
-    id: string; starts_at: string; service_id: string | null; staff_id: string | null;
-    staff: Array<{ name: string }> | { name: string } | null;
-  };
-  const staffRaw  = raw.staff;
-  const staffName = (Array.isArray(staffRaw) ? staffRaw[0]?.name : staffRaw?.name) ?? 'tu barbero';
+  const list = (rows ?? []) as unknown as RawAppt[];
+  if (list.length === 0) return null;
 
   return {
     customerId,
-    appt: {
-      id:        raw.id,
-      startsAt:  new Date(raw.starts_at),
-      serviceId: raw.service_id,
-      staffId:   raw.staff_id,
-      staffName,
-    },
+    appt:      toFutureAppointment(list[0]!),
+    hasOthers: list.length > 1,
   };
 }
 
@@ -128,7 +166,10 @@ export async function startCancelFlow(
   deps:    StateHandlerDeps,
 ): Promise<StateHandlerResult> {
   try {
-    const found = await findNextFutureAppointment(msg, context, deps);
+    // AUD-04: si el mensaje trae un día ("mi cita del viernes"), apuntar a ESA
+    // cita — el intérprete ya lo parseó gratis en dispatch().
+    const targetDay = deps.interpretation?.date ?? null;
+    const found = await findCancelTarget(msg, context, deps, targetDay);
     if (!found) {
       return {
         newState:     'GREETING',
@@ -137,11 +178,15 @@ export async function startCancelFlow(
       };
     }
 
-    const { customerId, appt } = found;
-    const desc     = describeAppointment(appt, deps.business.timezone);
-    const question = kind === 'modification'
+    const { customerId, appt, hasOthers } = found;
+    const desc = describeAppointment(appt, deps.business.timezone);
+    let question = kind === 'modification'
       ? `Tienes una cita ${desc}. Quieres moverla a otro dia u hora?`
       : `Tienes una cita ${desc}. Quieres cancelarla?`;
+    // Más de una cita futura y no nombró día: no asumir en silencio cuál.
+    if (hasOthers) {
+      question += ' Es tu proxima cita — si te refieres a otra, dime de que dia.';
+    }
 
     return {
       newState:   'AWAITING_CANCEL_CONFIRMATION',
@@ -149,6 +194,7 @@ export async function startCancelFlow(
         customerId,
         pendingCancelAppointmentId: appt.id,
         pendingCancelType:          kind,
+        pendingCancelDay:           utcToLocalDateStr(appt.startsAt, deps.business.timezone),
       },
       responseText: question,
     };
@@ -180,6 +226,14 @@ export async function handleAwaitingCancelConfirmation(
       newContext:   { ...(context.customerId ? { customerId: context.customerId } : {}) },
       responseText: NO_ACTIVE_APPOINTMENT_MSG,
     };
+  }
+
+  // AUD-04: "no, la del viernes" / "es la del viernes" — el cliente se refiere
+  // a OTRA cita. Si el mensaje trae un día distinto al de la cita pendiente,
+  // re-apuntar y volver a preguntar (nunca cancelar la equivocada).
+  const msgDay = deps.interpretation?.date ?? null;
+  if (msgDay && context.pendingCancelDay && msgDay !== context.pendingCancelDay) {
+    return startCancelFlow(kind, msg, { customerId: context.customerId }, deps);
   }
 
   const affirmation = deps.interpretation?.affirmation ?? null;

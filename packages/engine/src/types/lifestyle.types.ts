@@ -271,6 +271,13 @@ export const LifestyleBotContextSchema = z.object({
   pendingCancelType: z.enum(['cancellation', 'modification']).optional(),
 
   /**
+   * AUD-04: día LOCAL (YYYY-MM-DD, tz del negocio) de la cita pendiente de
+   * cancelar/mover. Permite detectar "no, la del viernes" (día distinto →
+   * re-apuntar a esa otra cita) sin re-consultar la BD.
+   */
+  pendingCancelDay: z.string().optional(),
+
+  /**
    * AUD-03: true cuando el aviso al admin de ESTA escalada ya se disparó.
    * Lo setea dispatch() al detectar la transición a ESCALATED — dedup para que
    * los mensajes siguientes del cliente (ESCALATED pegajoso) no re-notifiquen.
