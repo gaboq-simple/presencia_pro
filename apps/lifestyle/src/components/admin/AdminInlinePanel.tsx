@@ -39,9 +39,10 @@ function Toggle({ on, disabled, onClick, label }: { on: boolean; disabled?: bool
 }
 
 function GestionLink({ children }: { children: React.ReactNode }): React.ReactElement {
-  // Ancla a #gestion → OwnerTabs escucha el hashchange y cambia de pestaña sin navegar.
+  // La gestión completa vive JUSTO ABAJO, en la misma pestaña "Administrar" → ancla
+  // que hace scroll a #gestion-completa (no cambia de pestaña; es la misma vista).
   return (
-    <a href="#gestion" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-teal-ink hover:underline">
+    <a href="#gestion-completa" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-teal-ink hover:underline">
       {children} <span aria-hidden="true">→</span>
     </a>
   );
@@ -333,7 +334,7 @@ export default function AdminInlinePanel({ services, staff }: { services: AdminS
       </div>
 
       <p className="mt-3 border-t border-line pt-2 text-[11px] text-faint">
-        Cambios rápidos. Para lo completo (crear, dar de alta, config), andá a {String.fromCharCode(0x201C)}Gestión{String.fromCharCode(0x201D)}.
+        Cambios rápidos. Para lo completo (crear, dar de alta, config), ve a {String.fromCharCode(0x201C)}Administrar{String.fromCharCode(0x201D)} abajo.
       </p>
     </section>
   );

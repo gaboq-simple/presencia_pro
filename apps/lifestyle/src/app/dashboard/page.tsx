@@ -36,9 +36,9 @@ import DashboardLayout from '@/components/admin/DashboardLayout';
 import ConsolidatedView from '@/components/admin/ConsolidatedView';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
 import OwnerTabs from '@/components/admin/OwnerTabs';
-import HoyFeed from '@/components/admin/HoyFeed';
 import ClientelaView from '@/components/admin/ClientelaView';
 import NegocioView from '@/components/admin/NegocioView';
+import AdministrarView from '@/components/admin/AdministrarView';
 import ActividadView from '@/components/admin/ActividadView';
 import { getActivityFeed } from '@/lib/activityFeed';
 import { getRetentionFeed, getContactadosCount } from '@/lib/retentionFeed';
@@ -240,10 +240,19 @@ export default async function DashboardPage({
 
   return (
     <OwnerTabs
-      hoy={<HoyFeed feed={retentionFeed} contactados={contactados} />}
-      negocio={<NegocioView revenue={negocioRevenue} occupancy={negocioOccupancy} barberos={negocioStaff} pulso={pulsoHoy} semana={pulsoSemana} services={servicesForManagement} staff={staffForManagement} />}
+      panorama={
+        <NegocioView
+          revenue={negocioRevenue}
+          occupancy={negocioOccupancy}
+          barberos={negocioStaff}
+          pulso={pulsoHoy}
+          semana={pulsoSemana}
+          feed={retentionFeed}
+          contactados={contactados}
+        />
+      }
       clientela={<ClientelaView stats={clientelaStats} />}
-      panel={dashboardPanel}
+      administrar={<AdministrarView services={servicesForManagement} staff={staffForManagement} panel={dashboardPanel} />}
       actividad={<ActividadView initialEvents={activityPage.events} initialCursor={activityPage.nextCursor} />}
     />
   );

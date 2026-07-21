@@ -1,19 +1,22 @@
-// ─── Pestaña "Negocio" — la operación ─────────────────────────────────────────
+// ─── Pestaña "Panorama" — todo cómo va ────────────────────────────────────────
 // Server Component presentacional. Lectura pura (no muta nada).
-// PR-Neg-1: Ingresos (héroe sellado + comparación mismo-tramo + 6 meses).
-// PR-Neg-2: Ocupación (heatmap POSITIVO día×hora + huecos + potencial hedged).
-// PR-Neg-3: Barberos (recompra de héroe vs promedio del local, SIN ranking).
-// Copy sin promesas. Tokens Zentriq-claro.
+// Paso 4 (mapa A): el pulso de hoy + la semana que viene + el feed de rescate arriba;
+// el BI histórico (Ingresos del mes, heatmap, recompra) PLEGADO abajo en un <details>.
+// El panel de administración se movió a la pestaña "Administrar".
+//   Ingresos (héroe sellado + comparación mismo-tramo + 6 meses).
+//   Ocupación (heatmap POSITIVO día×hora + huecos + potencial hedged).
+//   Barberos (recompra vs promedio del local, SIN ranking).
+// Copy sin promesas, sin juicios. Tokens Zentriq-claro. Español mexicano neutro.
 
 import type { NegocioRevenue } from '@/lib/negocioMetrics';
 import type { OccupancyResult } from '@/lib/occupancy';
 import type { StaffRecompraResult, StaffRecompraRow, RecompraTone } from '@/lib/staffRecompra';
 import type { PulsoHoy as PulsoHoyData } from '@/lib/pulsoHoy';
 import type { SemanaProxima as SemanaData } from '@/lib/pulsoSemana';
-import type { AdminServiceRow, AdminStaffManagementRow } from '@/lib/dashboard.types';
+import type { RetentionFeed } from '@/lib/cadence';
 import PulsoHoy from '@/components/admin/PulsoHoy';
 import SemanaProxima from '@/components/admin/SemanaProxima';
-import AdminInlinePanel from '@/components/admin/AdminInlinePanel';
+import HoyFeed from '@/components/admin/HoyFeed';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 function money(n: number): string {
@@ -231,12 +234,28 @@ function BarberoRow({ row, avgRate }: { row: StaffRecompraRow; avgRate: number |
   );
 }
 
+// Promedio de recompra de un subconjunto (solo rates listas) para la fila colapsada.
+function avgRecompra(rows: StaffRecompraRow[]): number | null {
+  const vals = rows.map((r) => (r.rate.status === 'ok' ? r.rate.rate : null)).filter((v): v is number => v !== null);
+  if (vals.length === 0) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+const VISIBLE_RECOMPRA = 3;
+
 function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElement | null {
-  if (data.staff.length === 0) return null; // sin barberos activos → no renderiza
+  // Regla de robustez 1: con ≤1 barbero no hay con qué comparar (su recompra ya es la
+  // del local) → la sección no aporta, no se renderiza.
+  if (data.staff.length <= 1) return null;
 
   const avg = data.localAverage;
   const avgRate = avg.status === 'ok' ? avg.rate : null;
   const anyRate = data.staff.some((s) => s.rate.status === 'ok');
+
+  // Regla 3: 3 visibles + resto colapsado.
+  const shown = data.staff.slice(0, VISIBLE_RECOMPRA);
+  const rest = data.staff.slice(VISIBLE_RECOMPRA);
+  const restAvg = avgRecompra(rest);
 
   return (
     <section className="mt-6 rounded-xl bg-card p-4 shadow-card">
@@ -257,10 +276,24 @@ function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElem
       )}
 
       <ul className="mt-3 divide-y divide-line">
-        {data.staff.map((row) => (
+        {shown.map((row) => (
           <BarberoRow key={row.staffId} row={row} avgRate={avgRate} />
         ))}
       </ul>
+      {/* Regla 3: el resto colapsa en un <details> nativo (sin JS de cliente). */}
+      {rest.length > 0 && (
+        <details className="group mt-1 border-t border-line">
+          <summary className="flex cursor-pointer list-none items-center justify-between py-2 text-sm text-ink-2 marker:content-none">
+            <span>+{rest.length} barbero{rest.length === 1 ? '' : 's'} más</span>
+            <span className="text-faint">{restAvg !== null ? `~${pct(restAvg)}% recompra` : 'aún sin tasa'}</span>
+          </summary>
+          <ul className="divide-y divide-line">
+            {rest.map((row) => (
+              <BarberoRow key={row.staffId} row={row} avgRate={avgRate} />
+            ))}
+          </ul>
+        </details>
+      )}
 
       {/* Caveat de justicia — el número se conversa, no se castiga. */}
       <div className="mt-3 rounded-xl border-l-4 border-l-line-2 bg-tint-1/40 px-3 py-2">
@@ -278,12 +311,12 @@ function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElem
   );
 }
 
-export default function NegocioView({ revenue, occupancy, barberos, pulso, semana, services, staff }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData; services: AdminServiceRow[]; staff: AdminStaffManagementRow[] }): React.ReactElement {
+export default function NegocioView({ revenue, occupancy, barberos, pulso, semana, feed, contactados }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData; feed: RetentionFeed; contactados: number }): React.ReactElement {
   const { thisMonth, comparison, months, hasAnyRevenue } = revenue;
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-5">
-      <p className="px-1 text-xs text-faint">Tu operación — ingresos reales, sin promesas.</p>
+      <p className="px-1 text-xs text-faint">Cómo va tu negocio — hoy, lo que viene y la historia.</p>
 
       {/* ── Pulso de hoy (Paso 1) — arriba de todo ── */}
       <PulsoHoy data={pulso} />
@@ -291,8 +324,18 @@ export default function NegocioView({ revenue, occupancy, barberos, pulso, seman
       {/* ── La semana que viene (Paso 2) — la pieza accionable ── */}
       <SemanaProxima data={semana} />
 
-      {/* ── Administración rápida inline (Paso 3) — atajo a lo más tocado ── */}
-      <AdminInlinePanel services={services} staff={staff} />
+      {/* ── El rescate (feed RFM, ex-pestaña "Hoy") — lugar de "la fuga" (se rediseña
+           en un paso posterior; por ahora se preserva tal cual). ── */}
+      <div className="mt-6">
+        <HoyFeed feed={feed} contactados={contactados} embedded />
+      </div>
+
+      {/* ── BI histórico — plegado abajo: el "cómo viene el mes" no compite con el hoy. ── */}
+      <details className="group mt-6">
+        <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl bg-card px-4 py-3 shadow-card marker:content-none">
+          <span className="text-xs font-medium uppercase tracking-wide text-faint">La historia · ingresos, ocupación y barberos</span>
+          <span className="text-faint transition-transform group-open:rotate-90" aria-hidden="true">›</span>
+        </summary>
 
       {/* ── Ingresos (héroe) ── */}
       <section className="mt-2 rounded-xl bg-card p-4 shadow-card">
@@ -329,6 +372,7 @@ export default function NegocioView({ revenue, occupancy, barberos, pulso, seman
 
       {/* ── Barberos · recompra de héroe (PR-Neg-3) ── */}
       <BarberosBlock data={barberos} />
+      </details>
     </div>
   );
 }
