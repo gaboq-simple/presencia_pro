@@ -263,6 +263,13 @@ export const LifestyleBotContextSchema = z.object({
   /** UUID de la cita cuya cancelación está pendiente de confirmación. */
   pendingCancelAppointmentId: z.string().uuid().optional(),
 
+  /**
+   * Qué pidió el cliente sobre esa cita (AUD-02): 'cancellation' = cancelarla;
+   * 'modification' = moverla (tras cancelar, pre-llena servicio/barbero y pasa
+   * a QUALIFYING_DATETIME para reagendar sin re-preguntar lo conocido).
+   */
+  pendingCancelType: z.enum(['cancellation', 'modification']).optional(),
+
   // ── Clasificador de intenciones ───────────────────────────────────────────
 
   /**

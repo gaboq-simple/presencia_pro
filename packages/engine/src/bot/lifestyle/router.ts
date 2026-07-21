@@ -23,6 +23,8 @@ import { handleQualifyingDatetime }    from './states/qualifyingDatetime';
 import { handleQualifyingService }     from './states/qualifyingService';
 import { handleQualifyingStaff }       from './states/qualifyingStaff';
 import { handleShowingSlots }          from './states/presentingSlots';
+import { startCancelFlow, handleAwaitingCancelConfirmation } from './states/awaitingCancelConfirmation';
+import { isModificationIntent, isCancellationIntent, wantsToModifyExistingAppointment } from './cancelIntent';
 import { getCatalog }                  from './catalog';
 import { tenantDb }                    from '../../tenantDb';
 import { interpret }                   from './interpreter';
@@ -77,6 +79,11 @@ const ACTIVE_FLOW_STATES: ReadonlySet<LifestyleBotState> = new Set([
   'CONFIRMING_APPOINTMENT',
   'AWAITING_CONFIRMATION',
   'AWAITING_BOOKING_NAME',
+  // AUD-02: mientras el bot espera el "sí/no" de "¿cancelo tu cita?", ese sí/no
+  // pertenece a ESTA pregunta. Sin esto, el pasivo de recordatorios interceptaría
+  // el "sí" (el cliente por definición TIENE una cita futura, posiblemente <3h)
+  // y lo leería como confirmación de asistencia — lo contrario de lo pedido.
+  'AWAITING_CANCEL_CONFIRMATION',
 ]);
 
 // Campos de la reserva cuyo llenado (de vacío a valor) cuenta como progreso real.
@@ -207,6 +214,22 @@ async function routeToHandler(
 
   switch (state) {
     case 'GREETING': {
+      // ── AUD-02 (ex TODO MEDIO-9): cancelar/mover una cita EXISTENTE ────────
+      // "quiero cancelar mi cita del viernes" al día siguiente de agendar llega
+      // aquí (la conversación ya se reseteó). Sin esta intercepción caía al
+      // flujo de reserva y el bot intentaba VENDER una cita nueva. Corre DESPUÉS
+      // del pasivo de recordatorios (arriba): para citas a <3h el pasivo es más
+      // específico y conserva prioridad. Modificación se checa primero (mismo
+      // orden que CONFIRMED): "ya no puedo, cambia mi cita" es mover, no cancelar.
+      const cancelKind = wantsToModifyExistingAppointment(msg.body)
+        ? 'modification' as const
+        : isCancellationIntent(msg.body)
+          ? 'cancellation' as const
+          : null;
+      if (cancelKind) {
+        return startCancelFlow(cancelKind, msg, context, deps);
+      }
+
       // Si greeting detectó toda la info y va directo a SHOWING_SLOTS,
       // encadena inmediatamente para combinar confirmación + slots en un solo mensaje.
       const greetResult = await handleGreeting(msg, context, deps);
@@ -315,19 +338,6 @@ async function routeToHandler(
       return result;
     }
 
-    // TODO(MEDIO-9): Cancelación desde GREETING
-    // Cuando el usuario está en GREETING y escribe "quiero cancelar mi cita del viernes",
-    // classifyMultiIntent no detecta cancelación y el flujo va a QUALIFYING_SERVICE.
-    // Flujo propuesto:
-    //   1. En handleGreeting (greeting.ts), tras classifyMultiIntent, verificar si el
-    //      mensaje contiene keywords de cancelación (reutilizar CANCELLATION_KEYWORDS).
-    //   2. Si sí: buscar cita activa (status='confirmed', starts_at > now) del customerId.
-    //   3. Si existe: preguntar "Tienes cita de [svc] el [fecha] con [barbero]. Cancelamos?"
-    //      y retornar estado AWAITING_CANCEL_CONFIRMATION con appointmentId en contexto.
-    //   4. Agregar case 'AWAITING_CANCEL_CONFIRMATION' aquí (actualmente escala a FALLBACK
-    //      en línea ~213) para confirmar/cancelar según respuesta del usuario.
-    //   5. Si no existe cita activa: continuar flujo normal de agendamiento.
-
     case 'CONFIRMED': {
       // CONFIRMED ya no es un estado terminal — handler.ts no resetea a GREETING.
       // Orden de detección (importa — modificación debe ir ANTES de containsSideQuestion
@@ -378,8 +388,9 @@ async function routeToHandler(
       return handleFallback(msg, context, deps);
 
     case 'AWAITING_CANCEL_CONFIRMATION':
-      // El bot no cancela citas — escalar directamente
-      return handleFallback(msg, { ...context, fallbackAttempts: 2 }, deps);
+      // AUD-02: el cliente respondió a "¿cancelo/muevo tu cita?" — el handler
+      // cancela solo ante un SÍ explícito; ante NO o ambigüedad la cita queda.
+      return handleAwaitingCancelConfirmation(msg, context, deps);
 
     default: {
       // Exhaustiveness check — TypeScript garantiza que nunca llega aquí
@@ -470,28 +481,10 @@ function isClosingMessage(body: string): boolean {
   );
 }
 
-// ─── Detección de modificación/cancelación en CONFIRMED ───────────────────────
-
-const MODIFICATION_KEYWORDS = [
-  'cambiar', 'modificar', 'mover', 'otra hora', 'reagendar',
-  'cambio de hora', 'mejor a las', 'prefiero a las', 'a otra hora',
-  'diferente hora', 'cambiarla', 'cambiarme', 'moverla', 'moverme',
-];
-
-const CANCELLATION_KEYWORDS = [
-  'cancelar', 'ya no puedo', 'no voy a ir', 'anular', 'quitar la cita',
-  'no puedo ir', 'cancela', 'no voy', 'cancelen', 'cancelame',
-];
-
-function isModificationIntent(body: string): boolean {
-  const lower = body.trim().toLowerCase();
-  return MODIFICATION_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-function isCancellationIntent(body: string): boolean {
-  const lower = body.trim().toLowerCase();
-  return CANCELLATION_KEYWORDS.some((kw) => lower.includes(kw));
-}
+// ─── Detección de modificación/cancelación ────────────────────────────────────
+// Los detectores viven en cancelIntent.ts (módulo puro, AUD-02): los comparten
+// el estado CONFIRMED, la intercepción en GREETING y el fast-path de
+// qualifyingService.
 
 // ─── Detección de intent ARCO (derechos sobre datos personales) ───────────────
 
