@@ -47,6 +47,11 @@ export type PulsoHoy = {
   walkIns: DayMetric;
   noShowRate30d: number | null;    // tasa de no-show en ventana móvil 30 días
   barberos: PulsoBarbero[];
+  /** ¿Hay semana pasada con la cual comparar? El mismo día la semana pasada tuvo
+   *  capacidad Y citas. Si es false, la UI omite las comparaciones (regla de robustez
+   *  2: negocio nuevo → "sin semana pasada todavía", nunca un +0% inventado). Se deriva
+   *  de data ya traída (occLastWeek) — sin query nueva. */
+  comparable: boolean;
 };
 
 // Trae las citas de un día (rango tz-aware) con lo necesario para ocupación + revenue.
@@ -129,6 +134,9 @@ export async function getPulsoHoy(businessId: string, now: Date = new Date()): P
     walkIns: { today: countStatus(todayRows, 'walkin'), lastWeek: countStatus(lastWeekRows, 'walkin') },
     noShowRate30d,
     barberos,
+    // Comparable = el mismo día la semana pasada tuvo capacidad Y citas. Sin eso, no
+    // hay con qué comparar honestamente (negocio nuevo / semana pasada vacía).
+    comparable: occLastWeek.capacity > 0 && occLastWeek.booked > 0,
   };
 }
 

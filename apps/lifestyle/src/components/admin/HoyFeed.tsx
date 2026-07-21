@@ -83,14 +83,17 @@ function PulseStat({ n, label, muted }: { n: number | string; label: string; mut
 export default function HoyFeed({
   feed,
   contactados,
+  embedded = false,
 }: {
   feed: RetentionFeed;
   contactados: number;
+  /** Montado dentro de otra vista (Panorama) → sin el wrapper de página propio. */
+  embedded?: boolean;
 }): React.ReactElement {
   const hasRows = feed.rows.length > 0;
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-5">
+    <div className={embedded ? '' : 'mx-auto w-full max-w-2xl px-4 py-5'}>
       {/* ── Pulso ── */}
       <section className="rounded-xl bg-card p-4 shadow-card">
         <p className="text-xs font-medium uppercase tracking-wide text-faint">La semana</p>

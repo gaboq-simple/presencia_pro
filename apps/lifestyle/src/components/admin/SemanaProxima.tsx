@@ -64,8 +64,15 @@ export default function SemanaProxima({ data }: { data: SemanaData }): React.Rea
   const anyOpen = data.days.some((d) => d.capacity > 0);
   if (!anyOpen) return null; // ningún día con capacidad (negocio sin horarios) → no renderiza
 
+  // Regla de robustez 5: la semana gana presencia por ÉNFASIS (un borde de color),
+  // NO reordenándose. El borde aparece solo cuando hay algo accionable esta semana —
+  // un día flojo (lugar libre) o uno llenándose. Sin señal → tarjeta normal.
+  const hasFlojo = data.days.some((d) => occupancyBand(d.pct) === 'flojo');
+  const hasLleno = data.days.some((d) => occupancyBand(d.pct) === 'lleno');
+  const accent = hasFlojo ? 'border-l-4 border-l-amber-border' : hasLleno ? 'border-l-4 border-l-teal-border' : '';
+
   return (
-    <section className="mt-6 rounded-xl bg-card p-4 shadow-card">
+    <section className={`mt-6 rounded-xl bg-card p-4 shadow-card ${accent}`}>
       <p className="text-xs font-medium uppercase tracking-wide text-faint">Los próximos 7 días</p>
       <p className="mt-1 text-sm text-ink-2">Ocupación proyectada de cada día. En ámbar, los días con más lugar libre.</p>
 
