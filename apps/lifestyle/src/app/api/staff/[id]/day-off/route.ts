@@ -28,6 +28,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { invalidateBusinessCache } from '@presenciapro/engine/bot';
+import { logManagementAudit } from '@/lib/managementAudit';
 import { tenantDb } from '@/lib/tenantDb';
 import { localDayRangeUtc, todayStrInTz } from '@/lib/dayWindow';
 
@@ -180,7 +181,20 @@ export async function POST(
     );
   }
 
-  // 8. Invalidar cache del bot
+  // 8. Auditoría (best-effort — mismo patrón que las demás rutas de gestión; un fallo
+  //    del audit NO revierte el día libre ya creado). Firma con el staff_id del dueño.
+  await logManagementAudit(supabase, {
+    entity:        'staff',
+    entityId:      staffId,
+    action:        'updated',
+    businessId,
+    actorStaffId:  session.staff_id,
+    oldData:       null,
+    newData:       { day_off_date: date, reason: reason ?? null, block_id: (block as { id: string }).id },
+    changedFields: ['day_off'],
+  });
+
+  // 9. Invalidar cache del bot
   invalidateBusinessCache(businessId);
 
   return NextResponse.json({ ok: true, block }, { status: 201 });

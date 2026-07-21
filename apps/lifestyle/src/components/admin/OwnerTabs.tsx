@@ -7,9 +7,16 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type TabKey = 'hoy' | 'negocio' | 'clientela' | 'gestion' | 'actividad';
+
+const TAB_KEYS: readonly TabKey[] = ['hoy', 'negocio', 'clientela', 'gestion', 'actividad'];
+function tabFromHash(): TabKey | null {
+  if (typeof window === 'undefined') return null;
+  const h = window.location.hash.replace('#', '') as TabKey;
+  return (TAB_KEYS as readonly string[]).includes(h) ? h : null;
+}
 
 const TABS: Array<{ key: TabKey; label: string; icon: React.ReactElement }> = [
   {
@@ -64,6 +71,27 @@ export default function OwnerTabs({
 }): React.ReactElement {
   const [active, setActive] = useState<TabKey>('hoy');
 
+  // Deep-link por hash: los enlaces "→ Gestión" del panel inline (y cualquier
+  // ancla #<tab>) cambian la pestaña activa sin navegar. Sincroniza al montar y en
+  // cada hashchange.
+  useEffect(() => {
+    const sync = () => {
+      const t = tabFromHash();
+      if (t) setActive(t);
+    };
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
+
+  const selectTab = (key: TabKey) => {
+    setActive(key);
+    if (typeof window !== 'undefined' && window.location.hash) {
+      // Limpia el hash al elegir manualmente, para no re-sincronizar a la vieja tab.
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-canvas pb-20">
       {/* Contenido de la pestaña activa. Hoy/Negocio/Clientela tienen superficie propia;
@@ -88,7 +116,7 @@ export default function OwnerTabs({
               <li key={t.key} className="flex-1">
                 <button
                   type="button"
-                  onClick={() => setActive(t.key)}
+                  onClick={() => selectTab(t.key)}
                   aria-current={isActive ? 'page' : undefined}
                   className={`flex w-full flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${
                     isActive ? 'text-teal-ink' : 'text-faint'
