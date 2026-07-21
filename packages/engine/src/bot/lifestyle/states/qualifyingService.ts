@@ -25,6 +25,7 @@ import {
 import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic, isServiceOrPriceQuestion, refineTopic, closingForTopic } from '../sideQuestion';
+import { isCancellationIntent } from '../cancelIntent';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
@@ -77,7 +78,9 @@ export async function handleQualifyingService(
   // directo. Esto rompe el bucle de "¿cuál servicio?" cuando el cliente dice
   // "sí" / "quiero una cita" sin nombrar el servicio (no matchea y el
   // clasificador no puede extraerlo). Las preguntas reales siguen al clasificador.
-  if (allServices.length === 1 && !looksLikeSideQuestion(msg.body)) {
+  // AUD-02: "cancelar mi cita" NO es intención de reserva — sin este guard, el
+  // fast-path le respondía "Perfecto, [servicio]…" a quien quería cancelar.
+  if (allServices.length === 1 && !looksLikeSideQuestion(msg.body) && !isCancellationIntent(msg.body)) {
     return buildAdvanceResult(context, allServices[0]!);
   }
 
