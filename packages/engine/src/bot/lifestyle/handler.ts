@@ -28,6 +28,7 @@ import { getCatalog } from './catalog';
 import { withRetry } from '../../utils/retry';
 import { logBotError } from '../../utils/logger';
 import type {
+  ClassifierFns,
   LifestyleBusinessConfig,
   LifestyleIncomingMessage,
   OfficeHours,
@@ -63,6 +64,14 @@ export type HandleLifestyleMessageOptions = {
    * histórico: persistir y devolver el texto al caller.
    */
   readonly send?: (text: string) => Promise<void>;
+  /**
+   * Deuda #1 (classifier inyectable): clasificadores inyectables también a
+   * nivel del HANDLER COMPLETO — dispatch() ya los recibía vía deps, pero
+   * handleLifestyleMessage los hardcodeaba, dejando la costura
+   * load→dedup→away→dispatch→send→persist sin arnés de test (el gap exacto
+   * donde vivió el bug de S4-BOT-09). Producción: omitir (usa los reales).
+   */
+  readonly classifier?: ClassifierFns;
 };
 
 // ─── Tipo DB ──────────────────────────────────────────────────────────────────
@@ -81,6 +90,7 @@ export async function handleLifestyleMessage(
   opts: HandleLifestyleMessageOptions,
 ): Promise<LifestyleBotResponse> {
   const { msg, business, supabase, anthropicKey, send } = opts;
+  const classifier: ClassifierFns = opts.classifier ?? { classifyIntent, classifyMultiIntent };
 
   const startMs = Date.now();
   let errorInfo: { code: string; message: string } | null = null;
@@ -176,7 +186,7 @@ export async function handleLifestyleMessage(
     supabase,
     anthropicKey,
     model,
-    classifier: { classifyIntent, classifyMultiIntent },
+    classifier,
   });
 
   // ── 4a-ter. Reconocimiento del contexto expirado (AUD-07e) ─────────────────
