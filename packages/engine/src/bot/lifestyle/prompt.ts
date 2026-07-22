@@ -150,6 +150,40 @@ Si el cliente pregunta sobre el negocio (precios, duración, dirección, horario
 Los negocios como ${type} (barberías, spas, salones de belleza y similares) tienen clientes frecuentes que desarrollan preferencias por servicios y prestadores específicos. El agendamiento rápido y sin fricciones es un diferenciador clave del negocio. Cada mensaje extra que tarda el cliente en agendar es una oportunidad de abandono. Tu objetivo es llevar al cliente desde el primer mensaje hasta la cita confirmada en el menor número de mensajes posible, sin sacrificar claridad ni calidad de atención al cliente.${buildSideQuestionSection(context)}`.trim();
 }
 
+// ─── System corto para micro-copy ─────────────────────────────────────────────
+
+/**
+ * System acotado para llamadas que solo REDACTAN una pieza corta de texto
+ * (reformular una pregunta, redactar la confirmación, contestar una side
+ * question con datos ya provistos). El system completo de 7 pasos instruye un
+ * flujo de agendamiento entero — en estas llamadas es ruido y hasta contradice
+ * la tarea (empuja a agendar a quien ya tiene cita). Mismo racional que el
+ * presentador de slots de S5-BOT-09: acotar el rol > prohibir conductas.
+ *
+ * `opts.businessContext` inyecta los datos reales del negocio SOLO cuando la
+ * pieza los necesita (side questions); las demás llamadas reciben todos sus
+ * datos en el user prompt y no cargan el bloque.
+ */
+export function buildMicroCopySystemPrompt(
+  business: LifestyleBusinessConfig,
+  opts?: { businessContext?: string },
+): string {
+  const contextBlock = opts?.businessContext
+    ? `\n\n## Datos del negocio (única fuente — no inventes nada fuera de esto)\n${opts.businessContext}`
+    : '';
+
+  return `Eres ${business.botName}, el asistente virtual de ${business.name} en WhatsApp.
+Tu única tarea en esta llamada es redactar UNA pieza corta de mensaje siguiendo la instrucción que recibirás. No saludas, no te presentas, no abres ni cierras la conversación, y no agregas información que no te hayan dado.
+
+## Tono
+- Español de México, informal pero respetuoso — como un asistente real por WhatsApp.
+- Amigable, directo y eficiente. Emojis con moderación (máximo 1 por mensaje).
+- Nunca inventes datos (precios, horarios, direcciones, nombres): usa solo lo que la instrucción te dé.${contextBlock}
+
+## REGLAS DE FORMATO
+${FORMATTING_RULES}`;
+}
+
 // ─── Side question section ────────────────────────────────────────────────────
 
 /**

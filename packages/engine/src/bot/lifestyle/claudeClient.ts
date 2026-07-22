@@ -19,17 +19,19 @@ export const TIMEOUT_SONNET_MS = 15_000;
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-type SystemContent = string | Array<{
-  type: 'text';
-  text: string;
-  cache_control?: { type: 'ephemeral' };
-}>;
+// Nota (residuo LLM, 2026-07-22): se retiró el soporte de bloques system con
+// cache_control. Era un no-op silencioso probado: todos los call sites corren
+// Haiku 4.5 (mínimo cacheable 4096 tokens) con systems de ~800-2000 tokens —
+// por debajo del mínimo la API ni siquiera escribe el cache. Además el system
+// varía por negocio/contexto y el tráfico WhatsApp es esporádico vs el TTL de
+// 5 min. Si algún día un system supera el mínimo Y hay ráfagas del mismo
+// negocio, reintroducirlo es trivial (bloque {type:'text', cache_control}).
 
 export type CallClaudeParams = {
   client:    Anthropic;
   model:     string;
   maxTokens: number;
-  system?:   SystemContent;
+  system?:   string;
   messages:  Anthropic.MessageParam[];
   timeoutMs: number;
   /**
@@ -78,7 +80,7 @@ export async function callClaude(params: CallClaudeParams): Promise<Anthropic.Me
         model,
         max_tokens: maxTokens,
         ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
-        ...(system !== undefined ? { system: system as Parameters<typeof client.messages.create>[0]['system'] } : {}),
+        ...(system !== undefined ? { system } : {}),
         messages,
       },
       { signal: AbortSignal.timeout(timeoutMs) },

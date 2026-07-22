@@ -22,7 +22,7 @@ import {
   buildRepeatOptionsMessage,
   buildSideQuestionResponse,
 } from '../clarification';
-import { buildSystemPrompt } from '../prompt';
+import { buildMicroCopySystemPrompt } from '../prompt';
 import { detectsServiceCorrection } from '../utils';
 import { isAvailabilityQuestion } from '../availabilityIntent';
 import { wantsToChooseStaff, asksWhoOnly } from '../staffAxisIntent';
@@ -296,7 +296,9 @@ export async function handleQualifyingStaff(
   const prevBotMessage = [...(context.messages ?? [])].reverse().find((m) => m.role === 'assistant')?.content ?? null;
   const responseText = await generateRepeatQuestion(
     anthropicKey,
-    buildSystemPrompt(business),
+    // System corto: esta llamada solo reformula una pregunta — el system
+    // completo de 7 pasos era ruido (y ~5x el costo de input).
+    buildMicroCopySystemPrompt(business),
     'el barbero de preferencia del cliente',
     fallbackText,
     prevBotMessage,
@@ -413,7 +415,7 @@ async function generateRepeatQuestion(
       client,
       model:     HAIKU_MODEL,
       maxTokens: 120,
-      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      system,
       messages:  [{
         role:    'user',
         // AUD-07d: sin el texto anterior, "no uses el mismo texto" era
