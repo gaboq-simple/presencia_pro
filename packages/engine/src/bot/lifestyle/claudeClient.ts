@@ -32,6 +32,14 @@ export type CallClaudeParams = {
   system?:   SystemContent;
   messages:  Anthropic.MessageParam[];
   timeoutMs: number;
+  /**
+   * AUD-07d: temperatura de muestreo. Los CLASIFICADORES la fijan en 0 —
+   * un clasificador JSON con la default (1.0) produce flips de confidence
+   * entre ejecuciones idénticas y cruza los umbrales 0.85/0.60 "según el día".
+   * NO pasarla en llamadas generativas con modelos que rechazan sampling
+   * params no-default (Sonnet 5+): solo Haiku la usa hoy.
+   */
+  temperature?: number;
   /** Contexto para logs de error — ayuda a diagnosticar 429 en multi-tenant. */
   context: {
     businessId:    string;
@@ -69,6 +77,7 @@ export async function callClaude(params: CallClaudeParams): Promise<Anthropic.Me
       {
         model,
         max_tokens: maxTokens,
+        ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
         ...(system !== undefined ? { system: system as Parameters<typeof client.messages.create>[0]['system'] } : {}),
         messages,
       },
