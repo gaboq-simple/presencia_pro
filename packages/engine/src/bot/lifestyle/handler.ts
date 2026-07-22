@@ -24,6 +24,7 @@ import { dispatch } from './router';
 import { tenantDb } from '../../tenantDb';
 import { classifyIntent, classifyMultiIntent } from './classifier';
 import { selectModel } from './modelRouter';
+import { getCatalog } from './catalog';
 import { withRetry } from '../../utils/retry';
 import { logBotError } from '../../utils/logger';
 import type {
@@ -140,7 +141,17 @@ export async function handleLifestyleMessage(
   let currentState: LifestyleBotState;
   let currentContext = deserializeContext(row?.context ?? {});
 
+  // AUD-07e: si el reset es por INACTIVIDAD (no terminal) y la conversación
+  // quedó a medias de un agendamiento, se reconoce el contexto previo con un
+  // preámbulo (paso 4a-ter) — antes el cliente que volvía con "sí, va la de
+  // las 5" recibía un saludo de conversación nueva que ignoraba todo.
+  let staleBookingServiceId: string | null = null;
+
   if (row && (shouldResetConversation(new Date(row.last_message)) || isTerminalState(row.state))) {
+    if (!isTerminalState(row.state) && row.state !== 'GREETING' && row.state !== 'CONFIRMED') {
+      const staleContext = deserializeContext(row.context ?? {});
+      staleBookingServiceId = staleContext.serviceId ?? null;
+    }
     currentState   = 'GREETING';
     currentContext = {};
   } else {
@@ -158,6 +169,24 @@ export async function handleLifestyleMessage(
     model,
     classifier: { classifyIntent, classifyMultiIntent },
   });
+
+  // ── 4a-ter. Reconocimiento del contexto expirado (AUD-07e) ─────────────────
+  // La conversación anterior quedó a medias (>24h) — decirlo, en vez de saludar
+  // como si nada. Una línea, sin pregunta (STYLE.md: máx una pregunta y esa la
+  // pone la respuesta del FSM).
+
+  if (staleBookingServiceId && dispatchedResult.responseText.trim()) {
+    try {
+      const catalog  = await getCatalog(msg.businessId, supabase);
+      const staleSvc = catalog.find((sv) => sv.id === staleBookingServiceId);
+      if (staleSvc) {
+        dispatchedResult = {
+          ...dispatchedResult,
+          responseText: `La otra vez quedamos a medias con tu cita de ${staleSvc.name} — si quieres retomarla, aquí seguimos.\n\n${dispatchedResult.responseText}`,
+        };
+      }
+    } catch { /* best-effort — sin el nombre del servicio no hay preámbulo */ }
+  }
 
   // ── 4a-bis. Preámbulo de fuera-de-horario (AUD-07a) ───────────────────────
   // El aviso de cerrado se antepone UNA sola vez por periodo cerrado

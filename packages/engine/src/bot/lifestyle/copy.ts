@@ -69,6 +69,34 @@ export const NEGATIVE_BASE_KEYWORDS = [
   'no', 'nope', 'negativo',
 ];
 
+// ─── Cierres/cortesías ────────────────────────────────────────────────────────
+// Antes privados de router.ts (estado CONFIRMED). AUD-07e los comparte con
+// qualifyingService: una cortesía tras una side-question contestada NO es
+// intención de reserva.
+
+export const CLOSING_KEYWORDS = [
+  'gracias', 'grax', 'grácias',
+  'perfecto', 'genial', 'excelente', 'de lujo',
+  'nos vemos', 'hasta luego', 'hasta pronto', 'hasta entonces',
+  'bye', 'chao', 'adios', 'adiós',
+  'listo', 'sale', 'va', 'ok', 'okey',
+  'de nada', 'claro que si',
+  'que bien', 'muy bien',
+];
+
+/**
+ * Cierre/cortesía REAL: mensaje corto (≤3 palabras — mismo principio que
+ * isAffirmation: token corto exige mensaje corto; AUD-07c) que matchea un
+ * keyword de despedida/agradecimiento.
+ */
+export function isClosingMessage(body: string): boolean {
+  const lower = body.trim().toLowerCase();
+  if (lower.split(/\s+/).length > 3) return false;
+  return CLOSING_KEYWORDS.some(
+    (kw) => lower === kw || new RegExp('(?:^|\\s)' + kw + '(?:\\s|$)').test(lower),
+  );
+}
+
 // ─── Respuesta de precio/duración del servicio ────────────────────────────────
 // Antes: función copiada carácter por carácter en awaitingConfirmation y
 // awaitingBookingName (incluyendo la falta de acento en "duración").

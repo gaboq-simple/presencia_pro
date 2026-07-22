@@ -83,18 +83,38 @@ export function isLikelyRealName(name: string): boolean {
  *   - nameQuestion: texto a anexar al mensaje de confirmación de slot
  *   - pendingBookingName: nombre pre-llenado (null si se pregunta directamente)
  */
-export function buildBookingNameQuestion(customerName: string | null): {
+export function buildBookingNameQuestion(
+  customerName: string | null,
+  knownName?:   string | null,
+): {
   nameQuestion: string;
   pendingBookingName: string | null;
 } {
   if (customerName && isLikelyRealName(customerName)) {
     return {
-      nameQuestion:       `La cita queda a nombre de ${customerName}, correcto? O dime otro nombre si es para alguien mas.`,
+      nameQuestion:       `¿La cita queda a nombre de ${customerName}? Si es para alguien más, dime el nombre.`,
       pendingBookingName: customerName,
     };
   }
+
+  // AUD-07e: nombre ya registrado del cliente (customers.name) — lo dio él
+  // mismo en una reserva anterior, así que la validación es más ligera que la
+  // del perfil de WhatsApp (un nombre de pila de UNA palabra es válido aquí;
+  // isLikelyRealName exige 2+ porque los display names de WA son ruidosos).
+  const known = knownName?.trim() ?? '';
+  if (
+    known.length >= 2 &&
+    !/\p{Emoji}/u.test(known) &&
+    /^[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ\s'\-]+$/.test(known)
+  ) {
+    return {
+      nameQuestion:       `¿La cita queda a nombre de ${known}, como la vez pasada? Si es para alguien más, dime el nombre.`,
+      pendingBookingName: known,
+    };
+  }
+
   return {
-    nameQuestion:       'A nombre de quien queda la cita?',
+    nameQuestion:       '¿A nombre de quién queda la cita?',
     pendingBookingName: null,
   };
 }

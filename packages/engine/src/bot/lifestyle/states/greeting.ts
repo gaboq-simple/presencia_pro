@@ -332,7 +332,9 @@ export async function handleGreeting(
 
     return {
       newState:   'QUALIFYING_SERVICE',
-      newContext: { ...baseContext },
+      // AUD-07e: grabar la side-question contestada — QUALIFYING_SERVICE la usa
+      // para no leer el "gracias" de cortesía como intención de reserva.
+      newContext: { ...baseContext, last_side_question: multi.sideQuestion.question },
       responseText,
     };
   }
