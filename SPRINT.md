@@ -957,7 +957,7 @@ COMMIT;
 
 ---
 
-#### S5-BOT-06 — Ruteo del dígito pelado en `routeSlotSelection` (hora-ofrecida > índice > cercana) 🔵 in-progress (2026-06-17, rama `fix/bare-digit-slot-selection`)
+#### S5-BOT-06 — Ruteo del dígito pelado en `routeSlotSelection` (hora-ofrecida > índice > cercana) 🟢 done (mergeado a main, commit `19f188a`; marcador stale cerrado 2026-07-22)
 **Origen:** finding "🟠 BUG — número pelado ('12') no se reconoce" (Backlog post-sprint, smoke de A1, 2026-06-17). Tras ofrecer "12, 12:15, 12:30" el cliente responde `"12"` (la hora ofrecida) y el bot NO lo reconoce → cae al clarify. `"a las 12"` SÍ funciona. Diagnóstico read-only previo (2026-06-17) confirmó causa, lugar del fix y casos límite; este es el fix.
 **Causa (recordatorio):** `extractRawTime` exige un marcador ("a las"/`:MM`/pm/am/turno) para leer un número como hora ("decisión e", `:558-562`). `"12"` sin marcador → `extractRawTime` null → `matchNaturalSlot` none → `parseChoice` → índice 12 → fuera de rango (≤3 slots) → clarify. La "decisión e" quedó **obsoleta** tras la presentación natural en prosa (S5-BOT-01): la lista NO se numera (`presentingSlots.ts:430`), así que un dígito pelado es la hora, no el índice.
 **Lugar del fix (least-invasive, confirmado por diagnóstico):** nueva rama en `routeSlotSelection` donde hoy está `parseChoice` (paso 4), DESPUÉS de date_redirect/no_preference/ask_who/matchNaturalSlot. **NO** en `extractRawTime` (haría inalcanzable el índice para todo dígito → rompería el test (e)). Se ALIMENTA el dígito pelado a `resolveTargetMinutes` (se LEE, no se modifica) y se decide la salida por precedencia.
@@ -978,11 +978,12 @@ COMMIT;
 - [ ] `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
 **Frontera dura:** `resolveTargetMinutes`/`extractRawTime`/`matchNaturalSlot`/`parseChoice` byte-idénticos; `offer_nearest` reusa S5-BOT-02 sin duplicar; NO tocar el edge pre-existente "10"→22:00 (ortogonal, ya existía con "a las 10"); NO construir pregunta de desambiguación (tarea futura, fuera de alcance).
 **Notas de ejecución (2026-06-17):** implementado en rama `fix/bare-digit-slot-selection` (desde `origin/main`, SIN merge). Una sola rama nueva en `routeSlotSelection` (paso 4, entre `matchNaturalSlot` y `parseChoice`); helpers internos byte-idénticos (verificado por `git diff`). 12 tests nuevos en `tests/slotSelection.test.ts` (los 8 obligatorios + 4 de no-regresión de frontera). `npm test` **234/234 verdes** (222 previos + 12; el crítico (e) "2"→index intacto); `tsc --noEmit` apps/lifestyle limpio (EXIT 0). Pendiente: smoke por WhatsApp (Gabriel) antes de merge.
+**Cierre de marcador stale (2026-07-22):** verificado contra `origin/main` — la rama pelada vive en `routeSlotSelection` (`confirmingAppointment.ts`), `tests/slotSelection.test.ts` presente y verde en la suite (619/619). Merge en main: commit `19f188a`.
 **Prompt:** Ad-hoc solicitado por Gabriel (2026-06-17 — fix del dígito pelado en `routeSlotSelection`).
 
 ---
 
-#### S5-BOT-07 — Desambiguación del dígito pelado ambiguo (preguntar la hora, no asumir índice) 🔵 in-progress (2026-06-17, rama `feat/digit-disambiguation`)
+#### S5-BOT-07 — Desambiguación del dígito pelado ambiguo (preguntar la hora, no asumir índice) 🟢 done (mergeado a main vía PR #21; marcador stale cerrado 2026-07-22)
 **Origen:** continuación de S5-BOT-06. Aquel resolvió el dígito pelado con precedencia *hora-ofrecida > índice > cercana > clarify*. Queda una **zona gris**: cuando un dígito es índice válido `[1..N]` **y a la vez** su lectura-hora cae *cerca pero no exacta* de un slot ofrecido, la elección índice-vs-hora es genuinamente ambigua y asumir cualquiera puede agendar lo que el cliente no pidió. Ej.: ante "12:00, 12:15, 12:30" el cliente dice `"1"` → como hora resuelve a la 1pm (13:00, `bestD=30`), pero `1` también es índice válido. ¿Quiso la primera opción (12:00) o la 1pm?
 **Regla central (la frontera):** preguntar ⟺ `d ∈ [1..N]` **Y** `EXACT_TOL(5) < bestD ≤ NEAR_TOL`. `NEAR_TOL = 60 min` como **constante nombrada y comentada** (ajustable con datos de smoke). Fuera de la banda: comportamiento de S5-BOT-06 **intacto** (select / índice / offer_nearest / clarify).
 **Disparo:** nueva acción **pura** `{action:'ask_hour', requestedMinutes:target, indexChoice:d}` en `routeSlotSelection`, dentro de la banda. La función sigue pura/testeable.
@@ -1003,6 +1004,7 @@ COMMIT;
 - [ ] No-regresión S5-BOT-01/02/03/04/06; `npm test` verde + `tsc --noEmit` apps/lifestyle limpio.
 **Frontera dura:** `resolveTargetMinutes`/`extractRawTime`/`matchNaturalSlot`/`parseChoice` byte-idénticos; `offer_nearest` reusa S5-BOT-02 sin duplicar; `ask_who` (A1) intacto; `NEAR_TOL` como constante nombrada.
 **Notas de ejecución (2026-06-17):** implementado en rama `feat/digit-disambiguation` (desde `origin/main`, SIN merge). `routeSlotSelection`: rama `(a.5)` entre exacta y índice (banda `EXACT_TOL < bestD ≤ NEAR_TOL`); acción pura `ask_hour`. Handler: bloque de consumo al tope (antes de aceptación de `nearestOfferSlot` y del router) + case `ask_hour`. La lógica de `offer_nearest` se **extrajo** a `handleOfferNearest()` (byte-idéntica salvo rename `route.requestedMinutes`/`route.slot`→params) para que el camino "sí" la reuse sin duplicar. Bandera `pendingDigitDisambig` en `lifestyle.types.ts` junto a `nearestOfferSlot`. Tests: 4 route-level (`slotSelection.test.ts`, incl. críticos "2"/"3"→index) + 6 handler-level (`digitDisambiguation.test.ts`, ciclo ask_hour→sí/no/fall-through, exclusión mutua, no-cruce de contadores). `npm test` **243/243 verdes**; `tsc --noEmit` apps/lifestyle limpio (EXIT 0). Helpers de frontera verificados byte-idénticos por `git diff`. Pendiente: smoke por WhatsApp (Gabriel) antes de merge.
+**Cierre de marcador stale (2026-07-22):** verificado contra `origin/main` — `pendingDigitDisambig` vive en `types/lifestyle.types.ts:211`, case `ask_hour` y bloque de consumo en `confirmingAppointment.ts`; `tests/digitDisambiguation.test.ts` presente y verde (619/619). Merge en main: PR #21 (`e00cbe2`).
 **Prompt:** Ad-hoc solicitado por Gabriel (2026-06-17 — desambiguación del dígito pelado ambiguo).
 
 ---
@@ -1067,7 +1069,7 @@ COMMIT;
 
 ---
 
-#### S5-BOT-09 — Preámbulo robótico en la apertura del flujo de agendamiento (saludo-en-medio + eco doble) 🟡 en progreso (2026-06-18)
+#### S5-BOT-09 — Preámbulo robótico en la apertura del flujo de agendamiento (saludo-en-medio + eco doble) 🟢 done (mergeado a main vía PR #25; marcador stale cerrado 2026-07-22)
 **Origen:** smoke por WhatsApp (2026-06-18). El mensaje de apertura del flujo de agendamiento suena a piezas pre-armadas concatenadas: trae un saludo incrustado a mitad y repite la intención dos o tres veces. Ejemplo confirmado: *"Perfecto, corte con Andrés. Déjame checar… **Hola, qué gusto verte de nuevo. Vi que quieres un corte con Andrés**…"*. Diagnóstico de diseño read-only (2026-06-18).
 
 **Síntomas (dos, distintos):**
@@ -1117,11 +1119,12 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 **Implementación:** rama `fix/s5-bot-09-apertura-natural` (commits de código). Este registro de diseño va directo a main. PR queda abierto para revisión de Gabriel — Claude Code no mergea.
 
-**Prompt:** Diseño registrado por Gabriel (2026-06-18 — preámbulo robótico de la apertura). Implementación en curso.
+**Cierre de marcador stale (2026-07-22):** verificado contra `origin/main` — `FORMATTING_RULES` extraída como fuente única (`prompt.ts` + `presentingSlots.ts`), el puente "déjame checar" eliminado de `greeting.ts` (0 ocurrencias). Merge en main: PR #25 (`e6c16a1`). Suite 619/619.
+**Prompt:** Diseño registrado por Gabriel (2026-06-18 — preámbulo robótico de la apertura).
 
 ---
 
-#### S5-BOT-10 — Barbero perdido + cierre que auto-agenda un barbero no aceptado (BUG 1 + BUG 2) 🔵 in-progress (impl. 2026-06-18, PR abierto)
+#### S5-BOT-10 — Barbero perdido + cierre que auto-agenda un barbero no aceptado (BUG 1 + BUG 2) 🟢 done (mergeado a main vía PR #26; marcador stale cerrado 2026-07-22)
 **Origen:** smoke de S5-BOT-09 (2026-06-18). Dos defectos de la misma costura en `CONFIRMING_APPOINTMENT`, se arreglan en **una sola rama** (componen entre sí). Diagnóstico read-only confirmado contra código.
 
 **BUG 1 — barbero perdido:** `routeSlotSelection` (`confirmingAppointment.ts:537-617`) no tiene eje de barbero en prosa. "Con Carlos" → cae a `matchNaturalSlot` → `none` → clarify de hora. El `staffId` queda sin setear.
@@ -1173,7 +1176,8 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 **Implementación:** rama propia (separada de `fix/s5-bot-09-apertura-natural`, que mergea por su cuenta). Claude Code no mergea — PR para revisión de Gabriel.
 
-**Prompt:** Diseño cerrado por Gabriel (2026-06-18 — read-only, con tres afinaciones: ciclo de vida de requestedStaffId centralizado, regla 2 anti-homonimia, copy con salida a barbero pedido). Implementación pendiente de arranque.
+**Cierre de marcador stale (2026-07-22):** verificado contra `origin/main` — `requestedStaffId` vive en `types/lifestyle.types.ts:90` (con su invariante de ciclo de vida documentado), `detectBarberSelection`/`clearBookingSelection` en `confirmingAppointment.ts` y `presentingSlots.ts`. Merge en main: PR #26 (`02edb3f`). Suite 619/619.
+**Prompt:** Diseño cerrado por Gabriel (2026-06-18 — read-only, con tres afinaciones: ciclo de vida de requestedStaffId centralizado, regla 2 anti-homonimia, copy con salida a barbero pedido).
 
 ---
 
@@ -1183,7 +1187,7 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
-#### S5-BOT-12 — Contador de escape estructural + P1 (afirmación tras presentación) 🔵 in-progress (impl. 2026-06-20, rama `fix/rama1-contador-escape-p1`)
+#### S5-BOT-12 — Contador de escape estructural + P1 (afirmación tras presentación) 🟢 done (mergeado a main vía PR #27; marcador stale cerrado 2026-07-22)
 **Origen:** "Rama 1 hotfix" — diseño read-only aprobado por Gabriel (2026-06-20) con tres ajustes. Dos bucles de la costura de agendamiento podían repetirse indefinidamente porque ramas de clarify reseteaban `clarification_attempts:0` cada turno (ask_who en `confirmingAppointment.ts:255-269`; barbero en `awaitingBookingName.ts:305-316`), de modo que el cap por-estado nunca subía. P1: el gate de afirmación exigía `nearestOfferSlot`, que la presentación de slots nunca setea → un "Sí" tras presentar caía a clarify.
 
 **DECISIÓN — contador de escape estructural (no parche):**
@@ -1210,6 +1214,7 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 **Implementación:** rama propia `fix/rama1-contador-escape-p1` desde `origin/main @ 02edb3f`. Claude Code no mergea — PR para revisión de Gabriel; Gabriel corre las 4 rutas de smoke antes del merge.
 
+**Cierre de marcador stale (2026-07-22):** verificado contra `origin/main` — `no_progress_streak` en `types/lifestyle.types.ts:344`, `STRUCTURAL_CAP = 6` aplicado en `router.ts:106/:225` con el test de relación de caps referenciado en el propio código. Merge en main: PR #27 (`bead1bb`). Suite 619/619.
 **Prompt:** Diseño read-only aprobado por Gabriel (2026-06-20) con tres ajustes incorporados.
 
 ---
@@ -1276,7 +1281,7 @@ Rutas a verificar en smoke (Gabriel): #1 GREETING→SLOTS nuevo y recurrente (sa
 
 ---
 
-#### S6-SEC-01 — Sistema de control de citas (audit trail + permisos por rol) 🔵 in-progress (Fase 1 + 2a + 2c-i 🟢 done; 2b / 2c-ii / capa visible pendientes)
+#### S6-SEC-01 — Sistema de control de citas (audit trail + permisos por rol) 🔵 in-progress (Fases 1 + 2a + 2b + 2c-i + 2c-ii 🟢 done; pendientes solo: capa VISIBLE del audit — diferida al rediseño de vistas — y residuo walk-in del bot en `unknown`; header corregido 2026-07-22, las fases done constan en el propio bloque)
 **Origen:** Gabriel detectó que el barbero en `/staff/gestion` podía mutar citas del negocio **sin rastro** y **sin límite** (inflar agenda/números del dueño con citas/clientes falsos). Orientación read-only aprobada: `ORIENTACION-audit-trail-permisos.md` + `ORIENTACION-fase2-gate-server-actions.md`. Se ataca por fases.
 
 **Fase 1 — gate + actor en `PATCH /api/appointments` 🟢 done (2026-06-29, PR #48).** Endpoint huérfano (sin caller UI, pero alcanzable) que mutaba estado sin actor / sin gate / sin permiso. Ahora estampa `modified_by_staff_id`+`modified_at` y aplica gate barbero-solo-sus-citas. Verificación curl diferida (endpoint sin caller UI). `tsc` + 456 tests verdes.
@@ -1595,16 +1600,24 @@ Lista de espera consciente. Aparece en el reporte final de auditoría. NO entra 
 ### ✅ `getDayAppointments` límite de día en UTC → **PROMOVIDO a S6-DATA-01 (done, 2026-07-04)**
 Gabriel lo priorizó e intercaló antes del gesto (PR-3 de S6-UI-02). Ver el bloque **S6-DATA-01** en la sección de tareas. Ya no es backlog.
 
-### 🟠 S6-DATA-02 — `rescheduleAppointment` interpreta `newStartTime` en la tz del servidor, no del negocio
+### ✅ S6-DATA-02 — `rescheduleAppointment` interpreta `newStartTime` en la tz del servidor → **RESUELTO (PR #107; marcador cerrado 2026-07-22)**
+
+Verificado contra `origin/main`: `rescheduleAppointment` construye el `starts_at` con `zonedWallTimeToUtc(input.newDate, input.newStartTime, timezone)` donde `timezone = getBusinessTimezone(session.business_id)` (`assistant-actions.ts:654-655`). Fix mergeado en PR #107 (`34a81b0`, familia S6-DATA-01). `createAssistantAppointment` no tenía el bug (recibe ISO pre-convertido).
+
+#### (registro original, superado)
 `rescheduleAppointment` calcula el nuevo `starts_at` con `new Date(\`${input.newDate}T00:00:00\`).setHours(hh, mm)` → usa la tz del **servidor** (Vercel = UTC), no la del negocio. Misma familia que S6-DATA-01. En el demo (servidor CST ≈ negocio CST durante dev local) coincide, pero en producción (servidor UTC) una hora `newStartTime='18:00'` se guardaría como 18:00 UTC = 12:00 local México → **la cita reagendada aterriza 6h antes de lo que el asistente eligió**. Detectado al cablear el gesto click-to-place (S6-UI-02 PR-3), que alimenta `newStartTime` con la hora-de-pared del negocio. Fix: interpretar `newStartTime`/`newDate` en `businesses.timezone` al construir el `timestamptz` (reusar el helper `zonedWallTimeToUtc` de `dashboard.types.ts`). Revisar también `createAssistantAppointment` por el mismo patrón. Tarea propia (toca action compartida + notificaciones/recordatorios que derivan del `starts_at`).
 
-### 🟠 S6-DATA-04 — Default de fecha del dashboard en UTC, no en tz del negocio
+### ✅ S6-DATA-04 — Default de fecha del dashboard en UTC, no en tz del negocio → **RESUELTO (PR #144; marcador cerrado 2026-07-22)**
+
+Verificado contra `origin/main`: el default de fecha sale de `todayStrInTz(timezone)` en `dashboard/page.tsx` y `staff/page.tsx` (más los reports weekly/staff-metrics), con comentario en código explicando el bug naive anterior. Fix mergeado en PR #144 (`4338595`), complementario al barrido de PR #142.
+
+#### (registro original, superado)
 `dashboard/page.tsx` (y `staff/gestion`, `staff`) computan el día por defecto con `toDateStr(new Date())` → fecha del **servidor** (Vercel = UTC). En producción, entre 18:00–24:00 hora de México, `new Date()` UTC ya es "mañana" → el dashboard abriría por defecto en el día equivocado (y `getDayAppointments`/blocks buscarían el día equivocado). Family S6-DATA-01. Detectado al cablear el gesto (el cliente ya lo mitiga en el header con `isTodayInTz`, pero el **default del servidor** sigue en UTC). Fix: calcular "hoy" en `businesses.timezone` al resolver el default de `?date`. Afecta owner/admin/asistente/gestion por igual (query/param compartido).
 
 ### ✅ Solape blando forzado → **RESUELTO en S6-UI-02 PR-3 (Opción C, 2026-07-04)**
 Ya no es backlog. Gabriel pidió investigar el constraint antes de tocarlo; se evaluaron 3 opciones y eligió **C** (columna `allow_overlap` + EXCLUDE condicionado, migración 046). Ver el bloque **S6-UI-02 → "PR-3 — solape blando (Opción C)"** en la sección de tareas: el bot y los flujos automáticos siguen 100% protegidos; solo el reacomodo manual explícito del asistente puede forzar. Verificado por ruta real + DB (solape normal bloqueado / forzado permitido).
 
-### ✅ DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path → **RESUELTA (2026-07-22, rama `feat/classifier-di-e2e`, sin merge)**
+### ✅ DEUDA TÉCNICA DE MÁXIMA PRIORIDAD — Classifier inyectable + e2e del happy-path → **RESUELTA (2026-07-22, PR #165 `673af6d` mergeado a main)**
 
 **Notas de ejecución (2026-07-22):** el bloque tenía tiempo escrito y parte ya existía (inyección a nivel `dispatch()` vía `deps.classifier` + `e2e-happyPath.test.ts` dispatch-level, ambos de R1). Lo que faltaba de verdad y se hizo:
 1. **DI a nivel del HANDLER COMPLETO** — `handleLifestyleMessage` aceptа `classifier?` opcional (antes hardcodeaba los reales): la costura load→dedup→dispatch→send→persist — el gap exacto de S4-BOT-09 — ya es testeable sin red.
@@ -1714,7 +1727,11 @@ El diagnóstico original subestimaba el problema: el aviso diferido no salía "a
 
 ---
 
-### 🟠 BUG — número pelado ("12") no se reconoce como selección tras oferta de horas (origen: smoke A1, 2026-06-17)
+### ✅ BUG — número pelado ("12") no se reconoce como selección tras oferta de horas → **RESUELTO en S5-BOT-06 (main `19f188a`; marcador cerrado 2026-07-22)**
+
+La rama pelada en `routeSlotSelection` (precedencia exacta-ofrecida > índice > cercana > clarify) está viva en main y cubierta por `tests/slotSelection.test.ts`. Ver bloque S5-BOT-06.
+
+#### (registro original, superado)
 
 **Origen:** smoke por WhatsApp de S5-BOT-04 (A1). Diagnóstico read-only, sin tocar código ni base. **Severidad: alta** — el cliente responde con el número que el bot acaba de ofrecerle, de la forma más natural posible, y el bot no lo entiende.
 
@@ -1730,7 +1747,11 @@ El diagnóstico original subestimaba el problema: el aviso diferido no salía "a
 
 ---
 
-### 🟠 HUECO — `AWAITING_BOOKING_NAME` no escucha correcciones, solo nombres (origen: smoke S5-BOT-07, 2026-06-17)
+### ✅ HUECO — `AWAITING_BOOKING_NAME` no escucha correcciones, solo nombres → **RESUELTO en S5-BOT-08 (PR #22) + S5-BOT-08b (PRs #23/#24); marcador cerrado 2026-07-22**
+
+Corrección de hora/día/cancelar en el cierre + protección del nombre legítimo, verificado por smoke el 2026-06-17 (ver bloque S5-BOT-08, 🟢 desde entonces — este finding quedó sin actualizar). El residual `"con Carlos"` lo cerró S5-BOT-08b.
+
+#### (registro original, superado)
 
 **Origen:** smoke por WhatsApp de S5-BOT-07. En el paso final del flujo (pedir el nombre para confirmar), el bot interpreta **cualquier** mensaje como un nombre.
 
@@ -1928,8 +1949,8 @@ El copy de plantillas deterministas y el generado por LLM evolucionaron por sepa
 
 ### Ola 2 — Fiabilidad de datos (antes del primer cliente real, no antes de "Hoy")
 
-- **REL-01 · Backup R2 verificado end-to-end** ⚪ todo
-  Correr el workflow y **confirmar un restore drill real** (no un Action en verde). Hoy no hay backup verificado.
+- **REL-01 · Backup R2 verificado end-to-end** 🟢 done (S6-OPS-01 / PR #135, `0ed4669`; marcador cerrado 2026-07-22)
+  Cubierta por S6-OPS-01 (PR #135): workflow `backup-weekly.yml` funcional y **artefacto verificado por contenido** (descarga → descifrado → restore a instancia local → conteo de filas), no solo el Action en verde. Gotcha documentado: `SUPABASE_DB_URL` debe ser el session pooler. El restore drill formal en staging sigue siendo **S4-OPS-02** (⚪ todo, tarea de Gabriel).
 - **REL-02 · Reconciliar el ledger de migraciones + documentar recreación** ⚪ todo
   Remoto tiene **7 filas** en `supabase_migrations.schema_migrations` (versiones timestamp) vs repo `001–043` (numeradas); migraciones aplicadas fuera de banda (SQL editor / MCP). Hoy **no se puede recrear la DB replayando el repo**. Documentar el procedimiento de recreación incluyendo los crons (que solo viven en el Dashboard).
 - **REL-03 · Confirmar los 2 crons/schedules activos en el Dashboard** ⚪ todo
@@ -2126,6 +2147,7 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-07-22 | Deuda #1 — classifier inyectable + e2e full-handler + consumo de intents | done (rama `feat/classifier-di-e2e`, sin merge) | Diagnóstico: el bloque estaba parcialmente resuelto (DI en dispatch + e2e dispatch-level ya existían de R1). Lo nuevo: (1) DI opcional en `handleLifestyleMessage` — la costura completa del handler testeable sin red; (2) `e2eFullHandler.test.ts`: 4 turnos reales con fake estateful (upsert aplicado → round-trip Zod entre turnos), INSERT de cita verificado, historial+dedup+retry; (3) punto #3 de S4-BOT-09: `DATE_HINT` ("para el viernes" se persiste, simétrico en service/staff, sin gastar clarify) + `DECLINED` ("no, mejor nada" → salida cálida, no bucle) + los advances absorben la fecha del mensaje. 8 tests nuevos; **suite 619/619**, tsc limpio, lint 0 err, build exit 0. Residuo LLM (cache/system-corto/multi-answer) anotado como tarea chica en el bloque. |
 | 2026-07-22 | Residuo LLM — cache_control, system corto, answer en el multi | done (rama `feat/bot-llm-residuo`, commit local) | (1) `cache_control` era no-op PROBADO (todos los generativos en Haiku 4.5, mínimo cacheable 4096 tokens vs systems de ~830–2000; system por-negocio/por-contexto; tráfico esporádico vs TTL 5 min) → retirado de los 6 call sites, `claudeClient.system` → `string` con nota. (2) `buildMicroCopySystemPrompt` (persona + FORMATTING_RULES + datos opcionales) en generateRepeatQuestion ×2, generateConfirmation y answerSideQuestion (éste con businessContext; el system de 7 pasos empujaba a agendar a quien ya tiene cita); greeting conserva el completo. (3) Multi-intent con `businessContext` opcional redacta `sideQuestion.answer` en la misma llamada (maxTokens 512→768) → el path defer de greeting ya NO llama a classifyIntent (spy lo blinda); [DERIVA] si no hay dato; metadata S5-OBS-01 arrastra el answer. `tests/llmResiduo.test.ts` (8). **Suite 627/627**, tsc limpio, lint 0 err, build exit 0. |
 | 2026-07-22 | Punto 4 de AUD-01 — routing de modelo por TAREA, no por estado | done (rama `feat/bot-model-por-tarea` APILADA sobre `feat/bot-llm-residuo`, commit local) | Diagnóstico: la inversión era TOTAL — Sonnet no se usaba en ninguna llamada real (deps.model=Sonnet solo llegaba a call sites de estados "Haiku"; los estados "Sonnet" hardcodeaban Haiku local ×3). Fix: `modelForTask('conversational_turn'\|'micro_copy'\|'slot_presentation')` en modelRouter (única fuente de model IDs); solo `generateGreetingText` corre Sonnet 5; `selectModel`/`deps.model` eliminados; timeouts alineados (confirmed/answerSideQuestion → HAIKU_MS). `tests/modelPorTarea.test.ts` (4, incluye escaneo de fuentes anti-hardcode y assert de que selectModel no reaparece). **Suite 631/631**, tsc limpio, lint 0 err, build exit 0. PR debe basarse en #167 (mismos archivos). |
+| 2026-07-22 | Limpieza de marcadores stale en SPRINT.md (solo doc) | done (rama `chore/sprint-stale-cleanup`, commit local) | Todo verificado con evidencia de código en `origin/main` + suite 619/619 corrida, no de memoria. Cerrados: **S5-BOT-06** (main `19f188a`), **S5-BOT-07** (PR #21), **S5-BOT-09** (PR #25), **S5-BOT-10** (PR #26), **S5-BOT-12** (PR #27) — código vivo (`routeSlotSelection` rama pelada, `pendingDigitDisambig`, `FORMATTING_RULES`, `requestedStaffId`, `STRUCTURAL_CAP`) y testeado. Findings del backlog: "número pelado" → S5-BOT-06; "AWAITING_BOOKING_NAME correcciones" → S5-BOT-08/08b. **S6-DATA-02** → PR #107 (`zonedWallTimeToUtc` en reschedule); **S6-DATA-04** → PR #144 (`todayStrInTz` en dashboard/staff/reports); **REL-01** → S6-OPS-01/PR #135 (artefacto verificado filas+restore; el drill formal sigue en S4-OPS-02). Deuda #1: header actualizado a "PR #165 mergeado". |
 | 2026-07-21 | AUD-06 — guía de estilo única + unificación de copy del bot | done (rama `style/bot-copy-guide` desde `origin/main`, sin merge) | Convención adoptada: **español correcto en todo** (acentos + ¿ ¡; regla anti-"¿" eliminada de FORMATTING_RULES) — muere la doble voz plantillas-vs-LLM. Nuevos: `STYLE.md` (guía escrita) y `copy.ts` (fuente única: escalamiento ×3, scheduling-error ×2, reset de servicio ×4, pregunta de fecha ×2, DAYS/MONTHS_ES **×5**, keywords sí/no base, buildSideAnswerFromService ×2). Listas de sí/no por composición base+extras ("va" funciona igual en horario/nombre/waitlist). Puntuales: "preferis" ×2, "Buscando…" ×4 → pregunta honesta, "la mas temprano", links a línea propia (privacidad + 3 de businessContext), emojis 🙏/🔔 fuera, desambiguación en lista numerada, side-answer del clasificador hereda FORMATTING_RULES. Sin cambios de lógica; 10 tests actualizados. **Suite 578/578**, tsc limpio, lint 0 err, build exit 0. |
 
 ---
