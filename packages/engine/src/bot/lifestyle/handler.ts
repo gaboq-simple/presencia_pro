@@ -85,10 +85,13 @@ export async function handleLifestyleMessage(
   let errorInfo: { code: string; message: string } | null = null;
 
   // ── 1. Verificar horario de atención ─────────────────────────────────────
+  // AUD-07a: fuera de horario ya NO es un muro. Antes este check retornaba
+  // awayMessage antes del FSM: a las 9pm (hora pico de agendado) el bot solo
+  // repetía "estamos cerrados" — imposible agendar para mañana o preguntar un
+  // precio. Ahora el FSM atiende SIEMPRE; el aviso de cerrado se antepone UNA
+  // vez por periodo como preámbulo (ver paso 4a-bis).
 
-  if (!isWithinOfficeHours(business.officeHours, msg.timestamp, business.timezone)) {
-    return { message: business.awayMessage };
-  }
+  const outOfHours = !isWithinOfficeHours(business.officeHours, msg.timestamp, business.timezone);
 
   // ── 2. Cargar conversación + deduplicación por message_id ────────────────
   // Si el message_id del mensaje entrante coincide con el último procesado,
@@ -148,13 +151,34 @@ export async function handleLifestyleMessage(
 
   const model = selectModel(currentState);
 
-  const dispatchedResult = await dispatch(currentState, msg, currentContext, {
+  let dispatchedResult = await dispatch(currentState, msg, currentContext, {
     business,
     supabase,
     anthropicKey,
     model,
     classifier: { classifyIntent, classifyMultiIntent },
   });
+
+  // ── 4a-bis. Preámbulo de fuera-de-horario (AUD-07a) ───────────────────────
+  // El aviso de cerrado se antepone UNA sola vez por periodo cerrado
+  // (away_notice_sent). Se fuerza el flag sobre el newContext SIEMPRE que
+  // estamos fuera de horario — varios handlers reconstruyen el contexto desde
+  // cero y perderían el flag (re-preámbulo espurio). Al volver a abrir, el
+  // flag se limpia: el siguiente periodo cerrado avisa de nuevo.
+
+  if (outOfHours) {
+    const needsNotice = !currentContext.away_notice_sent && business.awayMessage?.trim() && dispatchedResult.responseText.trim();
+    dispatchedResult = {
+      ...dispatchedResult,
+      ...(needsNotice ? { responseText: `${business.awayMessage}\n\n${dispatchedResult.responseText}` } : {}),
+      newContext: { ...dispatchedResult.newContext, away_notice_sent: true },
+    };
+  } else if (dispatchedResult.newContext.away_notice_sent) {
+    dispatchedResult = {
+      ...dispatchedResult,
+      newContext: { ...dispatchedResult.newContext, away_notice_sent: false },
+    };
+  }
 
   // ── 4b. Acumular historial de conversación ────────────────────────────────
   // Máximo MAX_HISTORY_TURNS turnos (user+assistant por turno = 2 mensajes por turno).
