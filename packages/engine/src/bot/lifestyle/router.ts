@@ -401,11 +401,10 @@ async function routeToHandler(
       return handleGreeting(msg, {}, deps);
 
     case 'AWAY':
-      return {
-        newState:     'AWAY',
-        newContext:   context,
-        responseText: deps.business.awayMessage,
-      };
+      // AUD-07a: el muro de fuera-de-horario murió (el aviso ahora es un
+      // preámbulo del handler). Nada transiciona a AWAY ya; este case solo
+      // recupera conversaciones legacy que quedaron atoradas en ese estado.
+      return handleGreeting(msg, {}, deps);
 
     case 'FALLBACK':
       return handleFallback(msg, context, deps);

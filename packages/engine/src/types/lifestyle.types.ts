@@ -291,6 +291,13 @@ export const LifestyleBotContextSchema = z.object({
    */
   escalation_holds: z.number().int().nonnegative().optional(),
 
+  /**
+   * AUD-07a: true cuando ya se antepuso el aviso de fuera-de-horario en este
+   * periodo cerrado. El handler lo fuerza mientras el negocio está cerrado y
+   * lo limpia al reabrir — el siguiente periodo cerrado vuelve a avisar una vez.
+   */
+  away_notice_sent: z.boolean().optional(),
+
   // ── Clasificador de intenciones ───────────────────────────────────────────
 
   /**
