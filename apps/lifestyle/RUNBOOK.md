@@ -313,6 +313,9 @@ Supabase Dashboard → Edge Functions → [nombre de funcion] → Schedules → 
 
 Si se recrea el proyecto Supabase, los crons deben reconfigurarse manualmente.
 
+**Recreacion completa del proyecto** (migraciones en orden, ledger vs repo, functions,
+crons, secrets y verificacion): ver `supabase/RECREATE.md` (REL-02, 2026-07-22).
+
 ### Verificar que los crons estan activos
 
 1. Supabase Dashboard → Edge Functions
