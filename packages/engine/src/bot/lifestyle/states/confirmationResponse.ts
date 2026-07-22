@@ -11,8 +11,9 @@
 //
 // Retorna StateHandlerResult si el mensaje fue manejado, null si debe caer al router normal.
 
-import type { LifestyleBotContext } from '../../../types/lifestyle.types';
+import type { LifestyleBotContext, LifestyleBotState } from '../../../types/lifestyle.types';
 import { tenantDb }                 from '../../../tenantDb';
+import { TECHNICAL_HICCUP_MESSAGE } from '../copy';
 import { sendWhatsAppMeta }         from '../../../notifications/whatsapp';
 import { notifyWaitlist }           from '../scheduling';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
@@ -85,6 +86,12 @@ export async function handleConfirmationResponse(
   msg:     LifestyleIncomingMessage,
   context: LifestyleBotContext,
   deps:    StateHandlerDeps,
+  /**
+   * Estado actual de la conversación (lo pasa el router). Solo se usa para que
+   * el guard de fallo técnico del clasificador (AUD-07b) responda SIN mover el
+   * estado. Opcional para no romper call sites de tests que arman 3 args.
+   */
+  currentState?: LifestyleBotState,
 ): Promise<StateHandlerResult | null> {
   const { business, supabase } = deps;
 
@@ -101,8 +108,13 @@ export async function handleConfirmationResponse(
   const customerId = (customerData as { id: string }).id;
 
   // ── Buscar cita próxima en las 3h ─────────────────────────────────────────
+  // Reloj canónico del bot = msg.timestamp (misma doctrina que el guard de
+  // office_hours y el piso "no agendar en el pasado"). Antes usaba new Date():
+  // además de romper la doctrina, hacía la ventana de 3h dependiente del reloj
+  // REAL — los tests con fixtures de fecha fija se volvían bombas de tiempo
+  // (pasaban o fallaban según la hora del día en que corriera la suite).
 
-  const now  = new Date();
+  const now  = msg.timestamp;
   const in3h = new Date(now.getTime() + 3 * 60 * 60_000);
 
   const { data: apptData, error: apptQueryError } = await tenantDb(supabase, business.id)
@@ -278,6 +290,21 @@ export async function handleConfirmationResponse(
       state:         'CONFIRMED',
       metadata:      buildSingleClassifierMetadata(classification, msg.body),
     });
+
+    // ── Fallo técnico del clasificador (AUD-07b): consumir el turno honesto ──
+    // Antes este UNCLEAR caía al `return null` de abajo → el router normal
+    // re-corría el turno contra el MISMO clasificador caído y el estado de
+    // reposo gastaba SUS intentos de clarify con "no te entendí" — el mensaje
+    // equivocado. Ahora: hiccup honesto sin mover el estado ni contadores; el
+    // reintento del cliente re-corre todo, y los fast paths por keywords del
+    // recordatorio ("confirmo", "no voy", "voy tarde") siguen vivos en outage.
+    if (classification.failure_reason) {
+      return {
+        newState:     currentState ?? 'CONFIRMED',
+        newContext:   { ...context },
+        responseText: TECHNICAL_HICCUP_MESSAGE,
+      };
+    }
 
     if (
       classification.intent === 'CONFIRM_NO' &&

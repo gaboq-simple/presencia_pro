@@ -261,7 +261,9 @@ async function routeToHandler(
   // (Bug R3: sin esta guarda, "sí" tras negociar 17:00 confirmaba la cita
   // preexistente de las 10:00 — "dice 5pm, agenda 10".)
   if (!ACTIVE_FLOW_STATES.has(state)) {
-    const confirmResult = await handleConfirmationResponse(msg, context, deps);
+    // `state` viaja para que el guard de fallo técnico (AUD-07b) responda el
+    // hiccup SIN mover la conversación de estado.
+    const confirmResult = await handleConfirmationResponse(msg, context, deps, state);
     if (confirmResult !== null) return confirmResult;
   }
 
