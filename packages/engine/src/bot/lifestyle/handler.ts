@@ -131,7 +131,16 @@ export async function handleLifestyleMessage(
   // mensajes duplicados). No cubre el race condition de doble-tap simultáneo —
   // para eso existe el constraint no_overlapping_appointments en appointments.
 
-  if (msg.messageId && row?.last_message_id && row.last_message_id === msg.messageId) {
+  // AUD-07f: ventana de dedup (últimos 5 ids en el contexto) además del
+  // last_message_id — cubre el retry FUERA DE ORDEN del webhook (el N-1
+  // reintentado después del N ya no se reprocesa pisando el estado).
+  const recentIds: unknown[] = Array.isArray(
+    (row?.context as Record<string, unknown> | null | undefined)?.['recent_message_ids'],
+  )
+    ? ((row!.context as Record<string, unknown>)['recent_message_ids'] as unknown[])
+    : [];
+
+  if (msg.messageId && (row?.last_message_id === msg.messageId || recentIds.includes(msg.messageId))) {
     // Mensaje ya procesado — retornar silenciosamente sin re-procesar
     return { message: '' };
   }
@@ -268,7 +277,13 @@ export async function handleLifestyleMessage(
   // ── 5. Persistir nuevo estado (solo si el cliente recibió la respuesta) ───
 
   if (!sendFailed) {
-    const serializedContext = serializeContext(result.newContext);
+    const contextToPersist = msg.messageId
+      ? {
+          ...result.newContext,
+          recent_message_ids: [...(currentContext.recent_message_ids ?? []), msg.messageId].slice(-5),
+        }
+      : result.newContext;
+    const serializedContext = serializeContext(contextToPersist);
 
     try {
       await withRetry(

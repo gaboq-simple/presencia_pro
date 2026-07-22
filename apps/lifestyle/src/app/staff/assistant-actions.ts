@@ -1091,6 +1091,25 @@ export async function releaseConversation(customerPhone: string): Promise<void> 
     .eq('customer_phone', customerPhone);
 
   if (error) throw new Error(`releaseConversation failed: ${error.message}`);
+
+  // AUD-07f: avisar al cliente que volvió el bot — el takeover sí avisa, pero
+  // el release era silencioso: el cliente no sabía con quién hablaba.
+  // Best-effort: si falla el envío, el release ya quedó hecho.
+  try {
+    const accessToken = process.env['WHATSAPP_ACCESS_TOKEN'];
+    const { data: biz } = await supabase
+      .from('businesses')
+      .select('whatsapp_phone_number_id')
+      .eq('id', session.business_id)
+      .maybeSingle();
+    const phoneNumberId = (biz as { whatsapp_phone_number_id: string } | null)?.whatsapp_phone_number_id;
+    if (accessToken && phoneNumberId) {
+      await sendWhatsAppMeta(
+        { to: customerPhone, body: 'Listo — te atiende de nuevo nuestro asistente virtual. ¿En qué más te puedo ayudar?' },
+        { accessToken, phoneNumberId },
+      );
+    }
+  } catch { /* best-effort */ }
 }
 
 // ─── Handoff: enviar mensaje desde el panel ───────────────────────────────────
