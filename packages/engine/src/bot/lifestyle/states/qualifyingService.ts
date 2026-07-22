@@ -12,6 +12,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { getCatalog } from '../catalog';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
@@ -31,7 +32,6 @@ import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandl
 
 const MAX_SERVICES_PER_MESSAGE = 4;
 const FLOW_QUESTION = '¿Qué servicio te interesa?';
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 // Intentos totales de clarificación antes de escalar a FALLBACK.
 // Exportado para el test de relación de caps (S5-BOT-12).
@@ -435,7 +435,7 @@ async function generateRepeatQuestion(
     const client = new Anthropic({ apiKey: anthropicKey });
     const resp = await callClaude({
       client,
-      model:     HAIKU_MODEL,
+      model:     modelForTask('micro_copy'),
       maxTokens: 120,
       system,
       messages:  [{
