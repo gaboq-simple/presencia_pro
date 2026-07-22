@@ -28,8 +28,8 @@ import { isModificationIntent, isCancellationIntent, wantsToModifyExistingAppoin
 import { TECHNICAL_HICCUP_MESSAGE, TECHNICAL_ESCALATION_MESSAGE, isClosingMessage } from './copy';
 import { getCatalog }                  from './catalog';
 import { interpret }                   from './interpreter';
-import { buildSystemPrompt }           from './prompt';
-import { answerSideQuestion as buildDerivaAnswer } from './businessContext';
+import { buildMicroCopySystemPrompt }  from './prompt';
+import { answerSideQuestion as buildDerivaAnswer, buildBusinessContext } from './businessContext';
 import type { LifestyleIncomingMessage, ServiceRow, StateHandlerDeps, StateHandlerResult } from './types';
 
 // ─── Contador de escape estructural (S5-BOT-12) ───────────────────────────────
@@ -535,7 +535,14 @@ async function answerSideQuestion(
   });
   try {
     const client = new Anthropic({ apiKey: deps.anthropicKey });
-    const system = buildSystemPrompt(deps.business, context, catalog);
+    // System corto CON datos del negocio: esta llamada solo redacta 1-2 líneas
+    // de respuesta informativa. El system completo de 7 pasos era ruido y
+    // además empujaba a agendar a un cliente que YA tiene cita confirmada.
+    const system = buildMicroCopySystemPrompt(deps.business, {
+      businessContext: buildBusinessContext(deps.business, catalog, {
+        appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '',
+      }),
+    });
 
     // Dar contexto del servicio agendado — permite responder "cuánto dura" con precisión
     const svc     = context.serviceId ? catalog.find((s) => s.id === context.serviceId) : undefined;
@@ -547,7 +554,7 @@ async function answerSideQuestion(
       client,
       model:     deps.model,
       maxTokens: 120,
-      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      system,
       messages:  [{ role: 'user', content: `${apptCtx} Ahora pregunta: "${question}". Responde en 1-2 líneas. Sin markdown. Ortografía correcta: acentos y signos de apertura (¿ ¡).` }],
       timeoutMs: TIMEOUT_SONNET_MS,
       context:   { businessId: deps.business.id, customerPhone: '', state: 'CONFIRMED' },

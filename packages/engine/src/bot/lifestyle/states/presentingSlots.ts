@@ -700,7 +700,7 @@ async function generateSlotsMessage(params: {
       client,
       model:     HAIKU_MODEL,
       maxTokens: 200,
-      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      system,
       messages:  [{ role: 'user', content: userMessage }],
       timeoutMs: TIMEOUT_HAIKU_MS,
       context:   { businessId, customerPhone, state: 'SHOWING_SLOTS' },
