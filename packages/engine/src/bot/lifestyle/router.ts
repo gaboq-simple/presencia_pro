@@ -25,6 +25,7 @@ import { handleQualifyingStaff }       from './states/qualifyingStaff';
 import { handleShowingSlots }          from './states/presentingSlots';
 import { startCancelFlow, handleAwaitingCancelConfirmation } from './states/awaitingCancelConfirmation';
 import { isModificationIntent, isCancellationIntent, wantsToModifyExistingAppointment } from './cancelIntent';
+import { TECHNICAL_HICCUP_MESSAGE, TECHNICAL_ESCALATION_MESSAGE } from './copy';
 import { getCatalog }                  from './catalog';
 import { interpret }                   from './interpreter';
 import { buildSystemPrompt }           from './prompt';
@@ -104,6 +105,11 @@ const PROGRESS_FIELDS = [
  */
 export const STRUCTURAL_CAP = 6;
 
+// AUD-07b: fallos técnicos (throw de handler) consecutivos antes de escalar a
+// humano. Transitorio → reintento en el mismo estado; persistente → ESCALATED
+// (con aviso atómico al admin), nunca el loop eterno de fallbackMessage.
+export const MAX_TECH_FAILURES = 3;
+
 function canonicalIndex(state: LifestyleBotState): number {
   return CANONICAL_FLOW.indexOf(state);
 }
@@ -140,13 +146,29 @@ export async function dispatch(
   let result: StateHandlerResult;
   try {
     result = await routeToHandler(state, msg, context, handlerDeps);
+    // Turno exitoso → el contador de fallos técnicos se resetea.
+    if (context.tech_failures) {
+      result = { ...result, newContext: { ...result.newContext, tech_failures: 0 } };
+    }
   } catch {
-    // Nunca crash — captura cualquier error de handler y transiciona a FALLBACK
-    return {
-      newState:     'FALLBACK',
-      newContext:   context,
-      responseText: deps.business.fallbackMessage,
-    };
+    // Nunca crash. AUD-07b: un throw de handler es un fallo TÉCNICO, no
+    // incomprensión — antes se respondía fallbackMessage ("no te entendí",
+    // el mensaje equivocado) y se entraba al funnel de FALLBACK. Ahora: ser
+    // honesto, quedarse en el MISMO estado (el reintento del cliente re-corre
+    // el turno) y, al 3er fallo consecutivo, escalar a humano — la transición
+    // a ESCALATED dispara la notificación atómica al admin (hook de abajo).
+    const failures = (context.tech_failures ?? 0) + 1;
+    result = failures >= MAX_TECH_FAILURES
+      ? {
+          newState:     'ESCALATED',
+          newContext:   { ...context, tech_failures: failures },
+          responseText: TECHNICAL_ESCALATION_MESSAGE,
+        }
+      : {
+          newState:     state,
+          newContext:   { ...context, tech_failures: failures },
+          responseText: TECHNICAL_HICCUP_MESSAGE,
+        };
   }
 
   result = applyStructuralCap(state, context, result);

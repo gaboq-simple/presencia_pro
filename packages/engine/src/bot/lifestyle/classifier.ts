@@ -44,7 +44,21 @@ export type IntentClassification = {
    * con la información del negocio. Null en todos los demás intents.
    */
   readonly side_question_answer: string | null;
+  /**
+   * AUD-07b: presente SOLO cuando el UNCLEAR viene de un fallo TÉCNICO
+   * (timeout/API caída/JSON ilegible), no de incomprensión real del mensaje.
+   * Los consumidores no deben gastar intentos de clarificación ni decir
+   * "no te entendí" cuando este campo está presente.
+   */
+  readonly failure_reason?: ClassifierFailureReason | null;
 };
+
+export type ClassifierFailureReason = 'timeout' | 'api' | 'parse';
+
+function failureReasonFromError(err: unknown): ClassifierFailureReason {
+  const name = err instanceof Error ? err.name : '';
+  return name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'api';
+}
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -73,6 +87,9 @@ export async function classifyIntent(params: {
   businessContext: string;
   recentHistory:   LifestyleConversationMessage[];
   anthropicKey:    string;
+  /** AUD-07b: atribución multi-tenant de los logs de error (antes '' — 429s anónimos). */
+  businessId?:     string;
+  customerPhone?:  string;
 }): Promise<IntentClassification> {
   const {
     userMessage,
@@ -113,13 +130,14 @@ export async function classifyIntent(params: {
         { role: 'user', content: userMessage },
       ],
       timeoutMs:  TIMEOUT_HAIKU_MS,
-      context:    { businessId: '', customerPhone: '', state: 'classifier' },
+      context:    { businessId: params.businessId ?? '', customerPhone: params.customerPhone ?? '', state: 'classifier' },
     });
 
     const firstBlock = response.content[0];
     rawResponse = firstBlock?.type === 'text' ? firstBlock.text.trim() : '';
-  } catch {
-    return unclearResult();
+  } catch (err) {
+    // Fallo TÉCNICO (timeout/API) — no es que el cliente no se explique.
+    return unclearResult(failureReasonFromError(err));
   }
 
   return parseClassifierResponse(rawResponse);
@@ -187,7 +205,7 @@ function parseClassifierResponse(raw: string): IntentClassification {
   try {
     // Extraer JSON aunque venga con texto adicional (defensa)
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return unclearResult();
+    if (!jsonMatch) return unclearResult('parse');
 
     const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
 
@@ -198,7 +216,7 @@ function parseClassifierResponse(raw: string): IntentClassification {
       ? parsed['side_question_answer']
       : null;
 
-    if (!VALID_INTENTS.has(intent)) return unclearResult();
+    if (!VALID_INTENTS.has(intent)) return unclearResult('parse');
 
     // Clamp confidence a [0, 1]
     const clampedConfidence = Math.max(0, Math.min(1, confidence));
@@ -210,16 +228,17 @@ function parseClassifierResponse(raw: string): IntentClassification {
       side_question_answer: sqa,
     };
   } catch {
-    return unclearResult();
+    return unclearResult('parse');
   }
 }
 
-function unclearResult(): IntentClassification {
+function unclearResult(failureReason?: ClassifierFailureReason): IntentClassification {
   return {
     intent:               'UNCLEAR',
     confidence:           0,
     value:                null,
     side_question_answer: null,
+    ...(failureReason ? { failure_reason: failureReason } : {}),
   };
 }
 
@@ -236,6 +255,8 @@ export type MultiIntentClassification = {
   confirmYes?:   boolean;
   confirmNo?:    boolean;
   unclear?:      boolean;
+  /** AUD-07b: unclear por fallo TÉCNICO, no por mensaje ambiguo. */
+  failure_reason?: ClassifierFailureReason;
 };
 
 /**
@@ -252,6 +273,9 @@ export async function classifyMultiIntent(params: {
   services:     string[];
   staff:        string[];
   anthropicKey: string;
+  /** AUD-07b: atribución multi-tenant de los logs de error. */
+  businessId?:     string;
+  customerPhone?:  string;
 }): Promise<MultiIntentClassification> {
   const { userMessage, services, staff, anthropicKey } = params;
 
@@ -267,12 +291,12 @@ export async function classifyMultiIntent(params: {
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userMessage }],
       timeoutMs:  TIMEOUT_HAIKU_MS,
-      context:    { businessId: '', customerPhone: '', state: 'multi_intent_classifier' },
+      context:    { businessId: params.businessId ?? '', customerPhone: params.customerPhone ?? '', state: 'multi_intent_classifier' },
     });
     const firstBlock = response.content[0];
     rawResponse = firstBlock?.type === 'text' ? firstBlock.text.trim() : '';
-  } catch {
-    return { unclear: true };
+  } catch (err) {
+    return { unclear: true, failure_reason: failureReasonFromError(err) };
   }
 
   return parseMultiIntentResponse(rawResponse);
@@ -379,7 +403,7 @@ function parseMultiIntentResponse(raw: string): MultiIntentClassification {
 
     return result;
   } catch {
-    return { unclear: true };
+    return { unclear: true, failure_reason: 'parse' };
   }
 }
 

@@ -114,6 +114,8 @@ export async function handleAwaitingConfirmation(
     businessContext,
     recentHistory,
     anthropicKey:     deps.anthropicKey,
+    businessId:       deps.business.id,
+    customerPhone:    msg.customerPhone,
   });
 
   // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).

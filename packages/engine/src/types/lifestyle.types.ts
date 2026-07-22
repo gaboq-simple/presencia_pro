@@ -298,6 +298,13 @@ export const LifestyleBotContextSchema = z.object({
    */
   away_notice_sent: z.boolean().optional(),
 
+  /**
+   * AUD-07b: throws de handler consecutivos (fallo técnico, no incomprensión).
+   * Se resetea a 0 en el primer turno exitoso; al llegar a MAX_TECH_FAILURES
+   * el dispatch escala a humano con la verdad ("problemas técnicos").
+   */
+  tech_failures: z.number().int().nonnegative().optional(),
+
   // ── Clasificador de intenciones ───────────────────────────────────────────
 
   /**

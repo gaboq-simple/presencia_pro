@@ -24,7 +24,7 @@ import { isAvailabilityQuestion } from '../availabilityIntent';
 import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import { utcToLocalDateStr, getTodayStr, noonUTCDate } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
-import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE } from '../copy';
+import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE , TECHNICAL_HICCUP_MESSAGE } from '../copy';
 
 // ─── Keywords walk-in ─────────────────────────────────────────────────────────
 
@@ -305,6 +305,8 @@ export async function handleQualifyingDatetime(
     businessContext,
     recentHistory,
     anthropicKey:     deps.anthropicKey,
+    businessId:    deps.business.id,
+    customerPhone: msg.customerPhone,
   });
 
   // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
@@ -323,6 +325,15 @@ export async function handleQualifyingDatetime(
     availableOptions:      datetimeOptions,
     clarificationAttempts: attempts,
   });
+
+  // ── Fallo técnico del clasificador (AUD-07b): honesto y sin gastar intentos ──
+  if (clarResult.action === 'TECH_ISSUE') {
+    return {
+      newState:     'QUALIFYING_DATETIME',
+      newContext:   clarResult.updatedContext,
+      responseText: TECHNICAL_HICCUP_MESSAGE,
+    };
+  }
 
   // ── ADVANCE con DATE_PREFERENCE ───────────────────────────────────────────
 

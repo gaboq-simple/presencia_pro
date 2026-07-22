@@ -30,7 +30,7 @@ import { parseDate } from './qualifyingDatetime';
 import { getTodayStr } from '../tzUtils';
 import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
-import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE } from '../copy';
+import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE , TECHNICAL_HICCUP_MESSAGE } from '../copy';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -190,6 +190,8 @@ export async function handleQualifyingStaff(
     businessContext,
     recentHistory,
     anthropicKey,
+    businessId:    business.id,
+    customerPhone: msg.customerPhone,
   });
 
   // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
@@ -208,6 +210,15 @@ export async function handleQualifyingStaff(
     availableOptions:      staffNames,
     clarificationAttempts: attempts,
   });
+
+  // ── Fallo técnico del clasificador (AUD-07b): honesto y sin gastar intentos ──
+  if (clarResult.action === 'TECH_ISSUE') {
+    return {
+      newState:     'QUALIFYING_STAFF',
+      newContext:   clarResult.updatedContext,
+      responseText: TECHNICAL_HICCUP_MESSAGE,
+    };
+  }
 
   // ── NO_PREFERENCE via clasificador ────────────────────────────────────────
 

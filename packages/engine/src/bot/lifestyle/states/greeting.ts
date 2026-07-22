@@ -161,7 +161,9 @@ export async function handleGreeting(
       services:     services.map((s) => s.name),
       staff:        allStaff.map((s) => s.name),
       anthropicKey,
-    }).catch(() => ({ unclear: true } as MultiIntentClassification));
+      businessId:    business.id,
+      customerPhone: msg.customerPhone,
+    }).catch(() => ({ unclear: true, failure_reason: 'api' } as MultiIntentClassification));
 
     // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
     logClassifierOutput({
@@ -296,6 +298,8 @@ export async function handleGreeting(
         businessContext:  buildBusinessContext(business, services, sqOpts),
         recentHistory:    [],
         anthropicKey,
+        businessId:       business.id,
+        customerPhone:    msg.customerPhone,
       }).then((c) => {
         // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
         logClassifierOutput({

@@ -26,7 +26,7 @@ import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic, isServiceOrPriceQuestion, refineTopic, closingForTopic } from '../sideQuestion';
 import { isCancellationIntent } from '../cancelIntent';
-import { ESCALATION_TO_TEAM_MESSAGE } from '../copy';
+import { ESCALATION_TO_TEAM_MESSAGE , TECHNICAL_HICCUP_MESSAGE } from '../copy';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
@@ -107,6 +107,8 @@ export async function handleQualifyingService(
     businessContext,
     recentHistory,
     anthropicKey,
+    businessId:    business.id,
+    customerPhone: msg.customerPhone,
   });
 
   // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
@@ -125,6 +127,15 @@ export async function handleQualifyingService(
     availableOptions:      optionNames,
     clarificationAttempts: attempts,
   });
+
+  // ── Fallo técnico del clasificador (AUD-07b): honesto y sin gastar intentos ──
+  if (clarResult.action === 'TECH_ISSUE') {
+    return {
+      newState:     'QUALIFYING_SERVICE',
+      newContext:   clarResult.updatedContext,
+      responseText: TECHNICAL_HICCUP_MESSAGE,
+    };
+  }
 
   // ── ADVANCE ───────────────────────────────────────────────────────────────
 
