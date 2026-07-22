@@ -17,7 +17,7 @@ import type { LifestyleBotContext, LifestyleBotState } from '../../types/lifesty
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
-export type ClarificationAction = 'ADVANCE' | 'CLARIFY' | 'REPEAT_OPTIONS';
+export type ClarificationAction = 'ADVANCE' | 'CLARIFY' | 'REPEAT_OPTIONS' | 'TECH_ISSUE';
 
 export type ClarificationResult = {
   /** Acción a tomar en el state handler. */
@@ -64,6 +64,20 @@ export function handleClassification(params: {
   } = params;
 
   const { intent, confidence, side_question_answer } = classification;
+
+  // ── Fallo TÉCNICO del clasificador (AUD-07b) ──────────────────────────────
+  // Timeout/API caída/JSON ilegible — NO es incomprensión del cliente. No se
+  // gastan clarification_attempts (un outage de Anthropic no debe empujar la
+  // conversación a la escalación por "no entender") y el caller responde
+  // TECHNICAL_HICCUP_MESSAGE en vez de fingir "no te entendí".
+
+  if (classification.failure_reason) {
+    return {
+      action:         'TECH_ISSUE',
+      updatedContext: { ...context },
+      prefixMessage:  null,
+    };
+  }
 
   // ── Side question con confianza suficiente ────────────────────────────────
   // El estado NO cambia — solo respondemos la pregunta y retomamos el flujo.

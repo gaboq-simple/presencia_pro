@@ -21,6 +21,18 @@ export const SCHEDULING_ERROR_MESSAGE =
   'No pude verificar la disponibilidad en este momento. ' +
   'Intenta de nuevo en unos minutos o escríbenos directamente.';
 
+/**
+ * AUD-07b: fallo TÉCNICO (timeout/API/parse) — honesto, sin culpar al cliente
+ * ("no te entendí" era mentira cuando el que falló fue el sistema) y sin
+ * gastar intentos de clarificación.
+ */
+export const TECHNICAL_HICCUP_MESSAGE =
+  'Perdona, tuve un problema técnico al procesar tu mensaje. ¿Me lo mandas de nuevo?';
+
+/** AUD-07b: 3 fallos técnicos seguidos → escalar con la verdad (dispatch notifica al admin). */
+export const TECHNICAL_ESCALATION_MESSAGE =
+  'Sigo con problemas técnicos — enseguida le aviso al equipo para que te atiendan personalmente.';
+
 /** Reset a elegir servicio tras una corrección (antes ×4 copias). */
 export const SERVICE_QUESTION_RESET = 'Sin problema. ¿Cuál servicio te interesa?';
 

@@ -35,6 +35,8 @@ export type SingleClassifierMetadata = {
   readonly confidence:      number;
   readonly value:           string | null;
   readonly message_raw:     string;
+  /** AUD-07b: 'timeout'|'api'|'parse' cuando el UNCLEAR fue fallo técnico; null si fue genuino. */
+  readonly failure_reason:  string | null;
 };
 
 export type MultiClassifierMetadata = {
@@ -50,6 +52,8 @@ export type MultiClassifierMetadata = {
     readonly unclear:      boolean | null;
   };
   readonly message_raw: string;
+  /** AUD-07b: fallo técnico del multi-clasificador, o null. */
+  readonly failure_reason: string | null;
 };
 
 export type ClassifierMetadata = SingleClassifierMetadata | MultiClassifierMetadata;
@@ -65,6 +69,8 @@ export function buildSingleClassifierMetadata(
     confidence:      classification.confidence,
     value:           classification.value,
     message_raw:     messageRaw,
+    // AUD-07b: distingue "Haiku no entendió" de "la llamada nunca llegó".
+    failure_reason:  classification.failure_reason ?? null,
   };
 }
 
@@ -86,6 +92,8 @@ export function buildMultiClassifierMetadata(
       unclear:      multi.unclear      ?? null,
     },
     message_raw: messageRaw,
+    // AUD-07b: distingue "no extrajo nada" de "la llamada nunca llegó".
+    failure_reason: multi.failure_reason ?? null,
   };
 }
 
