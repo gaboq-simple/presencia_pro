@@ -244,6 +244,23 @@ export async function handleAwaitingBookingName(
     return buildConfirmedResult(context, body);
   }
 
+  // ── AUD-07c: pregunta legítima al pedir el nombre ──────────────────────────
+  // "¿cuánto va a costar?" en el cierre NO es un intento fallido de nombre: el
+  // estado ya sabe responder precio/duración (copy.ts). Contestar y repetir la
+  // pregunta SIN gastar retry — antes: "No capté bien el nombre" ×2 → fallback.
+  if (containsQuestion(body.toLowerCase())
+      && /precio|costo|cu[aá]nto|cuesta|vale|dura/i.test(body)
+      && context.serviceId) {
+    const sideAnswer = await buildSideAnswerFromService(context.serviceId, deps);
+    if (sideAnswer) {
+      return {
+        newState:     'AWAITING_BOOKING_NAME',
+        newContext:   { ...context },
+        responseText: `${sideAnswer} ¿A nombre de quién queda la cita?`,
+      };
+    }
+  }
+
   // ── Input no reconocido como nombre — retry ───────────────────────────────
 
   if (retries >= MAX_RETRIES - 1) {

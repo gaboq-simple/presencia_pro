@@ -436,6 +436,37 @@ export async function handleGreeting(
     }
   }
 
+  // ── AUD-07c: negocio uni-barbero — no preguntar lo que no se puede elegir ──
+  // El skip vivía solo en QUALIFYING_STAFF: greeting armaba "¿tienes barbero de
+  // preferencia?" sin mirar allStaff (que ya tiene cargado) — un round-trip
+  // inútil en CADA reserva de un negocio de un solo barbero. Mismo salto que
+  // hace QUALIFYING_STAFF, pero sin gastar el turno.
+  if (plan.nextState === 'QUALIFYING_STAFF' && allStaff.length <= 1) {
+    const solo = allStaff[0];
+    baseContext.staffId    = solo?.id ?? undefined;
+    baseContext.autoAssign = !solo;
+    if (parsedDate) {
+      // Fecha ya conocida → directo a slots (el router encadena SHOWING_SLOTS).
+      // Determinista, nunca Sonnet (S5-BOT-11: greeting confirma, slots presenta).
+      const hasHourU     = Boolean(parsedTimeStr || parsedAgendaTime);
+      const confirmation = hasHourU ? '' : `${resolvedService!.name} para ${dateExpr ?? ''}, anotado.`;
+      const privacyU     = isReturning ? '' : buildPrivacyNotice();
+      return {
+        newState:     'SHOWING_SLOTS',
+        newContext:   { ...baseContext },
+        responseText: [confirmation, privacyU].filter((s) => s.length > 0).join('\n\n'),
+      };
+    }
+    plan = {
+      nextState: 'QUALIFYING_DATETIME',
+      sonnetInstruction:
+        `El cliente quiere ${resolvedService!.name}. `
+        + `Confirma el servicio brevemente. Pregunta para qué día quiere su cita. `
+        + `Máximo 2 líneas. Ortografía correcta: acentos y signos de apertura (¿ ¡).`,
+      deterministicFallback: `${resolvedService!.name}, con gusto. ¿Para qué día lo quieres?`,
+    };
+  }
+
   // ── greeting confirma, showingSlots presenta (PIEZA 1 + Hallazgo 2 / S5-BOT-11) ──
   // greetCase 'full' encadena a SHOWING_SLOTS en el router (que une por .join la
   // confirmación de saludo + la presentación de slots). La confirmación de greeting
