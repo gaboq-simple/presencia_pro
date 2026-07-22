@@ -8,7 +8,8 @@
 //   6. Transiciona a estado CONFIRMED (conversación completa).
 
 import Anthropic from '@anthropic-ai/sdk';
-import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
+import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { sendWhatsAppMeta } from '../../../notifications/whatsapp';
 import { tenantDb } from '../../../tenantDb';
@@ -352,7 +353,7 @@ export async function handleConfirmed(
     startTimeStr,
     business.name,
     business.address,
-    deps.model,
+    modelForTask('micro_copy'),
     business.id,
     msg.customerPhone,
     firstName,
@@ -422,7 +423,7 @@ async function generateConfirmation(
       maxTokens: 200,
       system,
       messages:  [{ role: 'user', content: prompt }],
-      timeoutMs: TIMEOUT_SONNET_MS,
+      timeoutMs: TIMEOUT_HAIKU_MS,
       context:   { businessId, customerPhone, state: 'CONFIRMED' },
     });
 

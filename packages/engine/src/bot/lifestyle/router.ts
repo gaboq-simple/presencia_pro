@@ -9,7 +9,8 @@
 //   para evitar enviar un mensaje vacío al cliente.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { callClaude, TIMEOUT_SONNET_MS } from './claudeClient';
+import { callClaude, TIMEOUT_HAIKU_MS } from './claudeClient';
+import { modelForTask } from './modelRouter';
 import type { LifestyleBotContext, LifestyleBotState } from '../../types/lifestyle.types';
 import { handleConfirmationResponse }  from './states/confirmationResponse';
 import { handleQualifyingWaitlist }    from './states/waitlist';
@@ -552,11 +553,11 @@ async function answerSideQuestion(
 
     const resp = await callClaude({
       client,
-      model:     deps.model,
+      model:     modelForTask('micro_copy'),
       maxTokens: 120,
       system,
       messages:  [{ role: 'user', content: `${apptCtx} Ahora pregunta: "${question}". Responde en 1-2 líneas. Sin markdown. Ortografía correcta: acentos y signos de apertura (¿ ¡).` }],
-      timeoutMs: TIMEOUT_SONNET_MS,
+      timeoutMs: TIMEOUT_HAIKU_MS,
       context:   { businessId: deps.business.id, customerPhone: '', state: 'CONFIRMED' },
     });
 

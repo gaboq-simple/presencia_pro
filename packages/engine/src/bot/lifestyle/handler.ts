@@ -23,7 +23,6 @@ import {
 import { dispatch } from './router';
 import { tenantDb } from '../../tenantDb';
 import { classifyIntent, classifyMultiIntent } from './classifier';
-import { selectModel } from './modelRouter';
 import { getCatalog } from './catalog';
 import { withRetry } from '../../utils/retry';
 import { logBotError } from '../../utils/logger';
@@ -178,14 +177,16 @@ export async function handleLifestyleMessage(
   }
 
   // ── 4. Despachar al estado handler ────────────────────────────────────────
-
-  const model = selectModel(currentState);
+  // El modelo ya NO se pre-selecciona por estado (punto 4 de AUD-01): cada
+  // call site generativo declara su tarea vía modelForTask() en modelRouter.
+  // Los logs de transición de este handler omiten model_used — el modelo real
+  // por llamada lo loguea cada call site (greeting/confirmed/presentingSlots)
+  // y el clasificador loguea CLASSIFIER_MODEL por su cuenta.
 
   let dispatchedResult = await dispatch(currentState, msg, currentContext, {
     business,
     supabase,
     anthropicKey,
-    model,
     classifier,
   });
 
@@ -276,7 +277,6 @@ export async function handleLifestyleMessage(
         customer_phone: msg.customerPhone,
         state_from:     currentState,
         state_to:       result.newState,
-        model_used:     model,
         error_code:     'send_failed',
         error_message:  errMsg,
         recovered:      false,
@@ -325,7 +325,6 @@ export async function handleLifestyleMessage(
         customer_phone: msg.customerPhone,
         state_from:     currentState,
         state_to:       result.newState,
-        model_used:     model,
         error_code:     'supabase_upsert_failed',
         error_message:  errMsg,
         recovered:      true,
@@ -358,7 +357,6 @@ export async function handleLifestyleMessage(
             state_from:     currentState,
             state_to:       result.newState,
             event_type:     eventType,
-            model_used:     model,
             tokens_total:   null,
             error_code:     errorInfo?.code ?? null,
             error_message:  errorInfo?.message ?? null,
@@ -377,7 +375,6 @@ export async function handleLifestyleMessage(
         customer_phone: msg.customerPhone,
         state_from:     currentState,
         state_to:       result.newState,
-        model_used:     model,
         duration_ms,
         error_code:     'bot_logs_write_failed',
         error_message:  err instanceof Error ? err.message : String(err),
