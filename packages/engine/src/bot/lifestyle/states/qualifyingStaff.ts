@@ -30,7 +30,7 @@ import { parseDate } from './qualifyingDatetime';
 import { getTodayStr } from '../tzUtils';
 import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
-import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE , TECHNICAL_HICCUP_MESSAGE } from '../copy';
+import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE, TECHNICAL_HICCUP_MESSAGE, dayLabelFromDateStr } from '../copy';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -218,6 +218,21 @@ export async function handleQualifyingStaff(
       newContext:   clarResult.updatedContext,
       responseText: TECHNICAL_HICCUP_MESSAGE,
     };
+  }
+
+  // ── Fecha dicha al elegir barbero (deuda #1): persistir, no tirar ──────────
+  // "mejor el jueves" mientras se pregunta el barbero ya no se pierde: se
+  // guarda la fecha y se retoma la pregunta — la matriz de correcciones deja
+  // de ser asimétrica (el servicio ya se corregía en todos los estados).
+  if (clarResult.action === 'DATE_HINT') {
+    const hintedDate = deps.interpretation?.date ?? null;
+    if (hintedDate) {
+      return {
+        newState:     'QUALIFYING_STAFF',
+        newContext:   { ...clarResult.updatedContext, requestedDate: hintedDate },
+        responseText: `Va, ${dayLabelFromDateStr(hintedDate)}. ¿Con quién te gustaría agendar?`,
+      };
+    }
   }
 
   // ── NO_PREFERENCE via clasificador ────────────────────────────────────────

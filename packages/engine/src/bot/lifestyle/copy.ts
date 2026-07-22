@@ -7,6 +7,7 @@
 // vive aquí. Los estados agregan SOLO sus extras específicos de contexto.
 
 import { getCatalog } from './catalog';
+import { weekdayFromDateStr } from './tzUtils';
 import { logBotError } from './utils/logger';
 import type { StateHandlerDeps } from './types';
 
@@ -68,6 +69,16 @@ export const AFFIRMATIVE_BASE_KEYWORDS = [
 export const NEGATIVE_BASE_KEYWORDS = [
   'no', 'nope', 'negativo',
 ];
+
+/**
+ * Etiqueta corta de un día local ("el viernes 24") para ecos de confirmación.
+ * dateStr = YYYY-MM-DD en la tz del negocio.
+ */
+export function dayLabelFromDateStr(dateStr: string): string {
+  const dayName = DAYS_ES[weekdayFromDateStr(dateStr)]!;
+  const dayNum  = parseInt(dateStr.split('-')[2]!, 10);
+  return `el ${dayName} ${dayNum}`;
+}
 
 // ─── Cierres/cortesías ────────────────────────────────────────────────────────
 // Antes privados de router.ts (estado CONFIRMED). AUD-07e los comparte con

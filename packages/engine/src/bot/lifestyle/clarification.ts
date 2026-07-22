@@ -17,7 +17,7 @@ import type { LifestyleBotContext, LifestyleBotState } from '../../types/lifesty
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
-export type ClarificationAction = 'ADVANCE' | 'CLARIFY' | 'REPEAT_OPTIONS' | 'TECH_ISSUE';
+export type ClarificationAction = 'ADVANCE' | 'CLARIFY' | 'REPEAT_OPTIONS' | 'TECH_ISSUE' | 'DATE_HINT' | 'DECLINED';
 
 export type ClarificationResult = {
   /** Acción a tomar en el state handler. */
@@ -93,6 +93,43 @@ export function handleClassification(params: {
       action:         'CLARIFY',
       updatedContext,
       prefixMessage:  prefix,
+    };
+  }
+
+  // ── Consumo del TIPO de intent (deuda #1 — punto #3 de S4-BOT-09) ─────────
+  // Antes solo se miraba confidence y el tipo se tiraba: DATE_PREFERENCE 0.95
+  // ("para el viernes") en QUALIFYING_SERVICE caía en ADVANCE →
+  // findMatchingServices("viernes") = [] → REPEAT_OPTIONS y la fecha se
+  // DESCARTABA (el cliente la repetía después — "te dije el viernes");
+  // CONFIRM_NO 0.95 ("no, mejor nada gracias") caía al menú en bucle.
+
+  // Fecha dicha en un paso que no la pedía → el estado la PERSISTE y sigue con
+  // su pregunta. Umbral bajo (CLARIFY): el estado valida con parseDate
+  // determinista antes de usarla. QUALIFYING_DATETIME queda fuera: ahí la
+  // fecha ES la respuesta y su parseo determinista ya corre antes.
+  if (
+    intent === 'DATE_PREFERENCE' &&
+    confidence >= CLARIFY_THRESHOLD &&
+    params.currentState !== 'QUALIFYING_DATETIME'
+  ) {
+    return {
+      action:         'DATE_HINT',
+      updatedContext: { ...context },   // attempts intactos — dar una fecha es avance, no confusión
+      prefixMessage:  null,
+    };
+  }
+
+  // Negación de alta confianza al elegir servicio → el cliente declina el
+  // flujo, no "no entendió el menú". Salida cálida en vez de bucle.
+  if (
+    intent === 'CONFIRM_NO' &&
+    confidence >= ADVANCE_THRESHOLD &&
+    params.currentState === 'QUALIFYING_SERVICE'
+  ) {
+    return {
+      action:         'DECLINED',
+      updatedContext: { ...context },
+      prefixMessage:  null,
     };
   }
 

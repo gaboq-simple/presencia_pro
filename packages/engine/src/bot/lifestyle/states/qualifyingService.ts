@@ -26,7 +26,7 @@ import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic, isServiceOrPriceQuestion, refineTopic, closingForTopic } from '../sideQuestion';
 import { isCancellationIntent } from '../cancelIntent';
-import { ESCALATION_TO_TEAM_MESSAGE, TECHNICAL_HICCUP_MESSAGE, isClosingMessage } from '../copy';
+import { ESCALATION_TO_TEAM_MESSAGE, TECHNICAL_HICCUP_MESSAGE, isClosingMessage, dayLabelFromDateStr } from '../copy';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
@@ -66,7 +66,7 @@ export async function handleQualifyingService(
   const matches = findMatchingServices(msg.body, services);
 
   if (matches.length === 1) {
-    return buildAdvanceResult(context, matches[0]!);
+    return buildAdvanceResult(context, matches[0]!, deps.interpretation?.date);
   }
 
   if (matches.length > 1) {
@@ -97,7 +97,7 @@ export async function handleQualifyingService(
   // AUD-02: "cancelar mi cita" NO es intención de reserva — sin este guard, el
   // fast-path le respondía "Perfecto, [servicio]…" a quien quería cancelar.
   if (allServices.length === 1 && !looksLikeSideQuestion(msg.body) && !isCancellationIntent(msg.body)) {
-    return buildAdvanceResult(context, allServices[0]!);
+    return buildAdvanceResult(context, allServices[0]!, deps.interpretation?.date);
   }
 
   // ── Si había candidatos ambiguos y el input no matchea ninguno,
@@ -152,6 +152,31 @@ export async function handleQualifyingService(
     };
   }
 
+  // ── Fecha dicha al elegir servicio (deuda #1): persistir, no tirar ─────────
+  // "para el viernes" en QUALIFYING_SERVICE ya no cae al menú perdiendo la
+  // fecha: se guarda (validada por el parseo determinista del intérprete) y se
+  // retoma la pregunta de servicio. Si el parser no la confirma, cae al camino
+  // normal de clarify de abajo.
+  if (clarResult.action === 'DATE_HINT') {
+    const hintedDate = deps.interpretation?.date ?? null;
+    if (hintedDate) {
+      return {
+        newState:     'QUALIFYING_SERVICE',
+        newContext:   { ...clarResult.updatedContext, requestedDate: hintedDate },
+        responseText: `Perfecto, ${dayLabelFromDateStr(hintedDate)}. ¿Qué servicio te interesa?`,
+      };
+    }
+  }
+
+  // ── Negación clara del flujo (deuda #1): salida cálida, no bucle de menú ───
+  if (clarResult.action === 'DECLINED') {
+    return {
+      newState:     'GREETING',
+      newContext:   { customerId: context.customerId, last_side_question: null },
+      responseText: 'Sin problema. Aquí ando cuando quieras agendar.',
+    };
+  }
+
   // ── ADVANCE ───────────────────────────────────────────────────────────────
 
   if (clarResult.action === 'ADVANCE') {
@@ -160,7 +185,7 @@ export async function handleQualifyingService(
       : [];
 
     if (valueMatches.length === 1) {
-      return buildAdvanceResult(clarResult.updatedContext, valueMatches[0]!);
+      return buildAdvanceResult(clarResult.updatedContext, valueMatches[0]!, deps.interpretation?.date);
     }
 
     if (valueMatches.length > 1) {
@@ -278,10 +303,14 @@ export function repeatFallbackContext(
 function buildAdvanceResult(
   context:  LifestyleBotContext,
   service:  ServiceRow,
+  hintedDate?: string | null,
 ): StateHandlerResult {
   const newContext: LifestyleBotContext = {
     ...context,
     serviceId:                    service.id,
+    // Deuda #1: si el mensaje traía fecha ("corte para el viernes"), absorberla
+    // aquí — antes se tiraba y el cliente la repetía después.
+    ...(hintedDate && !context.requestedDate ? { requestedDate: hintedDate } : {}),
     ambiguous_service_candidates: undefined,
     clarification_attempts:       0,
     last_side_question:           null,
