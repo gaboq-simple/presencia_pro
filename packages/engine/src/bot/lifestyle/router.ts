@@ -209,6 +209,17 @@ function applyStructuralCap(
     return { ...result, newContext: { ...result.newContext, no_progress_streak: 0 } };
   }
 
+  // AUD-07c: una side-question CONTESTADA este turno no es falta de progreso —
+  // el cliente preguntó algo legítimo y el bot respondió bien. Sin este guard,
+  // 6 preguntas seguidas de precios/ubicación forzaban ESCALATED aunque la
+  // conversación iba perfecta. Señal: last_side_question recién grabada (los
+  // handlers la setean al responder y la resetean al avanzar). No se resetea el
+  // streak (eso exige progreso real) — solo no se incrementa.
+  const answeredSideQuestion =
+    result.newContext.last_side_question != null &&
+    result.newContext.last_side_question !== context.last_side_question;
+  if (answeredSideQuestion) return result;
+
   // Sin progreso y aún dentro del flujo → incrementar.
   const streak = (context.no_progress_streak ?? 0) + 1;
   if (streak >= STRUCTURAL_CAP) {
@@ -553,6 +564,11 @@ const CLOSING_KEYWORDS = [
 
 function isClosingMessage(body: string): boolean {
   const lower = body.trim().toLowerCase();
+  // AUD-07c: un cierre real es CORTO ("gracias", "ok, nos vemos"). Sin este
+  // guard, "ok quiero agendar otra para mi hijo" matcheaba 'ok' como despedida
+  // y borraba el contexto tragándose la intención real (multi-intención).
+  // Mismo principio que isAffirmation: tokens cortos exigen mensaje corto.
+  if (lower.split(/\s+/).length > 3) return false;
   return CLOSING_KEYWORDS.some(
     (kw) => lower === kw || new RegExp('(?:^|\\s)' + kw + '(?:\\s|$)').test(lower),
   );

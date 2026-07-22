@@ -546,7 +546,10 @@ export function parseDate(lower: string, now: Date, tz: string): string | null {
 function nextWeekday(from: Date, targetDay: number, isNext: boolean): Date {
   const d    = new Date(from);
   const diff = (targetDay - d.getUTCDay() + 7) % 7;
-  d.setUTCDate(d.getUTCDate() + (diff === 0 || isNext ? diff + 7 : diff));
+  // AUD-07c: "el sábado" dicho un sábado = HOY (el filtro de horas pasadas
+  // decide si aún hay slots), no la próxima semana en silencio. Solo el
+  // marcador explícito ("próximo sábado") salta de semana.
+  d.setUTCDate(d.getUTCDate() + (isNext ? diff + 7 : diff));
   return d;
 }
 
