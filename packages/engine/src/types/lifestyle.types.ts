@@ -305,6 +305,14 @@ export const LifestyleBotContextSchema = z.object({
    */
   tech_failures: z.number().int().nonnegative().optional(),
 
+  /**
+   * AUD-07f: últimos message_ids procesados (ventana de 5). El dedup por
+   * last_message_id solo cubría el reintento del ÚLTIMO mensaje — un retry
+   * fuera de orden del webhook (mensaje N-1 llegando después del N) se
+   * reprocesaba y pisaba el estado del flujo.
+   */
+  recent_message_ids: z.array(z.string()).optional(),
+
   // ── Clasificador de intenciones ───────────────────────────────────────────
 
   /**

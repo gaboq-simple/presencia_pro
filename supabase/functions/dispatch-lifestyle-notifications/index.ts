@@ -392,6 +392,28 @@ async function sendWithTemplateFallback(
 Deno.serve(async (_req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+  // ── Auto-release de handoffs abandonados (AUD-07f) ────────────────────────
+  // El release de 30 min solo se evaluaba cuando llegaba OTRO mensaje del
+  // cliente (route.ts): quien preguntó y esperó educadamente quedaba en
+  // silencio para siempre si el staff no contestaba. Este sweep corre cada
+  // minuto con el cron: el próximo mensaje del cliente ya lo atiende el FSM.
+  // sendMessageFromPanel renueva taken_at en cada mensaje del staff, así que
+  // solo se liberan tomas realmente inactivas.
+  try {
+    const staleCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const { data: released } = await supabase
+      .from('bot_conversations')
+      .update({ session_mode: 'bot', taken_by: null, taken_at: null })
+      .eq('session_mode', 'human')
+      .lt('taken_at', staleCutoff)
+      .select('id');
+    if (released && released.length > 0) {
+      console.log(`[handoff] auto-released ${released.length} takeover(s) inactivos >30min`);
+    }
+  } catch (err) {
+    console.error('[handoff] sweep failed:', err);
+  }
+
   // ── Fetch notificaciones pendientes (LIMIT 50) ──────────────────────────
 
   const { data: rows, error: fetchError } = await supabase

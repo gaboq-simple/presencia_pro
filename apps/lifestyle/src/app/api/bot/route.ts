@@ -312,8 +312,15 @@ async function handleMetaPost(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: 'ok' });
   }
 
-  // ── Rate limiting — 30 mensajes / 60s por número de negocio ──────────────
-  const rl = await rateLimit(`bot:${normalized.phoneNumberId}`, 30, 60);
+  // ── Rate limiting (AUD-07f) — por CLIENTE, con tope amplio por negocio ────
+  // Antes: bucket único de 30/60s por negocio — un sábado con 15 clientes
+  // chateando a la vez lo rebasaba y Meta recibía 429: el bot se veía mudo o
+  // tardío justo en la hora de mayor demanda. Ahora cada cliente tiene su
+  // límite (spam individual sigue contenido) y el negocio un techo amplio que
+  // solo actúa como guardia anti-DoS.
+  const rlClient = await rateLimit(`bot:${normalized.phoneNumberId}:${normalized.customerPhone}`, 15, 60);
+  const rlBiz    = await rateLimit(`bot:${normalized.phoneNumberId}`, 120, 60);
+  const rl       = rlClient.success ? rlBiz : rlClient;
   if (!rl.success) {
     const retryAfter = rl.reset > 0 ? rl.reset - Math.floor(Date.now() / 1_000) : 60;
     return NextResponse.json(
@@ -627,18 +634,23 @@ async function sendNonTextResponseMeta(
     let reply: string;
 
     switch (messageType) {
-      case 'audio':
-        reply = 'Por ahora solo puedo leer mensajes de texto. Escribeme lo que necesitas y con gusto te ayudo \uD83D\uDE0A';
+      case 'audio': {
+        // AUD-07f: contextualizar según dónde iba la conversación — una nota
+        // de voz dictando el nombre en pleno cierre recibía un genérico que
+        // ignoraba el flujo. (El contenido del audio sigue perdiéndose:
+        // transcripción = fase futura.)
+        reply = await buildAudioReplyForState(phoneNumberId, fromPhone);
         break;
+      }
       case 'image':
       case 'video':
-        reply = 'No puedo ver fotos ni videos, pero si me describes lo que buscas te ayudo!';
+        reply = 'No puedo ver fotos ni videos, pero si me describes lo que buscas, ¡te ayudo!';
         break;
       case 'sticker':
         // Silencio — los stickers son decorativos, responder crea ruido
         return;
       case 'document':
-        reply = 'No puedo abrir documentos, pero si me dices que necesitas te ayudo.';
+        reply = 'No puedo abrir documentos, pero si me dices qué necesitas, te ayudo.';
         break;
       case 'location': {
         // Requiere lookup ligero — address no está disponible sin resolver el negocio
@@ -651,8 +663,8 @@ async function sendNonTextResponseMeta(
           .maybeSingle();
         const address = (data as { address?: string } | null)?.address;
         reply = address
-          ? `Gracias! Nosotros estamos en ${address}.`
-          : 'Gracias por compartir tu ubicacion! Para ver donde estamos, escribeme.';
+          ? `¡Gracias! Nosotros estamos en ${address}.`
+          : '¡Gracias por compartir tu ubicación! Para ver dónde estamos, escríbeme.';
         break;
       }
       default:
@@ -662,6 +674,47 @@ async function sendNonTextResponseMeta(
     await sendMessage({ to: fromPhone, message: reply, from: phoneNumberId });
   } catch {
     // best-effort
+  }
+}
+
+/**
+ * AUD-07f: respuesta a nota de voz según el estado del FSM — lookup ligero
+ * (negocio + conversación). Best-effort: ante cualquier fallo, el genérico.
+ */
+async function buildAudioReplyForState(phoneNumberId: string, fromPhone: string): Promise<string> {
+  const generic = 'Por ahora solo puedo leer mensajes de texto. Escríbeme lo que necesitas y con gusto te ayudo 😊';
+  try {
+    const supabase = getServiceClient();
+    const { data: biz } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('whatsapp_phone_number_id', phoneNumberId)
+      .eq('active', true)
+      .maybeSingle();
+    const bizId = (biz as { id: string } | null)?.id;
+    if (!bizId) return generic;
+
+    const { data: conv } = await tenantDb(supabase, bizId)
+      .table('bot_conversations')
+      .select('state')
+      .eq('customer_phone', fromPhone)
+      .maybeSingle();
+    const state = (conv as { state: string } | null)?.state ?? '';
+
+    if (state === 'AWAITING_BOOKING_NAME') {
+      return 'Por ahora solo puedo leer mensajes de texto. Sigo esperando el nombre para tu cita — escríbemelo y la dejamos lista.';
+    }
+    const MID_FLOW = new Set([
+      'QUALIFYING_SERVICE', 'QUALIFYING_STAFF', 'QUALIFYING_DATETIME',
+      'SHOWING_SLOTS', 'QUALIFYING_WAITLIST', 'CONFIRMING_APPOINTMENT',
+      'AWAITING_CONFIRMATION', 'AWAITING_CANCEL_CONFIRMATION',
+    ]);
+    if (MID_FLOW.has(state)) {
+      return 'Por ahora solo puedo leer mensajes de texto. Seguimos con tu reserva — escríbeme por aquí lo que ibas a decirme 😊';
+    }
+    return generic;
+  } catch {
+    return generic;
   }
 }
 
@@ -824,6 +877,24 @@ async function processMetaMessage(
   }
 
   if (!businessData) {
+    // AUD-07f: si el negocio EXISTE pero está desactivado, acuse mínimo en vez
+    // de silencio absoluto — el cliente que escribe al número de un negocio
+    // dado de baja se enteraba de nada, nunca.
+    const { data: inactiveBiz } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('whatsapp_phone_number_id', phoneNumberId)
+      .eq('active', false)
+      .maybeSingle();
+    if (inactiveBiz) {
+      try {
+        await sendMessage({
+          to:      customerPhone,
+          message: 'Este número ya no está en servicio.',
+          from:    phoneNumberId,
+        });
+      } catch { /* best-effort */ }
+    }
     console.error(JSON.stringify({
       ts:             new Date().toISOString(),
       service:        'bot',
