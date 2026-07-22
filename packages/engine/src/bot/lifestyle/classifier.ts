@@ -265,7 +265,17 @@ export type MultiIntentClassification = {
   staffMatch?:   { value: string; confidence: number };
   dateMatch?:    { value: string; confidence: number };
   timeMatch?:    { value: string; shift?: 'morning' | 'afternoon'; confidence: number };
-  sideQuestion?: { question: string; topic: 'price' | 'hours' | 'location' | 'duration' | 'other' };
+  sideQuestion?: {
+    question: string;
+    topic: 'price' | 'hours' | 'location' | 'duration' | 'other';
+    /**
+     * Respuesta generada con los datos del negocio (solo cuando se pasó
+     * `businessContext` y el dato existe). Mata la 2ª llamada redundante que
+     * greeting hacía a classifyIntent solo para redactar esta respuesta.
+     * Null/ausente cuando no hay dato — el caller usa su fallback [DERIVA].
+     */
+    answer?: string | null;
+  };
   confirmYes?:   boolean;
   confirmNo?:    boolean;
   unclear?:      boolean;
@@ -287,6 +297,11 @@ export async function classifyMultiIntent(params: {
   services:     string[];
   staff:        string[];
   anthropicKey: string;
+  /**
+   * Datos reales del negocio (buildBusinessContext). Cuando se pasa, el
+   * extractor también redacta `sideQuestion.answer` en la misma llamada.
+   */
+  businessContext?: string;
   /** AUD-07b: atribución multi-tenant de los logs de error. */
   businessId?:     string;
   customerPhone?:  string;
@@ -294,14 +309,16 @@ export async function classifyMultiIntent(params: {
   const { userMessage, services, staff, anthropicKey } = params;
 
   const client      = new Anthropic({ apiKey: anthropicKey || undefined });
-  const systemPrompt = buildMultiIntentSystemPrompt(services, staff);
+  const systemPrompt = buildMultiIntentSystemPrompt(services, staff, params.businessContext);
 
   let rawResponse: string;
   try {
     const response = await callClaude({
       client,
       model:      CLASSIFIER_MODEL,
-      maxTokens:  512,
+      // Mismo racional que AUD-07d en el single: con answer en el JSON, 512
+      // podía truncar a media string → parse-fail. 768 da holgura.
+      maxTokens:  768,
       temperature: 0,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userMessage }],
@@ -318,9 +335,23 @@ export async function classifyMultiIntent(params: {
 }
 
 // Exportado para tests (AUD-07d: forma del prompt blindada por asserts).
-export function buildMultiIntentSystemPrompt(services: string[], staff: string[]): string {
+export function buildMultiIntentSystemPrompt(
+  services: string[],
+  staff: string[],
+  businessContext?: string,
+): string {
   const serviceList = services.length > 0 ? services.join(', ') : 'Sin servicios en catálogo';
   const staffList   = staff.length   > 0 ? staff.join(', ')    : 'Sin staff registrado';
+
+  const contextBlock = businessContext
+    ? `\n\n## Contexto del negocio (para responder sideQuestion)\n${businessContext}`
+    : '';
+  const answerRule = businessContext
+    ? `\n6. Si hay sideQuestion, genera también "answer": una respuesta breve (máx 2 líneas) SOLO con información del "Contexto del negocio". Si no tienes el dato, pon null en answer. La respuesta viaja VERBATIM al cliente — debe seguir las reglas de formato de la casa:\n${FORMATTING_RULES}`
+    : '';
+  const sideQuestionShape = businessContext
+    ? `- sideQuestion: { "question": "<pregunta exacta>", "topic": "price|hours|location|duration|other", "answer": "<respuesta breve o null>" }`
+    : `- sideQuestion: { "question": "<pregunta exacta>", "topic": "price|hours|location|duration|other" }`;
 
   return `Eres un extractor de información para un bot de agendamiento en WhatsApp.
 Tu única función es leer el mensaje del cliente y extraer TODA la información útil que aparezca.
@@ -330,7 +361,7 @@ Extrae TODOS los campos que encuentres — no elijas uno, sácalos todos.
 
 ## Catálogo del negocio
 Servicios: ${serviceList}
-Staff disponible: ${staffList}
+Staff disponible: ${staffList}${contextBlock}
 
 ## Campos a extraer (incluye solo los que encuentres)
 - serviceMatch: si menciona un servicio del catálogo (acepta nombre parcial o errores ortográficos)
@@ -347,14 +378,14 @@ Staff disponible: ${staffList}
 2. confidence entre 0.0 y 1.0 — refleja certeza real, no infles.
 3. Omite los campos que no encuentres — no pongas null, simplemente no los incluyas en el JSON.
 4. Si el mensaje tiene servicio + staff + fecha + hora, retorna los cuatro campos juntos.
-5. Para sideQuestion, categoriza el tema: price (precio/costo/cuánto cuesta), hours (horario/cuándo abren), location (dirección/dónde queda/cómo llegar), duration (cuánto dura/tiempo del servicio), other (cualquier otra pregunta sobre el negocio).
+5. Para sideQuestion, categoriza el tema: price (precio/costo/cuánto cuesta), hours (horario/cuándo abren), location (dirección/dónde queda/cómo llegar), duration (cuánto dura/tiempo del servicio), other (cualquier otra pregunta sobre el negocio).${answerRule}
 
 Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin markdown.
 FORMA de cada campo (incluye SOLO los que encontraste — nunca copies este esquema completo):
 - serviceMatch / staffMatch: { "value": "<nombre normalizado>", "confidence": 0.0-1.0 }
 - dateMatch: { "value": "<expresión tal como la dijo>", "confidence": 0.0-1.0 }
 - timeMatch: { "value": "<expresión tal como la dijo>", "shift": "morning|afternoon", "confidence": 0.0-1.0 }
-- sideQuestion: { "question": "<pregunta exacta>", "topic": "price|hours|location|duration|other" }
+${sideQuestionShape}
 - confirmYes / confirmNo / unclear: true (solo cuando aplique — NUNCA por defecto)
 
 ## Ejemplos (nombres ilustrativos — usa los del catálogo de arriba)
@@ -365,13 +396,16 @@ Mensaje: "si, a las 6"
 {"confirmYes":true,"timeMatch":{"value":"a las 6","confidence":0.9}}
 
 Mensaje: "cuanto cuesta el corte?"
-{"serviceMatch":{"value":"Corte","confidence":0.8},"sideQuestion":{"question":"cuanto cuesta el corte?","topic":"price"}}
+${businessContext
+    ? '{"serviceMatch":{"value":"Corte","confidence":0.8},"sideQuestion":{"question":"cuanto cuesta el corte?","topic":"price","answer":"El corte cuesta $150 y dura unos 30 minutos."}}'
+    : '{"serviceMatch":{"value":"Corte","confidence":0.8},"sideQuestion":{"question":"cuanto cuesta el corte?","topic":"price"}}'}
 
 Mensaje: "hola buenas"
 {"unclear":true}`;
 }
 
-function parseMultiIntentResponse(raw: string): MultiIntentClassification {
+// Exportado para tests (residuo LLM: extracción del answer blindada por asserts).
+export function parseMultiIntentResponse(raw: string): MultiIntentClassification {
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return { unclear: true };
@@ -409,9 +443,11 @@ function parseMultiIntentResponse(raw: string): MultiIntentClassification {
       const s = sq as Record<string, unknown>;
       const VALID_TOPICS = new Set(['price', 'hours', 'location', 'duration', 'other']);
       if (typeof s['question'] === 'string' && VALID_TOPICS.has(s['topic'] as string)) {
+        const answer = typeof s['answer'] === 'string' && s['answer'].trim() ? s['answer'].trim() : null;
         result.sideQuestion = {
           question: s['question'],
           topic:    s['topic'] as 'price' | 'hours' | 'location' | 'duration' | 'other',
+          ...(answer ? { answer } : {}),
         };
       }
     }

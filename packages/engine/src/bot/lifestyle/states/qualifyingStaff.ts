@@ -13,6 +13,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { getStaffForService } from '../catalog';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
@@ -22,7 +23,7 @@ import {
   buildRepeatOptionsMessage,
   buildSideQuestionResponse,
 } from '../clarification';
-import { buildSystemPrompt } from '../prompt';
+import { buildMicroCopySystemPrompt } from '../prompt';
 import { detectsServiceCorrection } from '../utils';
 import { isAvailabilityQuestion } from '../availabilityIntent';
 import { wantsToChooseStaff, asksWhoOnly } from '../staffAxisIntent';
@@ -32,7 +33,6 @@ import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE, TECHNICAL_HICCUP_MESSAGE, dayLabelFromDateStr } from '../copy';
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 // Intentos totales de clarificación antes de escalar a FALLBACK.
 // Exportado para el test de relación de caps (S5-BOT-12).
@@ -296,7 +296,9 @@ export async function handleQualifyingStaff(
   const prevBotMessage = [...(context.messages ?? [])].reverse().find((m) => m.role === 'assistant')?.content ?? null;
   const responseText = await generateRepeatQuestion(
     anthropicKey,
-    buildSystemPrompt(business),
+    // System corto: esta llamada solo reformula una pregunta — el system
+    // completo de 7 pasos era ruido (y ~5x el costo de input).
+    buildMicroCopySystemPrompt(business),
     'el barbero de preferencia del cliente',
     fallbackText,
     prevBotMessage,
@@ -411,9 +413,9 @@ async function generateRepeatQuestion(
     const client = new Anthropic({ apiKey: anthropicKey || undefined });
     const resp = await callClaude({
       client,
-      model:     HAIKU_MODEL,
+      model:     modelForTask('micro_copy'),
       maxTokens: 120,
-      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      system,
       messages:  [{
         role:    'user',
         // AUD-07d: sin el texto anterior, "no uses el mismo texto" era

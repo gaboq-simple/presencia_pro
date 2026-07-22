@@ -18,6 +18,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext, LifestyleBotState } from '../../../types/lifestyle.types';
 import { buildSystemPrompt } from '../prompt';
 import { tenantDb } from '../../../tenantDb';
@@ -25,7 +26,6 @@ import { logBot, maskPhone } from '../../../utils/logger';
 import type { MultiIntentClassification } from '../types';
 import {
   logClassifierOutput,
-  buildSingleClassifierMetadata,
   buildMultiClassifierMetadata,
 } from '../classifierLog';
 import { buildBusinessContext } from '../businessContext';
@@ -155,11 +155,16 @@ export async function handleGreeting(
   // ── Multi-intent classification ────────────────────────────────────────────
 
   let multi: MultiIntentClassification = { unclear: true };
+  const sqOpts = { appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '' };
   if (services.length > 0) {
     multi = await deps.classifier.classifyMultiIntent({
       userMessage:  msg.body,
       services:     services.map((s) => s.name),
       staff:        allStaff.map((s) => s.name),
+      // Con los datos reales, el extractor redacta sideQuestion.answer en la
+      // MISMA llamada — antes el path defer disparaba una 2ª llamada a
+      // classifyIntent solo para redactar esa respuesta.
+      businessContext: buildBusinessContext(business, services, sqOpts),
       anthropicKey,
       businessId:    business.id,
       customerPhone: msg.customerPhone,
@@ -275,10 +280,9 @@ export async function handleGreeting(
   // ── GAP 1 (S4-BOT-07): side-question pura como primer mensaje ──────────────
   // Si el mensaje es una pregunta sobre el negocio y NO trae datos de reserva
   // (greetCase 'none'), respóndela en vez de soltar un saludo genérico.
-  // Determinista por topic; defer → Haiku (classifyIntent) → fallback [DERIVA].
+  // Determinista por topic; defer → answer del multi (misma llamada) → [DERIVA].
 
   if (multi.sideQuestion && greetCase === 'none') {
-    const sqOpts = { appUrl: process.env['NEXT_PUBLIC_APP_URL'] ?? '' };
     const route = routeSideQuestion({
       topic:    multi.sideQuestion.topic,
       question: multi.sideQuestion.question,
@@ -287,32 +291,11 @@ export async function handleGreeting(
       opts:     sqOpts,
     });
 
-    let answer: string;
-    if (route.mode === 'answer') {
-      answer = route.text;
-    } else {
-      const haikuAnswer = await deps.classifier.classifyIntent({
-        userMessage:      multi.sideQuestion.question,
-        availableOptions: [],
-        flowQuestion:     'El cliente hizo una pregunta sobre el negocio.',
-        businessContext:  buildBusinessContext(business, services, sqOpts),
-        recentHistory:    [],
-        anthropicKey,
-        businessId:       business.id,
-        customerPhone:    msg.customerPhone,
-      }).then((c) => {
-        // S5-OBS-01: log no bloqueante del output del clasificador (no altera el flujo).
-        logClassifierOutput({
-          supabase,
-          businessId:    business.id,
-          customerPhone: msg.customerPhone,
-          state:         'GREETING',
-          metadata:      buildSingleClassifierMetadata(c, multi.sideQuestion!.question),
-        });
-        return c.side_question_answer;
-      }).catch(() => null);
-      answer = haikuAnswer ?? derivaFallback(business, sqOpts);
-    }
+    // El multi ya redactó la respuesta con businessContext (una sola llamada
+    // LLM por turno); si no trajo dato, cae al fallback determinista [DERIVA].
+    const answer: string = route.mode === 'answer'
+      ? route.text
+      : (multi.sideQuestion.answer ?? derivaFallback(business, sqOpts));
 
     // Cierre adaptativo por nivel del topic (determinista): Nivel 1 invita a
     // agendar; Niveles 2 y 3 no anexan empuje de agenda.
@@ -505,7 +488,9 @@ export async function handleGreeting(
     anthropicKey,
     systemPrompt,
     generativeMessages,
-    deps.model,
+    // Punto 4 de AUD-01: el turno de personalidad es la ÚNICA generativa que
+    // justifica Sonnet — antes GREETING era "Haiku state" y esto corría Haiku.
+    modelForTask('conversational_turn'),
     plan.deterministicFallback,
     business.id,
     msg.customerPhone,
@@ -597,7 +582,7 @@ async function generateGreetingText(
       client,
       model,
       maxTokens: 160,
-      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      system,
       messages,
       timeoutMs: TIMEOUT_SONNET_MS,
       context:   { businessId, customerPhone, state: 'GREETING' },

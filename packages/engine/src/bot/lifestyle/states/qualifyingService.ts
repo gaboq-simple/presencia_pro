@@ -12,6 +12,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { getCatalog } from '../catalog';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
@@ -22,7 +23,7 @@ import {
   buildSideQuestionResponse,
   type ClarificationResult,
 } from '../clarification';
-import { buildSystemPrompt } from '../prompt';
+import { buildMicroCopySystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic, isServiceOrPriceQuestion, refineTopic, closingForTopic } from '../sideQuestion';
 import { isCancellationIntent } from '../cancelIntent';
@@ -31,7 +32,6 @@ import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandl
 
 const MAX_SERVICES_PER_MESSAGE = 4;
 const FLOW_QUESTION = '¿Qué servicio te interesa?';
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 // Intentos totales de clarificación antes de escalar a FALLBACK.
 // Exportado para el test de relación de caps (S5-BOT-12).
@@ -263,7 +263,9 @@ export async function handleQualifyingService(
   const prevBotMessage = [...(context.messages ?? [])].reverse().find((m) => m.role === 'assistant')?.content ?? null;
   const responseText = await generateRepeatQuestion(
     anthropicKey,
-    buildSystemPrompt(business, undefined, servicesForClassifier),
+    // System corto: esta llamada solo reformula una pregunta (las opciones ya
+    // van en el mensaje anterior) — el system completo con catálogo era ruido.
+    buildMicroCopySystemPrompt(business),
     'los servicios disponibles para agendar',
     fallbackText,
     prevBotMessage,
@@ -433,9 +435,9 @@ async function generateRepeatQuestion(
     const client = new Anthropic({ apiKey: anthropicKey });
     const resp = await callClaude({
       client,
-      model:     HAIKU_MODEL,
+      model:     modelForTask('micro_copy'),
       maxTokens: 120,
-      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      system,
       messages:  [{
         role:    'user',
         // AUD-07d: sin el texto anterior, "no uses el mismo texto" era

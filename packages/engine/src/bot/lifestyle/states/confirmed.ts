@@ -8,13 +8,14 @@
 //   6. Transiciona a estado CONFIRMED (conversación completa).
 
 import Anthropic from '@anthropic-ai/sdk';
-import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
+import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { sendWhatsAppMeta } from '../../../notifications/whatsapp';
 import { tenantDb } from '../../../tenantDb';
 import { getCatalog, getStaffForService } from '../catalog';
 import { DAYS_ES, MONTHS_ES } from '../copy';
-import { buildSystemPrompt } from '../prompt';
+import { buildMicroCopySystemPrompt } from '../prompt';
 import { logBot, maskPhone } from '../../../utils/logger';
 import { formatTimeHumanFromDate } from '../utils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
@@ -343,14 +344,16 @@ export async function handleConfirmed(
 
   const confirmationText = await generateConfirmation(
     anthropicKey,
-    buildSystemPrompt(business, undefined, catalog),
+    // System corto: todos los datos de la cita viajan en el user prompt — el
+    // system completo de 7 pasos + catálogo era ruido para redactar 4 líneas.
+    buildMicroCopySystemPrompt(business),
     service.name,
     staffName,
     dateStr,
     startTimeStr,
     business.name,
     business.address,
-    deps.model,
+    modelForTask('micro_copy'),
     business.id,
     msg.customerPhone,
     firstName,
@@ -418,9 +421,9 @@ async function generateConfirmation(
       client,
       model,
       maxTokens: 200,
-      system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      system,
       messages:  [{ role: 'user', content: prompt }],
-      timeoutMs: TIMEOUT_SONNET_MS,
+      timeoutMs: TIMEOUT_HAIKU_MS,
       context:   { businessId, customerPhone, state: 'CONFIRMED' },
     });
 
