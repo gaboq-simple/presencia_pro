@@ -26,7 +26,7 @@ import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic, isServiceOrPriceQuestion, refineTopic, closingForTopic } from '../sideQuestion';
 import { isCancellationIntent } from '../cancelIntent';
-import { ESCALATION_TO_TEAM_MESSAGE , TECHNICAL_HICCUP_MESSAGE } from '../copy';
+import { ESCALATION_TO_TEAM_MESSAGE, TECHNICAL_HICCUP_MESSAGE, isClosingMessage } from '../copy';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
@@ -71,6 +71,21 @@ export async function handleQualifyingService(
 
   if (matches.length > 1) {
     return buildAmbiguousResult(context, matches);
+  }
+
+  // ── AUD-07e: cortesía tras una side-question contestada ───────────────────
+  // "gracias" / "ok" después de recibir la dirección o el precio NO es
+  // intención de reserva — sin este guard, el fast-path de servicio único lo
+  // tragaba como avance y respondía "Perfecto, Corte…" (vendedor que no
+  // escucha, contra el diseño de cierres adaptativos S4-BOT-08). Gate con
+  // last_side_question: un "ok" respondiendo a "¿qué servicio?" (sin side
+  // question previa) sigue avanzando como decidió S4-BOT-09.
+  if (context.last_side_question && isClosingMessage(msg.body)) {
+    return {
+      newState:     'GREETING',
+      newContext:   { customerId: context.customerId, last_side_question: null },
+      responseText: '¡Con gusto! Aquí ando si necesitas algo más.',
+    };
   }
 
   // ── Fast path: servicio único (S4-BOT-09) ─────────────────────────────────

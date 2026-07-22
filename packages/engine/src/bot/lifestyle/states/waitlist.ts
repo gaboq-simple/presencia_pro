@@ -13,7 +13,7 @@ import { getCatalog, getStaffForService } from '../catalog';
 import { findSlotsInNextDays } from '../scheduling';
 import { noonUTCDate, utcToLocalDateStr } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
-import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS } from '../copy';
+import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS, DAYS_ES, MONTHS_ES } from '../copy';
 
 // ─── Keywords ─────────────────────────────────────────────────────────────────
 
@@ -73,10 +73,18 @@ export async function handleQualifyingWaitlist(
         });
 
         if (alt) {
-          const dateLabel = wlFormatDateLabel(alt.date, business.timezone);
-          altResponseText =
-            `Entendido. El siguiente día con lugar disponible es el ${dateLabel}. ` +
-            `Escríbeme ese día y te busco horario.`;
+          // AUD-07e: antes se decía "Escríbeme ese día y te busco horario" —
+          // se tiraba el trabajo de findSlotsInNextDays y se le pedía al
+          // cliente repetir lo que el bot ya sabía. Ahora: encadenar a
+          // SHOWING_SLOTS con ese día (el router muestra horarios reales
+          // en el MISMO turno).
+          const dateLabel  = wlFormatDateLabel(alt.date, business.timezone);
+          const altDateStr = utcToLocalDateStr(alt.date, business.timezone);
+          return {
+            newState:   'SHOWING_SLOTS',
+            newContext: { ...context, requestedDate: altDateStr, requestedShift: undefined },
+            responseText: `Entendido — el ${dateLabel} sí hay lugar.`,
+          };
         } else {
           altResponseText =
             'Entendido. Por el momento la agenda está bastante llena. ' +
@@ -96,12 +104,33 @@ export async function handleQualifyingWaitlist(
     };
   }
 
-  // ── Mensaje no claro → FALLBACK ───────────────────────────────────────────
+  // ── Mensaje no claro ──────────────────────────────────────────────────────
+  // AUD-07e: waitlist era el único estado sin clarify ni parseo — "mejor el
+  // viernes" (respuesta natural a la oferta) iba directo a FALLBACK, justo en
+  // el punto de rescate de una venta perdida.
 
   if (!isYes) {
+    // 1) ¿Propuso otra fecha? ("mejor el viernes") → buscar horarios de ESE día.
+    const proposedDate = deps.interpretation?.date ?? null;
+    if (proposedDate) {
+      return {
+        newState:     'SHOWING_SLOTS',
+        newContext:   { ...context, requestedDate: proposedDate, requestedShift: undefined, clarification_attempts: 0 },
+        responseText: '',
+      };
+    }
+    // 2) Un reintento de clarificación antes de rendirse.
+    const attempts = context.clarification_attempts ?? 0;
+    if (attempts < 1) {
+      return {
+        newState:     'QUALIFYING_WAITLIST',
+        newContext:   { ...context, clarification_attempts: attempts + 1 },
+        responseText: '¿Te anoto en la lista de espera? Dime sí o no — o dime otro día que te acomode y busco horarios.',
+      };
+    }
     return {
       newState:     'FALLBACK',
-      newContext:   { ...context },
+      newContext:   { ...context, clarification_attempts: 0 },
       responseText: deps.business.fallbackMessage,
     };
   }
@@ -170,16 +199,12 @@ export async function handleQualifyingWaitlist(
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
-const WL_DAYS   = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-const WL_MONTHS = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
+// DAYS_ES/MONTHS_ES viven en copy.ts (AUD-06/07e — antes copia local WL_*).
 
 function formatDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y!, m! - 1, d!);
-  return `${WL_DAYS[date.getDay()]} ${date.getDate()} de ${WL_MONTHS[date.getMonth()]}`;
+  return `${DAYS_ES[date.getDay()]} ${date.getDate()} de ${MONTHS_ES[date.getMonth()]}`;
 }
 
 function wlFormatDateLabel(d: Date, tz: string): string {
@@ -187,5 +212,5 @@ function wlFormatDateLabel(d: Date, tz: string): string {
   const dayOfWeek = new Date(localDs + 'T12:00:00Z').getDay();
   const dayNum    = parseInt(localDs.split('-')[2]!, 10);
   const monthIdx  = parseInt(localDs.split('-')[1]!, 10) - 1;
-  return `${WL_DAYS[dayOfWeek]} ${dayNum} de ${WL_MONTHS[monthIdx]}`;
+  return `${DAYS_ES[dayOfWeek]} ${dayNum} de ${MONTHS_ES[monthIdx]}`;
 }

@@ -25,7 +25,7 @@ import { handleQualifyingStaff }       from './states/qualifyingStaff';
 import { handleShowingSlots }          from './states/presentingSlots';
 import { startCancelFlow, handleAwaitingCancelConfirmation } from './states/awaitingCancelConfirmation';
 import { isModificationIntent, isCancellationIntent, wantsToModifyExistingAppointment } from './cancelIntent';
-import { TECHNICAL_HICCUP_MESSAGE, TECHNICAL_ESCALATION_MESSAGE } from './copy';
+import { TECHNICAL_HICCUP_MESSAGE, TECHNICAL_ESCALATION_MESSAGE, isClosingMessage } from './copy';
 import { getCatalog }                  from './catalog';
 import { interpret }                   from './interpreter';
 import { buildSystemPrompt }           from './prompt';
@@ -324,8 +324,20 @@ async function routeToHandler(
     case 'SHOWING_SLOTS':
       return handleShowingSlots(msg, context, deps);
 
-    case 'QUALIFYING_WAITLIST':
-      return handleQualifyingWaitlist(msg, context, deps);
+    case 'QUALIFYING_WAITLIST': {
+      // AUD-07e: cuando waitlist redirige a slots (el cliente dio otra fecha, o
+      // se encontró el día con cupo), encadenar para mostrar horarios en el
+      // MISMO turno — antes se le pedía al cliente que repitiera el día.
+      const wlResult = await handleQualifyingWaitlist(msg, context, deps);
+      if (wlResult.newState === 'SHOWING_SLOTS') {
+        const slotsResult = await handleShowingSlots(msg, wlResult.newContext, deps);
+        const combined = [wlResult.responseText, slotsResult.responseText]
+          .filter((t) => t.trim().length > 0)
+          .join(' ');
+        return { ...slotsResult, responseText: combined };
+      }
+      return wlResult;
+    }
 
     case 'CONFIRMING_APPOINTMENT': {
       const confirmingResult = await handleConfirmingAppointment(msg, context, deps);
@@ -552,27 +564,7 @@ async function answerSideQuestion(
  * Detecta mensajes de agradecimiento o despedida post-confirmación.
  * Determinista — sin Claude. Solo keywords simples en español e inglés.
  */
-const CLOSING_KEYWORDS = [
-  'gracias', 'grax', 'grácias',
-  'perfecto', 'genial', 'excelente', 'de lujo',
-  'nos vemos', 'hasta luego', 'hasta pronto', 'hasta entonces',
-  'bye', 'chao', 'adios', 'adiós',
-  'listo', 'sale', 'va', 'ok', 'okey',
-  'de nada', 'claro que si',
-  'que bien', 'muy bien',
-];
-
-function isClosingMessage(body: string): boolean {
-  const lower = body.trim().toLowerCase();
-  // AUD-07c: un cierre real es CORTO ("gracias", "ok, nos vemos"). Sin este
-  // guard, "ok quiero agendar otra para mi hijo" matcheaba 'ok' como despedida
-  // y borraba el contexto tragándose la intención real (multi-intención).
-  // Mismo principio que isAffirmation: tokens cortos exigen mensaje corto.
-  if (lower.split(/\s+/).length > 3) return false;
-  return CLOSING_KEYWORDS.some(
-    (kw) => lower === kw || new RegExp('(?:^|\\s)' + kw + '(?:\\s|$)').test(lower),
-  );
-}
+// CLOSING_KEYWORDS / isClosingMessage viven en copy.ts (AUD-07e).
 
 // ─── Detección de modificación/cancelación ────────────────────────────────────
 // Los detectores viven en cancelIntent.ts (módulo puro, AUD-02): los comparten

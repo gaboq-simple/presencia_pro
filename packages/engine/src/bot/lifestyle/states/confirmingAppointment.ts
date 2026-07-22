@@ -26,12 +26,14 @@
 //   Incrementa clarification_attempts y pide clarificación (máx MAX_CLARIFY_ATTEMPTS).
 
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
+import { tenantDb } from '../../../tenantDb';
 import { getCatalog, getStaffForService } from '../catalog';
 import { SCHEDULING_ERROR_MESSAGE, SERVICE_QUESTION_RESET, DAYS_ES, MONTHS_ES } from '../copy';
 import {
   formatTimeHumanFromDate,
   formatTimeHuman,
   buildBookingNameQuestion,
+  isLikelyRealName,
   detectsServiceCorrection,
   clearBookingSelection,
 } from '../utils';
@@ -1009,7 +1011,19 @@ async function buildConfirmationResult(
     `Fecha: ${dayName} ${dayNum} de ${monthName}\n` +
     `Hora: ${timeStr}`;
 
-  const { nameQuestion, pendingBookingName } = buildBookingNameQuestion(customerName);
+  // AUD-07e: si el perfil de WA no sirve como nombre (apodo/emoji), intentar
+  // el nombre ya registrado — al cliente recurrente no se le pide su nombre en
+  // cada reserva.
+  let knownName: string | null = null;
+  if ((!customerName || !isLikelyRealName(customerName)) && context.customerId) {
+    const { data: custRow } = await tenantDb(supabase, businessId)
+      .table('customers')
+      .select('name')
+      .eq('id', context.customerId)
+      .maybeSingle();
+    knownName = (custRow as { name: string | null } | null)?.name ?? null;
+  }
+  const { nameQuestion, pendingBookingName } = buildBookingNameQuestion(customerName, knownName);
 
   const newContext: LifestyleBotContext = {
     ...context,
