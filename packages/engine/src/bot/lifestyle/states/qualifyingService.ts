@@ -26,10 +26,11 @@ import { buildSystemPrompt } from '../prompt';
 import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic, isServiceOrPriceQuestion, refineTopic, closingForTopic } from '../sideQuestion';
 import { isCancellationIntent } from '../cancelIntent';
+import { ESCALATION_TO_TEAM_MESSAGE } from '../copy';
 import type { ServiceRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
 const MAX_SERVICES_PER_MESSAGE = 4;
-const FLOW_QUESTION = 'Que servicio te interesa?';
+const FLOW_QUESTION = '¿Qué servicio te interesa?';
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 // Intentos totales de clarificación antes de escalar a FALLBACK.
@@ -200,7 +201,7 @@ export async function handleQualifyingService(
     return {
       newState:     'FALLBACK',
       newContext:   { ...context, clarification_attempts: 0 },
-      responseText: 'Parece que no estamos conectando. Dejame pasarte con alguien del equipo para ayudarte mejor.',
+      responseText: ESCALATION_TO_TEAM_MESSAGE,
     };
   }
 
@@ -260,7 +261,7 @@ function buildAdvanceResult(
   return {
     newState:     'QUALIFYING_STAFF',
     newContext,
-    responseText: `Perfecto, ${service.name}. Tienes algun barbero de preferencia o te asignamos uno disponible?`,
+    responseText: `Perfecto, ${service.name}. ¿Tienes algún barbero de preferencia o te asignamos uno disponible?`,
   };
 }
 
@@ -269,10 +270,10 @@ function buildAmbiguousResult(
   candidates: ServiceRow[],
 ): StateHandlerResult {
   const lines = candidates.map(
-    (s) => `${s.name} ($${formatPrice(s.price)} ${s.currency}, ${s.duration_minutes} min)`,
+    (s, i) => `${i + 1}. ${s.name} ($${formatPrice(s.price)} ${s.currency}, ${s.duration_minutes} min)`,
   );
   const question =
-    `Tenemos ${lines.join(' y ')}. Cual te interesa?`;
+    `Tenemos:\n${lines.join('\n')}\n¿Cuál te interesa?`;
   return {
     newState: 'QUALIFYING_SERVICE',
     newContext: {

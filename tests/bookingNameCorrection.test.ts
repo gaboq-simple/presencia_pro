@@ -284,7 +284,7 @@ test('"no" pelado en Caso A → rechaza el nombre pre-llenado (semántica actual
   const r = await handle('no', ctxPrefilled(), makeDeps());
   assert.equal(r.newState, 'AWAITING_BOOKING_NAME');
   assert.equal(r.newContext.pendingBookingName, null);        // limpia el pre-llenado
-  assert.match(r.responseText, /A nombre de quien/i);
+  assert.match(r.responseText, /A nombre de qui[eé]n/i);
 });
 
 test('"sí" en Caso A → confirma el pre-llenado (un sí es confirmación, no corrección)', async () => {

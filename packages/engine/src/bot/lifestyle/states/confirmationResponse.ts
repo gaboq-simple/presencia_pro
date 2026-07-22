@@ -191,8 +191,8 @@ export async function handleConfirmationResponse(
     if (!result.feasible) {
       const isOverlap = result.reason.includes('traslape');
       const responseText = isOverlap
-        ? `Un retraso de ${delayMinutes} minutos se traslaparía con la siguiente cita de ${staffName}. Quieres que te busque otro horario?`
-        : `${result.reason}. Quieres reagendar tu cita para otro horario?`;
+        ? `Un retraso de ${delayMinutes} minutos se traslaparía con la siguiente cita de ${staffName}. ¿Quieres que te busque otro horario?`
+        : `${result.reason}. ¿Quieres reagendar tu cita para otro horario?`;
 
       return {
         newState:     'CONFIRMED',
@@ -239,7 +239,7 @@ export async function handleConfirmationResponse(
       newContext:   { ...context },
       responseText:
         `Sin problema! Te esperamos a las ${newTimeStr} con ${staffName}. ` +
-        `Tu ${serviceName} sigue siendo el mismo, terminaríamos aprox a las ${newEndStr}. Nos vemos!`,
+        `Tu ${serviceName} sigue siendo el mismo, terminaríamos aprox a las ${newEndStr}. ¡Nos vemos!`,
     };
   }
 
@@ -262,7 +262,7 @@ export async function handleConfirmationResponse(
     const classification = await deps.classifier.classifyIntent({
       userMessage:      msg.body,
       availableOptions: ['sí, confirmar', 'no, cancelar'],
-      flowQuestion:     'Confirmas o cancelas tu cita?',
+      flowQuestion:     '¿Confirmas o cancelas tu cita?',
       businessContext,
       recentHistory,
       anthropicKey:     deps.anthropicKey,
@@ -367,7 +367,7 @@ export async function handleConfirmationResponse(
     return {
       newState:     'COMPLETED',
       newContext:   { ...context },
-      responseText: 'Entendido, cancelamos tu cita. Cuando quieras reagendar aqui estamos.',
+      responseText: 'Entendido, cancelamos tu cita. Cuando quieras reagendar aquí estamos.',
     };
   }
 

@@ -24,17 +24,20 @@ import { getCatalog } from '../catalog';
 import { logBotError } from '../utils/logger';
 import { handleConfirmingAppointment, detectsSummaryCorrection } from './confirmingAppointment';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS, buildSideAnswerFromService } from '../copy';
 
 // Exportado para el test de relación de caps (S5-BOT-12).
 export const MAX_RETRIES = 2;
 
+// Base compartida (copy.ts) + extras de ESTE contexto (validar el nombre).
 const YES_KEYWORDS = [
-  'sí', 'si', 'simon', 'yes', 'claro', 'correcto', 'exacto', 'ok', 'dale',
-  'así es', 'asi es', 'efectivamente', 'afirmativo',
+  ...AFFIRMATIVE_BASE_KEYWORDS,
+  'correcto', 'exacto', 'así es', 'asi es', 'efectivamente', 'afirmativo',
 ];
 
 const NO_KEYWORDS = [
-  'no', 'nope', 'negativo', 'incorrecto', 'error', 'otro', 'diferente',
+  ...NEGATIVE_BASE_KEYWORDS,
+  'incorrecto', 'error', 'otro', 'diferente',
 ];
 
 // ─── YES helper ───────────────────────────────────────────────────────────────
@@ -157,25 +160,7 @@ function restIndicatesAlternateName(rest: string): boolean {
 
 // ─── Side answer desde catálogo ───────────────────────────────────────────────
 
-async function buildSideAnswerFromService(
-  serviceId: string,
-  deps:       StateHandlerDeps,
-): Promise<string | null> {
-  try {
-    const catalog = await getCatalog(deps.business.id, deps.supabase);
-    const service = catalog.find((s) => s.id === serviceId);
-    if (!service) return null;
-
-    const priceStr = service.price > 0
-      ? `$${service.price.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${service.currency}`
-      : 'sin costo adicional';
-
-    return `El costo es ${priceStr} y la duracion es de ${service.duration_minutes} min.`;
-  } catch (err) {
-    logBotError({ context: 'awaitingBookingName.buildSideAnswerFromService', error: err, businessId: deps.business.id });
-    return null;
-  }
-}
+// buildSideAnswerFromService vive en copy.ts (AUD-06 — antes copia local).
 
 export async function handleAwaitingBookingName(
   msg:   LifestyleIncomingMessage,
@@ -200,7 +185,7 @@ export async function handleAwaitingBookingName(
         return {
           newState:     'AWAITING_BOOKING_NAME',
           newContext:   { ...context, pendingBookingName: null, clarification_attempts: 0 },
-          responseText: 'Entendido. A nombre de quien quieres que quede la cita?',
+          responseText: 'Entendido. ¿A nombre de quién quieres que quede la cita?',
         };
       }
 
@@ -230,7 +215,7 @@ export async function handleAwaitingBookingName(
       return {
         newState:     'AWAITING_BOOKING_NAME',
         newContext:   { ...context, pendingBookingName: null, clarification_attempts: 0 },
-        responseText: 'Sin problema. A nombre de quien queda la cita?',
+        responseText: 'Sin problema. ¿A nombre de quién queda la cita?',
       };
     }
 
@@ -243,7 +228,7 @@ export async function handleAwaitingBookingName(
     return {
       newState:     'AWAITING_BOOKING_NAME',
       newContext:   { ...context, clarification_attempts: retries + 1 },
-      responseText: 'No capté bien el nombre. A nombre de quien queda la cita?',
+      responseText: 'No capté bien el nombre. ¿A nombre de quién queda la cita?',
     };
   }
 
@@ -272,7 +257,7 @@ export async function handleAwaitingBookingName(
   return {
     newState:     'AWAITING_BOOKING_NAME',
     newContext:   { ...context, pendingBookingName: null, clarification_attempts: retries + 1 },
-    responseText: 'No capté bien el nombre. A nombre de quien queda la cita?',
+    responseText: 'No capté bien el nombre. ¿A nombre de quién queda la cita?',
   };
 }
 
@@ -299,7 +284,7 @@ async function handleSummaryCorrection(
     return {
       newState:     'GREETING',
       newContext:   { customerId: context.customerId },
-      responseText: 'Sin problema, dejamos el agendamiento por ahora. Aqui estoy cuando quieras agendar.',
+      responseText: 'Sin problema, dejamos el agendamiento por ahora. Aquí estoy cuando quieras agendar.',
     };
   }
 

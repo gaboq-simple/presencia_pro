@@ -25,22 +25,17 @@
 import { tenantDb } from '../../../tenantDb';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { isCancellationIntent } from '../cancelIntent';
+import { DAYS_ES, MONTHS_ES } from '../copy';
 import { formatTimeHumanFromDate } from '../utils';
 import { utcToLocalDateStr, weekdayFromDateStr, localTimeToUTC, noonUTCDate } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 
-// Duplicado #4 en el bot (confirmed/confirmingAppointment/presentingSlots) —
-// unificar en AUD-06 (guía de estilo + constantes compartidas).
-const DAYS_ES   = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-const MONTHS_ES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
+// DAYS_ES/MONTHS_ES viven en copy.ts (AUD-06).
 
 const MAX_CANCEL_CLARIFY = 2;
 
 const NO_ACTIVE_APPOINTMENT_MSG =
-  'No encontre una cita proxima a tu nombre. Si quieres agendar una, con gusto te ayudo.';
+  'No encontré una cita próxima a tu nombre. Si quieres agendar una, con gusto te ayudo.';
 
 type FutureAppointment = {
   id:        string;
@@ -181,11 +176,11 @@ export async function startCancelFlow(
     const { customerId, appt, hasOthers } = found;
     const desc = describeAppointment(appt, deps.business.timezone);
     let question = kind === 'modification'
-      ? `Tienes una cita ${desc}. Quieres moverla a otro dia u hora?`
-      : `Tienes una cita ${desc}. Quieres cancelarla?`;
+      ? `Tienes una cita ${desc}. ¿Quieres moverla a otro día u hora?`
+      : `Tienes una cita ${desc}. ¿Quieres cancelarla?`;
     // Más de una cita futura y no nombró día: no asumir en silencio cuál.
     if (hasOthers) {
-      question += ' Es tu proxima cita — si te refieres a otra, dime de que dia.';
+      question += ' Es tu próxima cita — si te refieres a otra, dime de qué día.';
     }
 
     return {
@@ -247,7 +242,7 @@ export async function handleAwaitingCancelConfirmation(
     return {
       newState:     'GREETING',
       newContext:   { customerId: context.customerId },
-      responseText: 'De acuerdo, tu cita queda como esta. Si necesitas otra cosa, aqui estoy.',
+      responseText: 'De acuerdo, tu cita queda como está. Si necesitas otra cosa, aquí estoy.',
     };
   }
 
@@ -258,14 +253,14 @@ export async function handleAwaitingCancelConfirmation(
       return {
         newState:     'GREETING',
         newContext:   { customerId: context.customerId },
-        responseText: 'Tu cita queda como esta. Si mas adelante quieres cancelarla o moverla, escribeme "cancelar mi cita".',
+        responseText: 'Tu cita queda como está. Si más adelante quieres cancelarla o moverla, escríbeme "cancelar mi cita".',
       };
     }
     const verb = kind === 'modification' ? 'mover' : 'cancelar';
     return {
       newState:     'AWAITING_CANCEL_CONFIRMATION',
       newContext:   { ...context, clarification_attempts: attempts },
-      responseText: `Solo para confirmar: quieres ${verb} tu cita? Respondeme si o no.`,
+      responseText: `Solo para confirmar: ¿quieres ${verb} tu cita? Respóndeme sí o no.`,
     };
   }
 
@@ -287,7 +282,7 @@ export async function handleAwaitingCancelConfirmation(
       return {
         newState:     'GREETING',
         newContext:   { customerId: context.customerId },
-        responseText: 'Esa cita ya no aparece activa — no hay nada que cancelar. Si necesitas agendar, aqui estoy.',
+        responseText: 'Esa cita ya no aparece activa — no hay nada que cancelar. Si necesitas agendar, aquí estoy.',
       };
     }
 
@@ -315,14 +310,14 @@ export async function handleAwaitingCancelConfirmation(
           ...(raw.service_id ? { serviceId: raw.service_id } : {}),
           ...(raw.staff_id ? { staffId: raw.staff_id } : {}),
         },
-        responseText: `Listo, cancele tu cita de las ${timeStr} con ${staffName}. Para que dia te acomoda la nueva cita?`,
+        responseText: `Listo, cancelé tu cita de las ${timeStr} con ${staffName}. ¿Para qué día te acomoda la nueva cita?`,
       };
     }
 
     return {
       newState:     'GREETING',
       newContext:   { customerId: context.customerId },
-      responseText: `Listo, tu cita de las ${timeStr} con ${staffName} queda cancelada. Si necesitas agendar otra, aqui estoy.`,
+      responseText: `Listo, tu cita de las ${timeStr} con ${staffName} queda cancelada. Si necesitas agendar otra, aquí estoy.`,
     };
   } catch {
     return {

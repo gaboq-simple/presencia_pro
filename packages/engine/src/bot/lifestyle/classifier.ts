@@ -8,6 +8,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from './claudeClient';
+import { FORMATTING_RULES } from './prompt';
 import type { LifestyleConversationMessage } from '../../types/lifestyle.types';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
@@ -160,7 +161,8 @@ ${flowQuestion}
 1. Si hay ambigüedad entre SELECT_OPTION y SIDE_QUESTION, prefiere SELECT_OPTION cuando hay opciones disponibles y el mensaje hace referencia a una de ellas.
 2. Para SELECT_OPTION, extrae el valor normalizado: el nombre de la opción o el número ("1", "corte clásico").
 3. Para DATE_PREFERENCE, extrae la expresión de fecha/turno tal como la dijo el cliente.
-4. Para SIDE_QUESTION, genera una respuesta breve (máx 2 líneas) solo con información que tengas del negocio. Si no tienes la información, pon null en side_question_answer.
+4. Para SIDE_QUESTION, genera una respuesta breve (máx 2 líneas) solo con información que tengas del negocio. Si no tienes la información, pon null en side_question_answer. La respuesta viaja VERBATIM al cliente — debe seguir las reglas de formato de la casa:
+${FORMATTING_RULES}
 5. Errores ortográficos, abreviaciones y variantes de español mexicano son válidos ("si" = "sí", "ke" = "que", "xfa" = "por favor").
 6. confidence debe reflejar tu certeza real — no infles el score.
 

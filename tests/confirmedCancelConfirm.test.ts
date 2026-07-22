@@ -177,7 +177,7 @@ test('CONFIRMED + "quiero cancelar mi cita" → pregunta → "sí" → cancela',
   const ask = await dispatch('CONFIRMED', makeMsg('quiero cancelar mi cita'), CONFIRMED_CTX, deps);
 
   assert.equal(ask.newState, 'AWAITING_CANCEL_CONFIRMATION');
-  assert.match(ask.responseText, /miercoles 22/);
+  assert.match(ask.responseText, /miércoles 22/);
   assert.equal(rpcCalls.length, 0);
 
   const r = await dispatch('AWAITING_CANCEL_CONFIRMATION', makeMsg('sí'), ask.newContext, deps);
@@ -193,7 +193,7 @@ test('2 citas: el ask invita a nombrar el dia; "es la del viernes" re-apunta sin
   const { deps, rpcCalls } = makeDeps({ twoAppointments: true });
 
   const ask = await dispatch('CONFIRMED', makeMsg('quiero cancelar mi cita'), CONFIRMED_CTX, deps);
-  assert.match(ask.responseText, /miercoles 22/);
+  assert.match(ask.responseText, /miércoles 22/);
   assert.match(ask.responseText, /si te refieres a otra/);
   assert.equal(ask.newContext.pendingCancelAppointmentId, APPT_MIE);
 

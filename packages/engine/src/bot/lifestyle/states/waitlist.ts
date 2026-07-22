@@ -13,14 +13,15 @@ import { getCatalog, getStaffForService } from '../catalog';
 import { findSlotsInNextDays } from '../scheduling';
 import { noonUTCDate, utcToLocalDateStr } from '../tzUtils';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS } from '../copy';
 
 // ─── Keywords ─────────────────────────────────────────────────────────────────
 
 const YES_PHRASES = ['sí quiero', 'si quiero', 'claro que sí', 'claro que si'];
-const YES_WORDS   = ['sí', 'si', 'claro', 'dale', 'ok', 'va'];
+const YES_WORDS   = AFFIRMATIVE_BASE_KEYWORDS;
 
 const NO_PHRASES  = ['no gracias', 'no, gracias'];
-const NO_WORDS    = ['no'];
+const NO_WORDS    = NEGATIVE_BASE_KEYWORDS;
 
 function hasKeyword(text: string, phrases: string[], words: string[]): boolean {
   const n = text.toLowerCase().trim();
@@ -82,10 +83,10 @@ export async function handleQualifyingWaitlist(
             'Dime qué fecha tienes en mente y lo reviso.';
         }
       } else {
-        altResponseText = 'Entendido. Quieres probar con otro día o turno?';
+        altResponseText = 'Entendido. ¿Quieres probar con otro día o turno?';
       }
     } else {
-      altResponseText = 'Entendido. Quieres probar con otro día o turno?';
+      altResponseText = 'Entendido. ¿Quieres probar con otro día o turno?';
     }
 
     return {
@@ -111,7 +112,7 @@ export async function handleQualifyingWaitlist(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context },
-      responseText: 'Que servicio te interesa?',
+      responseText: '¿Qué servicio te interesa?',
     };
   }
 
@@ -162,8 +163,8 @@ export async function handleQualifyingWaitlist(
     newState:     'COMPLETED',
     newContext:   { ...context, customerId },
     responseText:
-      `Listo! Quedas en lista de espera para ${serviceName} el ${dateStr}. ` +
-      `Te avisamos si se libera un lugar 🔔`,
+      `¡Listo! Quedas en lista de espera para ${serviceName} el ${dateStr}. ` +
+      `Te avisamos si se libera un lugar.`,
   };
 }
 

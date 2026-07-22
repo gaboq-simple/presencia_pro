@@ -202,7 +202,7 @@ test('1er mensaje en ESCALATED → acuse de espera, sin re-saludar ni re-notific
   const r = await dispatch('ESCALATED', makeMsg('hola? siguen ahi?'), ctx, deps);
 
   assert.equal(r.newState, 'ESCALATED');
-  assert.match(r.responseText, /equipo ya esta enterado/);
+  assert.match(r.responseText, /equipo ya está enterado/);
   assert.doesNotMatch(r.responseText, /en que puedo ayudarte/i);
   assert.equal(r.newContext.escalation_holds, 1);
   assert.equal(sent.length, 0);   // dedup: no segundo aviso

@@ -17,6 +17,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
 import { getCatalog, getStaffForService } from '../catalog';
+import { SCHEDULING_ERROR_MESSAGE, SERVICE_QUESTION_RESET, DAYS_ES, MONTHS_ES } from '../copy';
 import { logBot } from '../../../utils/logger';
 import { FORMATTING_RULES } from '../prompt';
 import { getDayAvailability, findSlotsInNextDays, SchedulingQueryError, AFTERNOON_CUTOFF } from '../scheduling';
@@ -56,16 +57,7 @@ No saludas, no te presentas, no repites lo que el cliente ya pidió. Recibes una
 ## REGLAS DE FORMATO
 ${FORMATTING_RULES}`;
 
-// Mensaje al usuario cuando los queries de disponibilidad fallan
-const SCHEDULING_ERROR_MESSAGE =
-  'No pude verificar la disponibilidad en este momento. ' +
-  'Intenta de nuevo en unos minutos o escribenos directamente.';
-
-const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-const MONTHS_ES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
+// DAYS_ES/MONTHS_ES y SCHEDULING_ERROR_MESSAGE viven en copy.ts (AUD-06).
 
 export async function handleShowingSlots(
   msg: LifestyleIncomingMessage,
@@ -80,7 +72,7 @@ export async function handleShowingSlots(
     return {
       newState: 'QUALIFYING_SERVICE',
       newContext: { ...context, ...clearBookingSelection() },
-      responseText: 'Sin problema. Cual servicio te interesa?',
+      responseText: SERVICE_QUESTION_RESET,
     };
   }
 
@@ -88,7 +80,7 @@ export async function handleShowingSlots(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context },
-      responseText: 'Que servicio te interesa?',
+      responseText: '¿Qué servicio te interesa?',
     };
   }
 
@@ -99,7 +91,7 @@ export async function handleShowingSlots(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context, serviceId: undefined },
-      responseText: 'No encontre ese servicio. Cual quieres elegir?',
+      responseText: 'No encontré ese servicio. ¿Cuál quieres elegir?',
     };
   }
 
@@ -209,7 +201,7 @@ export async function handleShowingSlots(
       return {
         newState:     'SHOWING_SLOTS',
         newContext:   { ...contextAfterSlots, staffId: undefined, autoAssign: true },
-        responseText: `${staffName} no tiene disponibilidad para ese dia. Buscando con otro barbero disponible...`,
+        responseText: `${staffName} no tiene disponibilidad ese día. ¿Quieres que te busque con otro barbero?`,
       };
     }
 
@@ -285,8 +277,8 @@ export async function handleShowingSlots(
       newState:     'QUALIFYING_WAITLIST',
       newContext:   { ...contextAfterSlots },
       responseText:
-        'No tenemos horarios disponibles para tu preferencia en los proximos dias\n' +
-        'Quieres quedar en lista de espera? Si se libera un lugar te avisamos de inmediato.',
+        'No me quedan horarios cerca de esa fecha.\n' +
+        '¿Quieres quedar en lista de espera? Si se libera un lugar te avisamos de inmediato.',
     };
   }
 
@@ -362,8 +354,8 @@ export async function handleShowingSlots(
     };
 
     const proposalText = exactMatchMissed && requestedTimeLabel
-      ? `A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano que hay es el ${dayName} ${dayNum} de ${monthName} a las ${timeStr} con ${chosen.staffName}. ¿Te sirve o preferis otra hora?`
-      : `Tengo disponible el ${dayName} ${dayNum} de ${monthName} a las ${timeStr} con ${chosen.staffName}. ¿Te sirve o preferis otra hora?`;
+      ? `A las ${requestedTimeLabel} no tengo disponible. Lo más cercano que hay es el ${dayName} ${dayNum} de ${monthName} a las ${timeStr} con ${chosen.staffName}. ¿Te sirve o prefieres otra hora?`
+      : `Tengo disponible el ${dayName} ${dayNum} de ${monthName} a las ${timeStr} con ${chosen.staffName}. ¿Te sirve o prefieres otra hora?`;
 
     return {
       newState:     'CONFIRMING_APPOINTMENT',
@@ -523,7 +515,7 @@ async function handleHonestAvailability(
     return {
       newState:     'SHOWING_SLOTS',
       newContext:   { ...ctx, clarification_attempts: 0, staffId: undefined, autoAssign: true, pendingAgendaTime: undefined },
-      responseText: `${staffName} no tiene disponibilidad para ese dia. Buscando con otro barbero disponible...`,
+      responseText: `${staffName} no tiene disponibilidad ese día. ¿Quieres que te busque con otro barbero?`,
     };
   }
 
@@ -668,16 +660,16 @@ async function generateSlotsMessage(params: {
     .join('\n');
 
   const barberoLine = presentByStaff
-    ? '- Barbero: MENCIONA el nombre de cada barbero junto a su horario (ej. "Carlos a las 10, Andres a las 12"). El cliente quiere elegir/saber con quien.'
+    ? '- Barbero: MENCIONA el nombre de cada barbero junto a su horario (ej. "Carlos a las 10, Andrés a las 12"). El cliente quiere elegir/saber con quién.'
     : autoAssign
-      ? '- Barbero: se asignara automaticamente segun disponibilidad (no menciones nombre especifico de barbero)'
+      ? '- Barbero: se asignará automáticamente según disponibilidad (no menciones nombre específico de barbero)'
       : `- Barbero: ${staffName ?? 'cualquier barbero disponible (auto-asignado)'}`;
 
   // Nota de hora exacta no disponible — instrucción explícita a Claude
   const exactTimeNote = exactMatchMissed && requestedTimeLabel
     ? [
-        `- IMPORTANTE: El cliente pidio una cita "a las ${requestedTimeLabel}" pero ese horario exacto NO esta disponible.`,
-        `  Comunica esto PRIMERO de forma directa, sin disculpas. Ejemplo para 2 alternativas: "A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano es a las [hora1] o a las [hora2]. Cual prefieres?" Ejemplo para 1 alternativa: "A las ${requestedTimeLabel} no tengo disponible, pero tengo a las [hora]. ¿Te late?"`,
+        `- IMPORTANTE: El cliente pidió una cita "a las ${requestedTimeLabel}" pero ese horario exacto NO está disponible.`,
+        `  Comunica esto PRIMERO de forma directa, sin disculpas. Ejemplo para 2 alternativas: "A las ${requestedTimeLabel} no tengo disponible. Lo más cercano es a las [hora1] o a las [hora2]. ¿Cuál prefieres?" Ejemplo para 1 alternativa: "A las ${requestedTimeLabel} no tengo disponible, pero tengo a las [hora]. ¿Te late?"`,
       ].join('\n')
     : null;
 
@@ -688,7 +680,7 @@ async function generateSlotsMessage(params: {
     barberoLine,
     isWalkIn ? '- Es un walk-in (cliente en el local ahora mismo)' : null,
     isAltDate
-      ? `- Nota: el cliente pidio "${originalDateLabel}" pero no hay disponibilidad ese dia. Los horarios que vas a presentar son para "${altDateLabel}". Aclara el cambio de fecha de forma directa al inicio del mensaje, sin disculpas excesivas.`
+      ? `- Nota: el cliente pidió "${originalDateLabel}" pero no hay disponibilidad ese día. Los horarios que vas a presentar son para "${altDateLabel}". Aclara el cambio de fecha de forma directa al inicio del mensaje, sin disculpas excesivas.`
       : null,
     exactTimeNote,
     '',
@@ -696,10 +688,10 @@ async function generateSlotsMessage(params: {
     slotsText,
     '',
     presentByStaff
-      ? 'Presenta estos horarios mencionando el NOMBRE del barbero de cada uno (ej. "Carlos a las 10, Andres a las 12"), de forma natural y calida. Termina con una pregunta abierta para que el cliente elija con quien o a que hora. Sin signos de interrogacion ni exclamaciones al inicio.'
+      ? 'Presenta estos horarios mencionando el NOMBRE del barbero de cada uno (ej. "Carlos a las 10, Andrés a las 12"), de forma natural y cálida. Termina con una pregunta abierta para que el cliente elija con quién o a qué hora. Ortografía correcta: acentos y signos de apertura (¿ ¡).'
       : autoAssign
-        ? 'Presenta estos horarios de forma natural. El barbero sera asignado automaticamente — no menciones su nombre. Termina con una pregunta abierta para que el cliente elija el horario. Sin signos de interrogacion al inicio ni exclamaciones al inicio.'
-        : 'Presenta estos horarios de forma natural y calida, sin listarlos como formulario. Termina con una pregunta abierta para que el cliente elija, sin mencionar el numero total de opciones.',
+        ? 'Presenta estos horarios de forma natural. El barbero será asignado automáticamente — no menciones su nombre. Termina con una pregunta abierta para que el cliente elija el horario. Ortografía correcta: acentos y signos de apertura (¿ ¡).'
+        : 'Presenta estos horarios de forma natural y cálida, sin listarlos como formulario. Termina con una pregunta abierta para que el cliente elija, sin mencionar el número total de opciones.',
   ].filter((l) => l !== null).join('\n');
 
   try {
@@ -752,7 +744,7 @@ export function buildSlotsMessage(
     const slot      = slots[0]!;
     const time      = formatTimeHumanFromDate(slot.startsAt, tz);
     const staffPart = showStaff ? ` con ${slot.staffName}` : '';
-    return `Tenemos disponibilidad ahora mismo${staffPart} a las ${time}. Confirmamos? (si/no)`;
+    return `Tenemos disponibilidad ahora mismo${staffPart} a las ${time}. ¿Confirmamos? (sí/no)`;
   }
 
   // Hora exacta pedida no disponible → comunicar antes de listar alternativas
@@ -762,7 +754,7 @@ export function buildSlotsMessage(
       return `A las ${requestedTimeLabel} no tengo disponible, pero tengo a ${altTimes[0]}. ¿Te late?`;
     }
     const timesStr = altTimes.slice(0, -1).join(', a ') + ` o a ${altTimes[altTimes.length - 1]}`;
-    return `A las ${requestedTimeLabel} no tengo disponible. Lo mas cercano es a ${timesStr}. Cual prefieres?`;
+    return `A las ${requestedTimeLabel} no tengo disponible. Lo más cercano es a ${timesStr}. ¿Cuál prefieres?`;
   }
 
   const lines = slots.map((slot, i) => {
@@ -778,7 +770,7 @@ export function buildSlotsMessage(
   const opts = slots.length === 1
     ? '1'
     : slots.slice(0, -1).map((_, i) => String(i + 1)).join(', ') + ` o ${slots.length}`;
-  return `Estos son los horarios disponibles:\n\n${lines.join('\n')}\n\nCual prefieres? (${opts})`;
+  return `Estos son los horarios disponibles:\n\n${lines.join('\n')}\n\n¿Cuál prefieres? (${opts})`;
 }
 
 /** Formatea un Date (noon UTC) a "Miercoles 7 de mayo" para mensajes al usuario. */
@@ -804,5 +796,5 @@ function buildAltDateFallback(
     ? `a ${times[0]}`
     : times.slice(0, -1).join(', a ') + ` o a ${times[times.length - 1]}`;
   const staffNote = (autoAssign && !presentByStaff) ? '' : ` con ${slots[0]!.staffName}`;
-  return `Para ${originalDateLabel} no tengo espacio, pero el ${altDateLabel} si hay lugar — ${timesStr}${staffNote}. ¿Te late alguno?`;
+  return `Para ${originalDateLabel} no tengo espacio, pero el ${altDateLabel} sí hay lugar — ${timesStr}${staffNote}. ¿Te late alguno?`;
 }

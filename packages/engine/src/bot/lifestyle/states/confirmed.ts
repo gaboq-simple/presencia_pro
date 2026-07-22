@@ -13,6 +13,7 @@ import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { sendWhatsAppMeta } from '../../../notifications/whatsapp';
 import { tenantDb } from '../../../tenantDb';
 import { getCatalog, getStaffForService } from '../catalog';
+import { DAYS_ES, MONTHS_ES } from '../copy';
 import { buildSystemPrompt } from '../prompt';
 import { logBot, maskPhone } from '../../../utils/logger';
 import { formatTimeHumanFromDate } from '../utils';
@@ -29,7 +30,7 @@ export async function handleConfirmed(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context },
-      responseText: 'Hubo un problema al agendar. Que servicio te interesa?',
+      responseText: 'Hubo un problema al agendar. ¿Qué servicio te interesa?',
     };
   }
 
@@ -41,7 +42,7 @@ export async function handleConfirmed(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context, serviceId: undefined },
-      responseText: 'No encontre el servicio. Cual quieres elegir?',
+      responseText: 'No encontré el servicio. ¿Cuál quieres elegir?',
     };
   }
 
@@ -112,7 +113,7 @@ export async function handleConfirmed(
         selectedSlot: undefined,
         pendingSlots: [],
       },
-      responseText: 'Ese horario acaba de ser tomado. Buscando otra opcion...',
+      responseText: 'Ese horario se acaba de ocupar. ¿Quieres que te busque otra opción?',
     };
   }
 
@@ -155,7 +156,7 @@ export async function handleConfirmed(
           selectedSlot: undefined,
           pendingSlots: [],
         },
-        responseText: 'Ese horario acaba de ser tomado. Buscando otra opcion...',
+        responseText: 'Ese horario se acaba de ocupar. ¿Quieres que te busque otra opción?',
       };
     }
 
@@ -170,7 +171,7 @@ export async function handleConfirmed(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context },
-      responseText: 'Hubo un error al agendar tu cita. Por favor intenta de nuevo o contactanos directamente.',
+      responseText: 'Hubo un error al agendar tu cita. Por favor intenta de nuevo o contáctanos directamente.',
     };
   }
 
@@ -178,7 +179,7 @@ export async function handleConfirmed(
     return {
       newState:     'QUALIFYING_SERVICE',
       newContext:   { ...context },
-      responseText: 'Hubo un error al agendar tu cita. Por favor intenta de nuevo o contactanos directamente.',
+      responseText: 'Hubo un error al agendar tu cita. Por favor intenta de nuevo o contáctanos directamente.',
     };
   }
 
@@ -239,7 +240,7 @@ export async function handleConfirmed(
       scheduled_for:  at24h.toISOString(),
       message_body:
         `Hola, mañana tienes cita de ${service.name}${staffLabel}` +
-        ` a las ${timeLabel} en ${business.name}. Te esperamos!`,
+        ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
       metadata:       reminderMeta,
     });
   }
@@ -253,7 +254,7 @@ export async function handleConfirmed(
       scheduled_for:  at2h.toISOString(),
       message_body:
         `Hola, en 2 horas tienes cita de ${service.name}${staffLabel}` +
-        ` a las ${timeLabel} en ${business.name}. Te esperamos!`,
+        ` a las ${timeLabel} en ${business.name}. ¡Te esperamos!`,
       metadata:       reminderMeta,
     });
   }
@@ -371,11 +372,7 @@ export async function handleConfirmed(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const DAYS_ES   = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-const MONTHS_ES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
+// DAYS_ES/MONTHS_ES viven en copy.ts (AUD-06).
 
 function formatDate(d: Date, tz: string): string {
   const localDateStr = d.toLocaleDateString('en-CA', { timeZone: tz });  // YYYY-MM-DD
@@ -401,19 +398,19 @@ async function generateConfirmation(
   firstName:     string | null,
 ): Promise<string> {
   const nameNote = firstName
-    ? `- Nombre del cliente: ${firstName} — empieza el mensaje con "Listo, ${firstName}!"`
-    : '- Empieza el mensaje con "Listo!"';
+    ? `- Nombre del cliente: ${firstName} — empieza el mensaje con "¡Listo, ${firstName}!"`
+    : '- Empieza el mensaje con "¡Listo!"';
 
   const prompt =
-    `La cita quedo confirmada. Genera un mensaje de confirmacion corto y amigable con estos datos:\n` +
+    `La cita quedó confirmada. Genera un mensaje de confirmación corto y amigable con estos datos:\n` +
     `${nameNote}\n` +
     `- Servicio: ${serviceName}\n` +
     `- Barbero: ${staffName}\n` +
     `- Fecha: ${dateStr}\n` +
     `- Hora: ${timeStr}\n` +
     `- Negocio: ${businessName}\n` +
-    `- Direccion: ${address}\n\n` +
-    `Incluye un recordatorio de donde esta el negocio. Maximo 4 lineas. Sin markdown. Sin signos de interrogacion ni exclamaciones al inicio de oracion.`;
+    `- Dirección: ${address}\n\n` +
+    `Incluye un recordatorio de dónde está el negocio. Máximo 4 líneas. Sin markdown. Ortografía correcta: acentos y signos de apertura (¿ ¡).`;
 
   try {
     const client = new Anthropic({ apiKey });
@@ -455,5 +452,5 @@ function buildFallbackConfirmation(
   firstName:  string | null,
 ): string {
   const greeting = firstName ? `Listo, ${firstName}!` : 'Listo!';
-  return `${greeting} Tu cita de ${service} con ${staff} esta confirmada para el ${date} a las ${time}. Te esperamos!`;
+  return `${greeting} Tu cita de ${service} con ${staff} está confirmada para el ${date} a las ${time}. ¡Te esperamos!`;
 }

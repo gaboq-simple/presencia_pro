@@ -20,22 +20,25 @@ import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic } from '../sideQuestion';
 import { logBotError } from '../utils/logger';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
+import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS, SERVICE_QUESTION_RESET, buildSideAnswerFromService } from '../copy';
 
 // Exportado para el test de relación de caps (S5-BOT-12).
 export const MAX_RETRIES = 2;
 
+// Base compartida (copy.ts) + extras de ESTE contexto (confirmar una cita).
 const YES_KEYWORDS = [
-  'sí', 'si', 'yes', 'claro', 'ok', 'dale', 'listo', 'va', 'confirmo',
-  'confirmar', 'perfecto', 'de acuerdo', 'acepto', 'anótame', 'anotame',
+  ...AFFIRMATIVE_BASE_KEYWORDS,
+  'confirmo', 'confirmar', 'acepto', 'anótame', 'anotame',
   'agendar', 'agenda', 'quiero', 'adelante', 'por favor',
 ];
 
 const NO_KEYWORDS = [
-  'no', 'nope', 'cancelar', 'cancel', 'no quiero', 'no gracias',
-  'otro día', 'otro dia', 'cambiar', 'mejor no', 'negativo',
+  ...NEGATIVE_BASE_KEYWORDS,
+  'cancelar', 'cancel', 'no quiero', 'no gracias',
+  'otro día', 'otro dia', 'cambiar', 'mejor no',
 ];
 
-const FLOW_QUESTION = 'Confirmamos la cita? Solo dime "si" o "no".';
+const FLOW_QUESTION = '¿Confirmamos la cita? Solo dime "sí" o "no".';
 const CONFIRM_THRESHOLD = 0.85;
 
 /**
@@ -192,25 +195,7 @@ export async function handleAwaitingConfirmation(
 
 // ─── Helpers de side answer ───────────────────────────────────────────────────
 
-async function buildSideAnswerFromService(
-  serviceId: string,
-  deps:       StateHandlerDeps,
-): Promise<string | null> {
-  try {
-    const catalog = await getCatalog(deps.business.id, deps.supabase);
-    const service = catalog.find((s) => s.id === serviceId);
-    if (!service) return null;
-
-    const priceStr = service.price > 0
-      ? `$${service.price.toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${service.currency}`
-      : 'sin costo adicional';
-
-    return `El costo es ${priceStr} y la duracion es de ${service.duration_minutes} min.`;
-  } catch (err) {
-    logBotError({ context: 'awaitingConfirmation.buildSideAnswerFromService', error: err, businessId: deps.business.id });
-    return null;
-  }
-}
+// buildSideAnswerFromService vive en copy.ts (AUD-06 — antes copia local).
 
 // ─── Builders de resultado ────────────────────────────────────────────────────
 
@@ -257,6 +242,6 @@ function buildConfirmNoResult(context: LifestyleBotContext): StateHandlerResult 
   return {
     newState:     'QUALIFYING_SERVICE',
     newContext:   resetContext,
-    responseText: 'Sin problema. Que servicio te interesa?',
+    responseText: SERVICE_QUESTION_RESET,
   };
 }

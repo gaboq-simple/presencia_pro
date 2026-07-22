@@ -39,6 +39,7 @@ import {
   weekdayFromDateStr,
 } from './tzUtils';
 import { formatTimeHumanFromDate } from './utils';
+import { DAYS_ES, MONTHS_ES } from './copy';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -325,11 +326,7 @@ export async function notifyWaitlist(
 
 // ─── Helpers de formato para notifyWaitlist ───────────────────────────────────
 
-const WL_DAYS_ES   = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-const WL_MONTHS_ES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
+// DAYS_ES/MONTHS_ES viven en copy.ts (AUD-06 — antes 5ª copia local WL_*).
 
 function waitlistFormatDate(d: Date, tz: string): string {
   const localMin = utcToLocalMinutes(d, tz);
@@ -341,7 +338,7 @@ function waitlistFormatDate(d: Date, tz: string): string {
   const monthIdx  = parseInt(localDateStr.split('-')[1]!, 10) - 1;
   // suprime warning TS — localMin no se usa en date, es de formato de hora
   void localMin;
-  return `${WL_DAYS_ES[dayOfWeek]} ${dayNum} de ${WL_MONTHS_ES[monthIdx]}`;
+  return `${DAYS_ES[dayOfWeek]} ${dayNum} de ${MONTHS_ES[monthIdx]}`;
 }
 
 // ─── API pública ──────────────────────────────────────────────────────────────
