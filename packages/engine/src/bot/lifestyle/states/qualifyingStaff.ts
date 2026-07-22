@@ -13,6 +13,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
 import { getStaffForService } from '../catalog';
 import { logClassifierOutput, buildSingleClassifierMetadata } from '../classifierLog';
@@ -32,7 +33,6 @@ import { NO_PREFERENCE_KEYWORDS } from '../interpreter';
 import type { StaffRow, LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 import { ESCALATION_TO_TEAM_MESSAGE, SERVICE_QUESTION_RESET, DATE_QUESTION_MESSAGE, TECHNICAL_HICCUP_MESSAGE, dayLabelFromDateStr } from '../copy';
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 // Intentos totales de clarificación antes de escalar a FALLBACK.
 // Exportado para el test de relación de caps (S5-BOT-12).
@@ -413,7 +413,7 @@ async function generateRepeatQuestion(
     const client = new Anthropic({ apiKey: anthropicKey || undefined });
     const resp = await callClaude({
       client,
-      model:     HAIKU_MODEL,
+      model:     modelForTask('micro_copy'),
       maxTokens: 120,
       system,
       messages:  [{

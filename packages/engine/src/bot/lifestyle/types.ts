@@ -134,8 +134,8 @@ export type StateHandlerDeps = {
   readonly business: LifestyleBusinessConfig;
   readonly supabase: import('@supabase/supabase-js').SupabaseClient;
   readonly anthropicKey: string;
-  /** Model ID pre-seleccionado por modelRouter.selectModel() — los state handlers lo consumen sin decidirlo. */
-  readonly model: string;
+  // (punto 4 de AUD-01) `model` ya no viaja en deps: el modelo se decide por
+  // TAREA de generación en cada call site vía modelRouter.modelForTask().
   /** Clasificadores inyectables. Producción = impl real; tests = mock sin red. */
   readonly classifier: ClassifierFns;
   /**

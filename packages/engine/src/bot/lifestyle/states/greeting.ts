@@ -18,6 +18,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_SONNET_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext, LifestyleBotState } from '../../../types/lifestyle.types';
 import { buildSystemPrompt } from '../prompt';
 import { tenantDb } from '../../../tenantDb';
@@ -487,7 +488,9 @@ export async function handleGreeting(
     anthropicKey,
     systemPrompt,
     generativeMessages,
-    deps.model,
+    // Punto 4 de AUD-01: el turno de personalidad es la ÚNICA generativa que
+    // justifica Sonnet — antes GREETING era "Haiku state" y esto corría Haiku.
+    modelForTask('conversational_turn'),
     plan.deterministicFallback,
     business.id,
     msg.customerPhone,

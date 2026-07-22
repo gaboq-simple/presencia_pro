@@ -15,6 +15,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { callClaude, TIMEOUT_HAIKU_MS } from '../claudeClient';
+import { modelForTask } from '../modelRouter';
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
 import { getCatalog, getStaffForService } from '../catalog';
 import { SCHEDULING_ERROR_MESSAGE, SERVICE_QUESTION_RESET, DAYS_ES, MONTHS_ES } from '../copy';
@@ -37,7 +38,6 @@ import { formatTimeHumanFromDate, formatTimeHuman, detectsServiceCorrection, cle
 import { utcToLocalDateStr, utcToLocalMinutes, noonUTCDate, weekdayFromDateStr } from '../tzUtils';
 import type { LifestyleIncomingMessage, SlotCandidate, StaffRow, StateHandlerDeps, StateHandlerResult } from '../types';
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 // S5-BOT-09: system prompt ACOTADO para el presentador de slots.
 // La presentación de horarios es un componente de presentación, NO un turno
@@ -696,9 +696,10 @@ async function generateSlotsMessage(params: {
 
   try {
     const client = new Anthropic({ apiKey: anthropicKey || undefined });
+    const model  = modelForTask('slot_presentation');
     const resp   = await callClaude({
       client,
-      model:     HAIKU_MODEL,
+      model,
       maxTokens: 200,
       system,
       messages:  [{ role: 'user', content: userMessage }],
@@ -713,7 +714,7 @@ async function generateSlotsMessage(params: {
       customer_phone:   customerPhone,
       state_from:       'SHOWING_SLOTS',
       state_to:         'CONFIRMING_APPOINTMENT',
-      model_used:       HAIKU_MODEL,
+      model_used:       model,
       tokens_input:     resp.usage.input_tokens,
       tokens_cache_read: resp.usage.cache_read_input_tokens ?? 0,
       tokens_output:    resp.usage.output_tokens,

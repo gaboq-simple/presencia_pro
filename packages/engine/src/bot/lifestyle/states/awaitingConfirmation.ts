@@ -20,7 +20,7 @@ import { buildBusinessContext } from '../businessContext';
 import { answerSideQuestionDeterministic } from '../sideQuestion';
 import { logBotError } from '../utils/logger';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
-import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS, SERVICE_QUESTION_RESET, buildSideAnswerFromService } from '../copy';
+import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS, SERVICE_QUESTION_RESET, TECHNICAL_HICCUP_MESSAGE, buildSideAnswerFromService } from '../copy';
 
 // Exportado para el test de relación de caps (S5-BOT-12).
 export const MAX_RETRIES = 2;
@@ -126,6 +126,21 @@ export async function handleAwaitingConfirmation(
     state:         'AWAITING_CONFIRMATION',
     metadata:      buildSingleClassifierMetadata(classification, msg.body),
   });
+
+  // ── Fallo técnico del clasificador (AUD-07b): honesto y sin gastar retries ──
+  // Un timeout/API caída NO es que el cliente se explique mal. Antes este
+  // UNCLEAR caía al bloque "Ambiguo" de abajo: gastaba confirmationRetries
+  // (cap 2 → FALLBACK) y respondía 'Solo dime "si"…' — el mensaje equivocado
+  // durante un outage. Ahora: hiccup honesto, contadores intactos; el
+  // reintento del cliente re-corre el turno, y los fast paths de "sí"/"no"
+  // exactos (arriba) siguen vivos aunque el clasificador esté caído.
+  if (classification.failure_reason) {
+    return {
+      newState:     'AWAITING_CONFIRMATION',
+      newContext:   { ...context },
+      responseText: TECHNICAL_HICCUP_MESSAGE,
+    };
+  }
 
   // ── CONFIRM_YES via clasificador (prioridad sobre side question) ──────────
 
