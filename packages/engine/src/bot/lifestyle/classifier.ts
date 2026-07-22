@@ -123,7 +123,10 @@ export async function classifyIntent(params: {
     const response = await callClaude({
       client,
       model:      CLASSIFIER_MODEL,
-      maxTokens:  256,
+      // AUD-07d: 512 — con 256, un JSON con side_question_answer larga se
+      // truncaba a media string → parse-fail → UNCLEAR tras una pregunta clara.
+      maxTokens:  512,
+      temperature: 0,
       system:     systemPrompt,
       messages:   [
         ...historyMessages,
@@ -145,7 +148,8 @@ export async function classifyIntent(params: {
 
 // ─── System prompt del clasificador ──────────────────────────────────────────
 
-function buildClassifierSystemPrompt(
+// Exportado para tests (AUD-07d: forma del prompt blindada por asserts).
+export function buildClassifierSystemPrompt(
   availableOptions: string[],
   flowQuestion:     string,
   businessContext:  string,
@@ -191,7 +195,17 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin markdown, sin ex
   "confidence": <número entre 0.0 y 1.0>,
   "value": "<string o null>",
   "side_question_answer": "<string o null>"
-}`;
+}
+
+## Ejemplos
+Mensaje: "si"
+{"intent":"CONFIRM_YES","confidence":0.95,"value":null,"side_question_answer":null}
+
+Mensaje: "el viernes por la tarde"
+{"intent":"DATE_PREFERENCE","confidence":0.9,"value":"el viernes por la tarde","side_question_answer":null}
+
+Mensaje: "mmm dejame ver"
+{"intent":"UNCLEAR","confidence":0.3,"value":null,"side_question_answer":null}`;
 }
 
 // ─── Parser de respuesta ──────────────────────────────────────────────────────
@@ -287,7 +301,8 @@ export async function classifyMultiIntent(params: {
     const response = await callClaude({
       client,
       model:      CLASSIFIER_MODEL,
-      maxTokens:  300,
+      maxTokens:  512,
+      temperature: 0,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userMessage }],
       timeoutMs:  TIMEOUT_HAIKU_MS,
@@ -302,7 +317,8 @@ export async function classifyMultiIntent(params: {
   return parseMultiIntentResponse(rawResponse);
 }
 
-function buildMultiIntentSystemPrompt(services: string[], staff: string[]): string {
+// Exportado para tests (AUD-07d: forma del prompt blindada por asserts).
+export function buildMultiIntentSystemPrompt(services: string[], staff: string[]): string {
   const serviceList = services.length > 0 ? services.join(', ') : 'Sin servicios en catálogo';
   const staffList   = staff.length   > 0 ? staff.join(', ')    : 'Sin staff registrado';
 
@@ -333,17 +349,26 @@ Staff disponible: ${staffList}
 4. Si el mensaje tiene servicio + staff + fecha + hora, retorna los cuatro campos juntos.
 5. Para sideQuestion, categoriza el tema: price (precio/costo/cuánto cuesta), hours (horario/cuándo abren), location (dirección/dónde queda/cómo llegar), duration (cuánto dura/tiempo del servicio), other (cualquier otra pregunta sobre el negocio).
 
-Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin markdown:
-{
-  "serviceMatch": { "value": "<nombre normalizado del catálogo>", "confidence": 0.0 },
-  "staffMatch":   { "value": "<nombre normalizado del staff>",    "confidence": 0.0 },
-  "dateMatch":    { "value": "<expresión tal como la dijo>",      "confidence": 0.0 },
-  "timeMatch":    { "value": "<expresión tal como la dijo>", "shift": "morning|afternoon", "confidence": 0.0 },
-  "sideQuestion": { "question": "<pregunta exacta del cliente>", "topic": "price|hours|location|duration|other" },
-  "confirmYes":   true,
-  "confirmNo":    true,
-  "unclear":      true
-}`;
+Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin markdown.
+FORMA de cada campo (incluye SOLO los que encontraste — nunca copies este esquema completo):
+- serviceMatch / staffMatch: { "value": "<nombre normalizado>", "confidence": 0.0-1.0 }
+- dateMatch: { "value": "<expresión tal como la dijo>", "confidence": 0.0-1.0 }
+- timeMatch: { "value": "<expresión tal como la dijo>", "shift": "morning|afternoon", "confidence": 0.0-1.0 }
+- sideQuestion: { "question": "<pregunta exacta>", "topic": "price|hours|location|duration|other" }
+- confirmYes / confirmNo / unclear: true (solo cuando aplique — NUNCA por defecto)
+
+## Ejemplos (nombres ilustrativos — usa los del catálogo de arriba)
+Mensaje: "quiero un corte mañana a las 5 con carlos"
+{"serviceMatch":{"value":"Corte","confidence":0.9},"staffMatch":{"value":"Carlos","confidence":0.9},"dateMatch":{"value":"mañana","confidence":0.95},"timeMatch":{"value":"a las 5","confidence":0.9}}
+
+Mensaje: "si, a las 6"
+{"confirmYes":true,"timeMatch":{"value":"a las 6","confidence":0.9}}
+
+Mensaje: "cuanto cuesta el corte?"
+{"serviceMatch":{"value":"Corte","confidence":0.8},"sideQuestion":{"question":"cuanto cuesta el corte?","topic":"price"}}
+
+Mensaje: "hola buenas"
+{"unclear":true}`;
 }
 
 function parseMultiIntentResponse(raw: string): MultiIntentClassification {

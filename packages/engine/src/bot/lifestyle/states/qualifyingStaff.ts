@@ -278,11 +278,13 @@ export async function handleQualifyingStaff(
     [...staffNames, 'Cualquiera / no tengo preferencia'],
     FLOW_QUESTION,
   );
+  const prevBotMessage = [...(context.messages ?? [])].reverse().find((m) => m.role === 'assistant')?.content ?? null;
   const responseText = await generateRepeatQuestion(
     anthropicKey,
     buildSystemPrompt(business),
     'el barbero de preferencia del cliente',
     fallbackText,
+    prevBotMessage,
   );
 
   return {
@@ -388,6 +390,7 @@ async function generateRepeatQuestion(
   system: string,
   stateContext: string,
   fallback: string,
+  previousBotMessage: string | null,
 ): Promise<string> {
   try {
     const client = new Anthropic({ apiKey: anthropicKey || undefined });
@@ -398,7 +401,11 @@ async function generateRepeatQuestion(
       system:    [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       messages:  [{
         role:    'user',
-        content: `El usuario no entendió la pregunta anterior sobre ${stateContext}. Reformula la pregunta de forma diferente y más clara. No uses el mismo texto. Máximo 2 líneas.`,
+        // AUD-07d: sin el texto anterior, "no uses el mismo texto" era
+        // inverificable para el modelo — podía regenerar casi lo mismo.
+        content: previousBotMessage
+          ? `El usuario no entendió tu pregunta anterior sobre ${stateContext}. Tu mensaje anterior fue: "${previousBotMessage}". Reformúlala con OTRAS palabras, más clara. Máximo 2 líneas.`
+          : `El usuario no entendió la pregunta anterior sobre ${stateContext}. Reformula la pregunta de forma diferente y más clara. No uses el mismo texto. Máximo 2 líneas.`,
       }],
       timeoutMs: TIMEOUT_HAIKU_MS,
       context:   { businessId: '', customerPhone: '', state: 'QUALIFYING_STAFF' },
