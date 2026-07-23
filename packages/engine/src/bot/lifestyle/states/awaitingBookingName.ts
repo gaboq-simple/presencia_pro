@@ -20,9 +20,10 @@
 // handleConfirmed que genera el mensaje final con el nombre.
 
 import type { LifestyleBotContext } from '../../../types/lifestyle.types';
-import { getCatalog } from '../catalog';
+import { getCatalog, getStaffForService } from '../catalog';
 import { logBotError } from '../utils/logger';
-import { handleConfirmingAppointment, detectsSummaryCorrection } from './confirmingAppointment';
+import { handleConfirmingAppointment, detectsSummaryCorrection, detectBarberSelection } from './confirmingAppointment';
+import { normalize } from '../interpreter';
 import type { LifestyleIncomingMessage, StateHandlerDeps, StateHandlerResult } from '../types';
 import { AFFIRMATIVE_BASE_KEYWORDS, NEGATIVE_BASE_KEYWORDS, buildSideAnswerFromService } from '../copy';
 
@@ -306,15 +307,61 @@ async function handleSummaryCorrection(
   }
 
   if (kind === 'barber') {
-    // Copy honesto (S5-BOT-08b): la opción (c) NO conmuta de barbero (eso es A2),
-    // así que no prometemos un reagendamiento. Ofrecemos las dos salidas reales —
-    // confirmar con el barbero actual o reiniciar para elegir otro — con el nombre
-    // del barbero vigente interpolado desde pendingSlots.
+    // A2 (S5-BOT-05): conmutación REAL — el residual de 08b. Resolver a QUIÉN
+    // pide el cliente contra el ROSTER completo (no solo los ofrecidos) y
+    // re-consultar la disponibilidad de ESE barbero preservando día/servicio.
+    const currentStaffId = context.pendingSlots?.[0]?.staffId ?? context.staffId ?? null;
+    const roster = context.serviceId
+      ? await getStaffForService(deps.business.id, context.serviceId, deps.supabase)
+      : [];
+
+    // "con Carlos" → detector (Regla 1, roster completo). "con el otro" → si el
+    // roster tiene exactamente 2, el otro es inequívoco.
+    let named = detectBarberSelection(msg.body, roster, context.pendingSlots ?? [], 'staff');
+    if (!named && /\b(el\s+otro|otro\s+barber[oa])\b/.test(normalize(msg.body)) && roster.length === 2 && currentStaffId) {
+      const other = roster.find((r) => r.id !== currentStaffId);
+      if (other) named = { staffId: other.id, staffName: other.name };
+    }
+
+    if (named && named.staffId !== currentStaffId) {
+      // Conmutar: volver a SHOWING_SLOTS acotado al barbero pedido, limpiando
+      // el cierre (selectedSlot/pendingBookingName) y conservando día/servicio.
+      // requestedTime se conserva — sesga la presentación hacia la hora que el
+      // cliente ya había elegido. NO se tocan rejection_attempts.
+      return {
+        newState:   'SHOWING_SLOTS',
+        newContext: {
+          ...context,
+          staffId:                named.staffId,
+          requestedStaffId:       named.staffId,
+          autoAssign:             false,
+          presentBy:              'staff',
+          selectedSlot:           undefined,
+          pendingBookingName:     null,
+          pendingSlots:           undefined,
+          nearestOfferSlot:       null,
+          pendingDigitDisambig:   null,
+          clarification_attempts: 0,
+        },
+        responseText: '',
+      };
+    }
+
+    if (named && named.staffId === currentStaffId) {
+      return {
+        newState:     'AWAITING_BOOKING_NAME',
+        newContext:   { ...context, clarification_attempts: 0 },
+        responseText: `Tu cita ya es con ${named.staffName}. ¿A nombre de quién la dejo?`,
+      };
+    }
+
+    // No se pudo resolver a quién ("con el otro" con 3+ barberos, un nombre que
+    // no existe) → copy honesto con las salidas reales (comportamiento 08b).
     const barberoActual = context.pendingSlots?.[0]?.staffName ?? 'el barbero asignado';
     return {
       newState:     'AWAITING_BOOKING_NAME',
       newContext:   { ...context, clarification_attempts: 0 },
-      responseText: `Por ahora no puedo cambiar de barbero en este paso. ¿Confirmo tu cita con ${barberoActual}, o prefieres empezar de nuevo para elegir a otro?`,
+      responseText: `No ubiqué a qué barbero te refieres. ¿Confirmo tu cita con ${barberoActual}, o me dices el nombre del barbero que prefieres?`,
     };
   }
 
