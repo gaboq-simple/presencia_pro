@@ -162,6 +162,31 @@
 }
 .bar-block-live { box-shadow: 0 0 0 3px var(--color-tint-1), 0 4px 12px rgba(1, 130, 113, 0.22); }
 
+/* ── Home / entrada (rediseño premium) ────────────────────────────────────────
+ * Las tarjetas de acceso se elevan con un halo teal al hover — mismo lenguaje de
+ * marca que .card-glow-pos, aquí a tamaño tarjeta. CSS plano porque Tailwind v4 no
+ * genera bien box-shadow con rgba(comas). El anillo tint-1 + la sombra difusa teal
+ * son el acento. Al hover el tile del icono sube de tint-1 a tint-2. La media query
+ * global de reduced-motion (abajo) neutraliza la transición. */
+.entry-card { transition: transform .18s cubic-bezier(0.2, 0.8, 0.25, 1), box-shadow .18s, border-color .18s; }
+.entry-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-teal-border);
+  box-shadow: 0 0 0 4px var(--color-tint-1), 0 14px 30px -12px rgba(1, 130, 113, 0.22);
+}
+.entry-ico { transition: background-color .18s, color .18s; }
+.entry-card:hover .entry-ico { background-color: var(--color-tint-2); }
+
+/* Entrada escalonada del Home (rise + fade). `both` sostiene el estado inicial
+ * durante el animation-delay → sin flash. reduced-motion (abajo) la colapsa. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@theme {
+  --animate-rise-in: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
 /*
  * Accesibilidad — prefers-reduced-motion (S6-UI-02 PR-6, corrección de spec).
  * Neutraliza globalmente animaciones/transiciones para quien lo pide. Más robusto
