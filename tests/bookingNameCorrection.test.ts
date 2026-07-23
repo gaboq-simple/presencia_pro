@@ -237,16 +237,16 @@ test('S5-BOT-08b: cliente "Concepción" → se guarda como nombre (NO confundido
 
 // ─── Cableado: correcciones ───────────────────────────────────────────────────
 
-test('"con Carlos" → NO se guarda como nombre; copy honesto sin prometer reagendar, con barbero actual interpolado', async () => {
+test('"con Carlos" (el MISMO barbero de la cita) → NO se guarda como nombre; reconoce y retoma el nombre (A2)', async () => {
   const r = await handle('con Carlos', ctxPrefilled(), makeDeps());
   assert.equal(r.newState, 'AWAITING_BOOKING_NAME');
   assert.equal(r.newContext.bookingName, undefined);          // nunca corrupto
-  // copy honesto (S5-BOT-08b): NO promete reagendar; ofrece confirmar con el
-  // barbero actual (pendingSlots[0].staffName = "Carlos") o empezar de nuevo.
-  assert.match(r.responseText, /no puedo cambiar de barbero/i);
-  assert.match(r.responseText, /con Carlos/);                 // barbero actual interpolado
-  assert.match(r.responseText, /empezar de nuevo/i);
-  assert.doesNotMatch(r.responseText, /reagenda/i);           // ya no promete reagendamiento
+  // A2 (S5-BOT-05): el copy "no puedo cambiar de barbero" murió — la
+  // conmutación ahora es real. Si el barbero pedido es el MISMO de la cita,
+  // se reconoce ("tu cita ya es con Carlos") y se retoma la captura del nombre.
+  assert.match(r.responseText, /Tu cita ya es con Carlos/);
+  assert.match(r.responseText, /nombre/i);
+  assert.doesNotMatch(r.responseText, /reagenda/i);           // sigue sin prometer de más
 });
 
 test('"a las 2pm" → corrige la hora preservando barbero + día, delega en el mismo turno', async () => {

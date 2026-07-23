@@ -28,7 +28,7 @@
 import type { LifestyleBotContext, LifestylePendingSlot } from '../../../types/lifestyle.types';
 import { tenantDb } from '../../../tenantDb';
 import { getCatalog, getStaffForService } from '../catalog';
-import { SCHEDULING_ERROR_MESSAGE, SERVICE_QUESTION_RESET, DAYS_ES, MONTHS_ES } from '../copy';
+import { SCHEDULING_ERROR_MESSAGE, SERVICE_QUESTION_RESET, DAYS_ES, MONTHS_ES, AFFIRMATIVE_BASE_KEYWORDS } from '../copy';
 import {
   formatTimeHumanFromDate,
   formatTimeHuman,
@@ -169,11 +169,23 @@ export async function handleConfirmingAppointment(
     context = cleared;
   }
 
+  // ── Barbero nombrado en el mensaje (S5-BOT-10 / A2) ───────────────────────
+  // Se detecta ANTES de las ramas de aceptación: "sí, pero con Carlos" es una
+  // afirmación CONDICIONADA a un barbero — sin este orden, el "sí" aceptaba el
+  // slot ofrecido de OTRO barbero (Andrés) ignorando el "con Carlos".
+  const roster = context.serviceId
+    ? await getStaffForService(business.id, context.serviceId, supabase)
+    : [];
+  const barberSel = detectBarberSelection(msg.body, roster, pendingSlots, context.presentBy);
+
   // ── Aceptación del slot cercano ofrecido en el turno anterior (decisión b) ─
 
   if (context.nearestOfferSlot && isYes) {
     const offered = pendingSlots.find((s) => s.startsAt === context.nearestOfferSlot);
-    if (offered) {
+    // A2: si el "sí" viene condicionado a OTRO barbero ("sí con Carlos" cuando
+    // lo ofrecido es de Andrés), NO es aceptación de lo ofrecido → cae al flujo
+    // de barbero de abajo, que confirma/ofrece el slot del barbero pedido.
+    if (offered && (!barberSel || barberSel.staffId === offered.staffId)) {
       // El cliente ACEPTA explícitamente el slot ofrecido. Alinear
       // requestedStaffId al barbero aceptado para que el cierre defensivo no
       // vuelva a dispararse (evita loop cuando se ofreció a otro barbero).
@@ -187,7 +199,11 @@ export async function handleConfirmingAppointment(
   // sola opción caía al clarify genérico. Si hay exactamente un slot pendiente,
   // una afirmación lo acepta. Con múltiples slots NO se auto-selecciona: se
   // re-presenta concreto más abajo (post-router) para que el cliente elija.
-  if (!context.nearestOfferSlot && pendingSlots.length === 1 && isYes) {
+  // A2: mismo guard que la aceptación — "sí con <otro barbero>" no acepta este.
+  if (
+    !context.nearestOfferSlot && pendingSlots.length === 1 && isYes &&
+    (!barberSel || barberSel.staffId === pendingSlots[0]!.staffId)
+  ) {
     return buildConfirmationResult(context, pendingSlots[0]!, business, supabase, msg.customerName);
   }
 
@@ -228,18 +244,45 @@ export async function handleConfirmingAppointment(
 
   const route = routeSlotSelection(msg.body, pendingSlots, msg.timestamp, business.timezone, interp);
 
-  // ── Selección de barbero en prosa (S5-BOT-10, BUG 1) ──────────────────────
+  // ── Selección de barbero en prosa (S5-BOT-10, BUG 1 · A2 follow-up) ────────
   // "Con Carlos" / "Carlos porfa" no tienen rama en routeSlotSelection → caen a
   // clarify y el barbero se pierde. Anotar requestedStaffId para que el cierre
-  // defensivo valide; si el mensaje NO trae hora/índice (route 'none'),
-  // re-presentar los slots de ESE barbero (presentBy='staff').
-  const roster = context.serviceId
-    ? await getStaffForService(business.id, context.serviceId, supabase)
-    : [];
-  const barberSel = detectBarberSelection(msg.body, roster, pendingSlots, context.presentBy);
+  // defensivo valide. Si el mensaje NO trae hora/índice (route 'none'):
+  //   A2-a) "sí con Carlos" (afirmación + barbero con slot en la mesa) →
+  //         confirmar DIRECTO ese slot (criterio: "sí con Andrés" confirma a Andrés).
+  //   A2-b) "mejor Carlos" tras una presentación por barbero (presentBy='staff',
+  //         la híbrida incluida) y su slot ya está en la mesa → ofrecerlo directo
+  //         sin re-consultar ("Va — Carlos te atendería a las 10. ¿Te la agendo?").
+  //   c)    sin slot suyo a la mano → re-presentar SUS horarios (S5-BOT-10).
   if (barberSel) {
     context = { ...context, requestedStaffId: barberSel.staffId };
     if (route.action === 'none') {
+      const namedSlot = pendingSlots.find((s) => s.staffId === barberSel.staffId);
+
+      // "sí con Andrés": isAffirmation NO lo lee como sí (el "si" corto exige
+      // mensaje completo — frontera S5-BOT-03, que no se toca). Aquí el barbero
+      // ya está resuelto: basta que el mensaje ABRA con un afirmativo para que
+      // sea la confirmación del cambio (criterio A2). "no, mejor Andrés" no
+      // abre con afirmativo → cae a la oferta directa de abajo.
+      const yesWithBarber = isYes || startsWithAffirmative(msg.body);
+      if (yesWithBarber && namedSlot) {
+        return buildConfirmationResult(context, namedSlot, business, supabase, msg.customerName);
+      }
+
+      if (namedSlot && context.presentBy === 'staff') {
+        const tz = business.timezone;
+        return {
+          newState:   'CONFIRMING_APPOINTMENT',
+          newContext: {
+            ...context,
+            nearestOfferSlot:       namedSlot.startsAt,
+            pendingDigitDisambig:   null,
+            clarification_attempts: 0,
+          },
+          responseText: `Va — ${namedSlot.staffName} te atendería a las ${formatTimeHumanFromDate(new Date(namedSlot.startsAt), tz)}. ¿Te la agendo?`,
+        };
+      }
+
       return {
         newState:   'SHOWING_SLOTS',
         newContext: {
@@ -267,21 +310,12 @@ export async function handleConfirmingAppointment(
     case 'select':
       return buildConfirmationResult(context, route.slot, business, supabase, msg.customerName);
 
-    case 'ask_who': {
-      // S5-BOT-04 (A1): el cliente pregunta CON QUIÉN. Re-presentar los slots
-      // pendientes mencionando el barbero de cada uno, sin auto-confirmar. La
-      // respuesta híbrida fina ("te atendería Andrés; si prefieres, Carlos…")
-      // y su follow-up son A2 — aquí solo dejamos de ocultar el nombre.
-      const tz       = business.timezone;
-      const byBarber = pendingSlots
-        .map((s) => `${s.staffName} a las ${formatTimeHumanFromDate(new Date(s.startsAt), tz)}`)
-        .join(', ');
-      return {
-        newState:   'CONFIRMING_APPOINTMENT',
-        newContext: { ...context, clarification_attempts: 0, nearestOfferSlot: null },
-        responseText: `Tengo ${byBarber}. ¿Con quién prefieres?`,
-      };
-    }
+    case 'ask_who':
+      // A2 (S5-BOT-05): respuesta híbrida — responder QUIÉN (sobre la hora
+      // preguntada o el barbero nombrado si los hay) + ofrecer el otro eje sin
+      // forzar, dejando el slot en oferta (nearestOfferSlot) para que el "sí"
+      // del follow-up lo acepte por la rama existente de S5-BOT-03.
+      return buildWhoAnswer(route, context, pendingSlots, attempts, business, supabase);
 
     case 'ask_hour': {
       // S5-BOT-07: el dígito es índice válido pero su lectura-hora cae cerca (no
@@ -408,6 +442,150 @@ export async function handleConfirmingAppointment(
   };
 }
 
+// A2: ¿el mensaje ABRE con un afirmativo? ("sí con Andrés", "va, con Carlos").
+// Solo se consulta en la rama de barbero-resuelto — NO reemplaza a isAffirmation
+// (cuyo "si" corto exige mensaje completo a propósito, S5-BOT-03). Lee la lista
+// base compartida de copy.ts; no define keywords propios.
+function startsWithAffirmative(body: string): boolean {
+  const first = cleanMessage(body).split(/\s+/)[0] ?? '';
+  return first.length > 0 && AFFIRMATIVE_BASE_KEYWORDS.includes(first);
+}
+
+// ─── Respuesta híbrida a "¿con quién?" (A2 · S5-BOT-05) ──────────────────────
+// El cliente PREGUNTA (no elige): responder el dato con el barbero visible y
+// ofrecer el otro eje sin forzar. Cuatro variantes según lo que traiga la
+// pregunta (barbero nombrado y/o hora). El slot respondido queda en oferta
+// (nearestOfferSlot) para que "sí" lo acepte; presentBy='staff' habilita el
+// follow-up por nombre pelado ("mejor Carlos") vía la Regla 2 del detector.
+// Responder una pregunta es progreso → clarification_attempts:0; los contadores
+// de rechazo NO se tocan (frontera S5-BOT-03).
+async function buildWhoAnswer(
+  route:        Extract<SelectionRoute, { action: 'ask_who' }>,
+  context:      LifestyleBotContext,
+  pendingSlots: LifestylePendingSlot[],
+  attempts:     number,
+  business:     StateHandlerDeps['business'],
+  supabase:     StateHandlerDeps['supabase'],
+): Promise<StateHandlerResult> {
+  const tz = business.timezone;
+  const hhmm = (s: LifestylePendingSlot) => formatTimeHumanFromDate(new Date(s.startsAt), tz);
+  const offerCtx = (slot: LifestylePendingSlot, extra?: Partial<LifestyleBotContext>): LifestyleBotContext => ({
+    ...context,
+    ...extra,
+    presentBy:              'staff' as const,
+    nearestOfferSlot:       slot.startsAt,
+    pendingDigitDisambig:   null,
+    clarification_attempts: 0,
+  });
+
+  // (1) Barbero nombrado + hora ("¿Carlos a la 1?") — modo barbero-primero, sin
+  //     mezclar otros barberos (hallazgo smoke A1).
+  if (route.named && route.requestedMinutes !== undefined) {
+    const ownSlots = pendingSlots.filter((s) => s.staffId === route.named!.staffId);
+    const hit = ownSlots.find(
+      (s) => Math.abs(utcToLocalMinutes(new Date(s.startsAt), tz) - route.requestedMinutes!) <= EXACT_TOL,
+    );
+    if (hit) {
+      return {
+        newState:     'CONFIRMING_APPOINTMENT',
+        newContext:   offerCtx(hit, { requestedStaffId: hit.staffId }),
+        responseText: `Sí, ${hit.staffName} tiene la ${hhmm(hit)}. ¿Te la agendo?`,
+      };
+    }
+    // Su hora no está en la mesa → re-consulta REAL acotada a ESE barbero
+    // (handleOfferNearest honra requestedStaffId y redacta la respuesta directa
+    // "A las X no tengo con Carlos; lo más cercano es Y").
+    return handleOfferNearest(
+      route.requestedMinutes,
+      ownSlots[0] ?? pendingSlots[0]!,
+      { ...context, requestedStaffId: route.named.staffId, presentBy: 'staff' },
+      attempts, business, supabase,
+    );
+  }
+
+  // (2) Barbero nombrado sin hora ("¿tiene algo Carlos?").
+  if (route.named) {
+    const namedSlot = pendingSlots.find((s) => s.staffId === route.named!.staffId);
+    if (namedSlot) {
+      return {
+        newState:     'CONFIRMING_APPOINTMENT',
+        newContext:   offerCtx(namedSlot, { requestedStaffId: namedSlot.staffId }),
+        responseText: `${namedSlot.staffName} te atendería a las ${hhmm(namedSlot)}. ¿Te la agendo?`,
+      };
+    }
+    return {
+      newState:   'SHOWING_SLOTS',
+      newContext: {
+        ...context,
+        staffId:                route.named.staffId,
+        requestedStaffId:       route.named.staffId,
+        autoAssign:             false,
+        presentBy:              'staff',
+        pendingSlots:           undefined,
+        nearestOfferSlot:       null,
+        clarification_attempts: 0,
+      },
+      responseText: '',
+    };
+  }
+
+  // (3) Hora sin barbero ("¿a las 12 con quién?") — quién atiende ESA hora +
+  //     el otro barbero como alternativa suave.
+  if (route.requestedMinutes !== undefined) {
+    const hit = pendingSlots.find(
+      (s) => Math.abs(utcToLocalMinutes(new Date(s.startsAt), tz) - route.requestedMinutes!) <= EXACT_TOL,
+    );
+    if (hit) {
+      const other = pendingSlots.find((s) => s.staffId !== hit.staffId);
+      const otherPart = other
+        ? ` Si prefieres otro, también está ${other.staffName} a las ${hhmm(other)}.`
+        : '';
+      return {
+        newState:     'CONFIRMING_APPOINTMENT',
+        newContext:   offerCtx(hit),
+        responseText: `A las ${hhmm(hit)} te atendería ${hit.staffName}.${otherPart} ¿Te la agendo con ${hit.staffName}?`,
+      };
+    }
+    // La hora preguntada no está ofrecida → re-consulta real (mostrando el
+    // barbero: es una pregunta de QUIÉN, ocultarlo sería no responder).
+    return handleOfferNearest(
+      route.requestedMinutes, pendingSlots[0]!, context, attempts, business, supabase,
+      /* showStaff */ true,
+    );
+  }
+
+  // (4) "¿Con quién?" pelado — la híbrida del diseño A2.
+  if (pendingSlots.length === 1) {
+    const only = pendingSlots[0]!;
+    return {
+      newState:     'CONFIRMING_APPOINTMENT',
+      newContext:   offerCtx(only),
+      responseText: `Te atendería ${only.staffName} a las ${hhmm(only)}. ¿Te la agendo?`,
+    };
+  }
+  const first = pendingSlots[0]!;
+  const other = pendingSlots.find((s) => s.staffId !== first.staffId);
+  if (other) {
+    return {
+      newState:   'CONFIRMING_APPOINTMENT',
+      newContext: offerCtx(first),
+      responseText:
+        `A las ${hhmm(first)} te atendería ${first.staffName}. ` +
+        `Si prefieres otro, también está ${other.staffName} a las ${hhmm(other)}. ` +
+        `¿Te agendo con ${first.staffName} o prefieres cambiar?`,
+    };
+  }
+  // Todos los slots son del mismo barbero → decir quién y dejar elegir la hora
+  // (sin oferta pendiente: la hora la consume el matcher del siguiente turno).
+  const times = pendingSlots.map(hhmm);
+  return {
+    newState:   'CONFIRMING_APPOINTMENT',
+    newContext: { ...context, presentBy: 'staff', nearestOfferSlot: null, clarification_attempts: 0 },
+    responseText:
+      `Te atendería ${first.staffName} — tengo a las ${times.slice(0, -1).join(', a las ')} o a las ${times[times.length - 1]}. ¿Cuál te late?`,
+  };
+}
+
 // ─── Oferta del slot más cercano (decisión b / requery S5-BOT-02) ────────────
 // Re-consulta la disponibilidad REAL del día (mismo día de los slots mostrados,
 // NO salto de fecha) ordenada por cercanía a la hora pedida y ofrece el más
@@ -420,6 +598,9 @@ async function handleOfferNearest(
   attempts:         number,
   business:         StateHandlerDeps['business'],
   supabase:         StateHandlerDeps['supabase'],
+  // A2: forzar la mención del barbero aunque sea auto-assign — cuando la oferta
+  // responde una pregunta de QUIÉN, ocultar el nombre sería no responder.
+  showStaff = false,
 ): Promise<StateHandlerResult> {
   const tz       = business.timezone;
   const hh       = String(Math.floor(requestedMinutes / 60)).padStart(2, '0');
@@ -488,7 +669,7 @@ async function handleOfferNearest(
     const offeredTime  = formatTimeHumanFromDate(new Date(offered.startsAt), tz);
     // Mostrar el barbero si el cliente lo pidió (requestedStaffId) o si NO es
     // auto-assign; ocultarlo solo en auto-assign sin barbero pedido.
-    const staffPart    = (context.requestedStaffId || !context.autoAssign) ? ` con ${offered.staffName}` : '';
+    const staffPart    = (showStaff || context.requestedStaffId || !context.autoAssign) ? ` con ${offered.staffName}` : '';
 
     // CRÍTICO (anti Bug-B): aunque la hora pedida exista exacta, NO
     // auto-confirmar. Presentar y esperar el "sí" explícito del cliente.
@@ -517,7 +698,7 @@ async function handleOfferNearest(
   // cercano" — era FALSO: un slot truncado de la mañana que ya no aplicaba (de ahí salía el
   // "lo más cercano 10am" del smoke). Decimos la verdad y pivotamos a otro día, limpiando los
   // slots viejos (conservando barbero/servicio para reintentar la búsqueda ese nuevo día).
-  const staffPart = (context.requestedStaffId || !context.autoAssign) ? ` con ${fallbackSlot.staffName}` : '';
+  const staffPart = (showStaff || context.requestedStaffId || !context.autoAssign) ? ` con ${fallbackSlot.staffName}` : '';
   return {
     newState:   'QUALIFYING_DATETIME',
     newContext: {
@@ -610,7 +791,10 @@ export type SelectionRoute =
   | { action: 'select';        slot: LifestylePendingSlot }
   | { action: 'offer_nearest'; requestedMinutes: number; slot: LifestylePendingSlot }
   | { action: 'date_redirect' }
-  | { action: 'ask_who' }
+  // A2 (S5-BOT-05): ask_who enriquecido — la hora preguntada (si la pregunta la
+  // trae: "¿a las 12 con quién?") y el barbero nombrado (si nombra a uno de los
+  // OFRECIDOS: "¿Carlos a la 1?"). Ambos opcionales; el handler arma la híbrida.
+  | { action: 'ask_who';       requestedMinutes?: number; named?: { staffId: string; staffName: string } }
   | { action: 'ask_hour';      requestedMinutes: number; indexChoice: number }
   | { action: 'index';         choice: number }
   | { action: 'none' };
@@ -621,10 +805,27 @@ export type SelectionRoute =
 function hasStaffToken(normalizedBody: string, slots: LifestylePendingSlot[]): boolean {
   if (/\bquien(?:es)?\b|\bque\s+barber[oa]s?\b|\bbarber[oa]s?\b/.test(normalizedBody)) return true;
   // Nombre concreto de alguno de los barberos ofrecidos.
-  return slots.some((s) => {
-    const name = normalize(s.staffName);
-    return name.length > 2 && new RegExp(`\\b${name}\\b`).test(normalizedBody);
-  });
+  return findNamedSlotStaff(normalizedBody, slots) !== null;
+}
+
+// A2: ¿la pregunta nombra a un barbero de los OFRECIDOS? (nombre completo o
+// primer nombre, como palabra). Solo contra los slots — el roster completo lo
+// maneja detectBarberSelection en el handler (frontera del router puro).
+function findNamedSlotStaff(
+  normalizedBody: string,
+  slots: LifestylePendingSlot[],
+): { staffId: string; staffName: string } | null {
+  for (const s of slots) {
+    const name  = normalize(s.staffName);
+    const first = normalize(s.staffName.split(' ')[0] ?? '');
+    if (
+      (name.length > 2 && new RegExp(`\\b${name}\\b`).test(normalizedBody)) ||
+      (first.length > 2 && new RegExp(`\\b${first}\\b`).test(normalizedBody))
+    ) {
+      return { staffId: s.staffId, staffName: s.staffName };
+    }
+  }
+  return null;
 }
 
 export function routeSlotSelection(
@@ -660,23 +861,37 @@ export function routeSlotSelection(
     return { action: 'no_preference' };
   }
 
+  // Hora del mensaje (intérprete R4.1 o parser local — estrangulamiento). Se
+  // computa ANTES del guard 2.5 para que ask_who pueda llevar la hora preguntada
+  // (A2); es lectura pura sin efectos — mismo valor que consumía el paso 3.
+  const raw = interpretation ? toRawTime(interpretation.time) : extractRawTime(lower);
+
   // 2.5 Guard de interrogación por barbero (S5-BOT-04): ¿/? + token de barbero
   //     ("¿a las 12 con quién?", "¿qué barbero?") → ask_who, NO selección. Exige
   //     el token de barbero: "¿a las 6?" (duda sin barbero) NO dispara (cae al
   //     matcher). Va ANTES de matchNaturalSlot para ganarle la "?"-selección.
   //     Frontera: NO toca matchNaturalSlot/extractRawTime; solo antepone el guard.
+  //     A2: se enriquece con la hora preguntada (resuelta con la MISMA política
+  //     AM/PM que el matcher) y el barbero nombrado, para la respuesta híbrida.
   if (/[¿?]/.test(body) && hasStaffToken(normalize(body), slots)) {
-    return { action: 'ask_who' };
+    let requestedMinutes: number | undefined;
+    if (raw && slots.length > 0) {
+      const slotMins = [...slots]
+        .sort((a, b) => (a.startsAt < b.startsAt ? -1 : 1))
+        .map((s) => utcToLocalMinutes(new Date(s.startsAt), tz));
+      requestedMinutes = resolveTargetMinutes(raw, slotMins);
+    }
+    const named = findNamedSlotStaff(normalize(body), slots);
+    return {
+      action: 'ask_who',
+      ...(requestedMinutes !== undefined ? { requestedMinutes } : {}),
+      ...(named ? { named } : {}),
+    };
   }
 
-  // 3. Selección natural: hora / ordinal / difusa. La hora de reloj viene del
-  //    intérprete (R4.1: interpretation.time) cuando el caller lo pasa; si no
-  //    (call-sites que llaman sin interpretation, p. ej. tests directos), cae al
-  //    parser local extractRawTime (estrangulamiento — mismo valor, solo difiere
-  //    el .trim() que no afecta los regex anclados). resolveTargetMinutes (AM/PM
+  // 3. Selección natural: hora / ordinal / difusa. resolveTargetMinutes (AM/PM
   //    contra slots reales) sigue siendo política de estado y se queda en
   //    matchNaturalSlot. Ordinal/difusa NO son hora → siguen leyendo de `lower`.
-  const raw = interpretation ? toRawTime(interpretation.time) : extractRawTime(lower);
   const match = matchNaturalSlot(lower, slots, tz, raw);
   if (match.kind === 'exact')   return { action: 'select', slot: match.slot };
   if (match.kind === 'nearest') return { action: 'offer_nearest', requestedMinutes: match.requestedMinutes, slot: match.slot };
