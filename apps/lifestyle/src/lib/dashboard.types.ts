@@ -124,6 +124,59 @@ export type DashboardAppointment = {
   completed_at?: string | null;        // instante REAL del cierre (Paso 6, "el día se corrió"); solo lo trae la query del barbero
 };
 
+// ─── Select canónico de una cita con joins ───────────────────────────────────
+// FUENTE ÚNICA de la forma `DashboardAppointment`. Todo consumidor que hidrate
+// una cita con esta forma importa una de las dos constantes de abajo — si el
+// select se copia, los DTOs se desincronizan en la primera migración.
+//
+// Las dos variantes difieren en UNA columna (`completed_at`), por eso comparten
+// base en vez de vivir como copias. Mantener el orden: los escalares primero y
+// los embeds al final, porque `RawAppointmentRow` se lee contra este orden.
+//
+// El whitespace es irrelevante: supabase-js borra todo espacio no entrecomillado
+// del select antes de ponerlo en la query string, así que lo que viaja al cable
+// depende SOLO del conjunto y el orden de esta lista.
+
+const APPOINTMENT_SELECT_SCALARS = [
+  'id',
+  'starts_at',
+  'ends_at',
+  'status',
+  'source',
+  'notes',
+  'modified_at',
+  'allow_overlap',
+  'adjusted_starts_at',
+  'late_arrival_acknowledged',
+  'price_charged',
+  'arrived_at',
+] as const;
+
+const APPOINTMENT_SELECT_EMBEDS = [
+  'staff:staff_id(id, name)',
+  'service:service_id(id, name, duration_minutes, price, currency)',
+  'customer:customer_id(id, name, phone)',
+  'created_by:created_by_staff_id(id, name)',
+  'modified_by:modified_by_staff_id(id, name)',
+] as const;
+
+/** Cita del día del NEGOCIO (todas las citas). Sin `completed_at`. */
+export const DAY_APPOINTMENT_SELECT = [
+  ...APPOINTMENT_SELECT_SCALARS,
+  ...APPOINTMENT_SELECT_EMBEDS,
+].join(', ');
+
+/**
+ * Cita del día de UN BARBERO. Idéntica a `DAY_APPOINTMENT_SELECT` más
+ * `completed_at` — el instante real del cierre que alimenta "el día se corrió"
+ * (Paso 6). Es la única query que lo trae.
+ */
+export const STAFF_DAY_APPOINTMENT_SELECT = [
+  ...APPOINTMENT_SELECT_SCALARS,
+  'completed_at',
+  ...APPOINTMENT_SELECT_EMBEDS,
+].join(', ');
+
 // ─── Staff con disponibilidad ─────────────────────────────────────────────────
 
 export type StaffAvailabilitySlot = {
@@ -236,6 +289,9 @@ export type TopClientEntry = {
 // Representa lo que Supabase JS retorna para el select anidado.
 // El FK staff_id y service_id son NOT NULL → objeto (no array).
 // customer_id, created_by_staff_id, modified_by_staff_id son nullable → objeto | null.
+//
+// Debe reflejar EXACTAMENTE lo que traen DAY_APPOINTMENT_SELECT /
+// STAFF_DAY_APPOINTMENT_SELECT — es el contrato que valida el cast de la fila.
 
 type RawAppointmentRow = {
   id: string;
@@ -250,9 +306,11 @@ type RawAppointmentRow = {
   created_by: StaffRef | null;
   modified_by: StaffRef | null;
   modified_at: string | null;
+  allow_overlap: boolean;
   adjusted_starts_at: string | null;
   late_arrival_acknowledged: boolean;
   price_charged: number | null;
+  arrived_at: string | null;
   completed_at?: string | null;  // solo lo selecciona la query del barbero (Paso 6)
 };
 
@@ -313,32 +371,14 @@ export async function getDayAppointments(
 
   const { data, error } = await tenantDb(supabase, businessId)
     .table('appointments')
-    .select(`
-      id,
-      starts_at,
-      ends_at,
-      status,
-      source,
-      notes,
-      modified_at,
-      allow_overlap,
-      adjusted_starts_at,
-      late_arrival_acknowledged,
-      price_charged,
-      arrived_at,
-      staff:staff_id(id, name),
-      service:service_id(id, name, duration_minutes, price, currency),
-      customer:customer_id(id, name, phone),
-      created_by:created_by_staff_id(id, name),
-      modified_by:modified_by_staff_id(id, name)
-    `)
+    .select(DAY_APPOINTMENT_SELECT)
     .gte('starts_at', start)
     .lt('starts_at', end)
     .order('starts_at');
 
   if (error) throw new Error(`getDayAppointments failed: ${error.message}`);
 
-  return (data ?? []) as unknown as RawAppointmentRow[] as DashboardAppointment[];
+  return (data ?? []) as RawAppointmentRow[] as DashboardAppointment[];
 }
 
 // ─── Query: staff activo con disponibilidad ───────────────────────────────────
@@ -846,26 +886,7 @@ export async function getStaffDayAppointments(
   // vivía escapado (sin businessId en scope); la tanda de Server Components lo cerró.
   const { data, error } = await tenantDb(supabase, businessId)
     .table('appointments')
-    .select(`
-      id,
-      starts_at,
-      ends_at,
-      status,
-      source,
-      notes,
-      modified_at,
-      allow_overlap,
-      adjusted_starts_at,
-      late_arrival_acknowledged,
-      price_charged,
-      arrived_at,
-      completed_at,
-      staff:staff_id(id, name),
-      service:service_id(id, name, duration_minutes, price, currency),
-      customer:customer_id(id, name, phone),
-      created_by:created_by_staff_id(id, name),
-      modified_by:modified_by_staff_id(id, name)
-    `)
+    .select(STAFF_DAY_APPOINTMENT_SELECT)
     .eq('staff_id', staffId)
     .gte('starts_at', start)
     .lt('starts_at', end)
@@ -873,7 +894,7 @@ export async function getStaffDayAppointments(
 
   if (error) throw new Error(`getStaffDayAppointments failed: ${error.message}`);
 
-  return (data ?? []) as unknown as RawAppointmentRow[] as DashboardAppointment[];
+  return (data ?? []) as RawAppointmentRow[] as DashboardAppointment[];
 }
 
 // ─── Query: disponibilidad recurrente del barbero ────────────────────────────
