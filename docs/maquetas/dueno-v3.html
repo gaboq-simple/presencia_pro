@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Dueño v3 — maqueta viva</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  MAQUETA VIVA dueño-v3 · iteración 2 (movimiento + sistema de detalle)
+  · 5 pestañas navegables (Análisis es NUEVA: el BI sale de Panorama)
+  · Héroe de Panorama = LA SEMANA (corrige la contradicción con la Fase 1)
+  · Todo el movimiento sale de 4 tokens (2 duraciones, 2 curvas) y solo
+    existe si explica una relación. motion-reduce lo apaga entero.
+  · Elevación: HAIRLINE-first. La sombra única queda para lo que flota.
+  · Debajo del teléfono: la sección SISTEMA (escala, rejilla, elevación,
+    iconos, movimiento, estados, paleta A vs B).
+  · TRAZABILIDAD: cada número lleva su origen real en comentario, o NO-EXISTE.
+  · ?full → sin marco, alto libre, sin Sistema (modo captura).
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+/* ═══ 1 · TOKENS ═══════════════════════════════════════════════════════════ */
+:root{
+  /* Existentes (globals.css @theme, 1:1) */
+  --canvas:#F4F7F7; --card:#FFFFFF; --ink:#16181C; --ink-2:#5A5E63; --faint:#8A8F94;
+  --line:rgba(18,32,30,.08); --line-2:rgba(18,32,30,.12);
+  --teal:#00C2A8; --teal-ink:#025F53; --teal-border:#018271;
+  --tint-1:#EBFAF8; --tint-2:#C7F2EC;
+  --red-ink:#A23B36; --red-tint:#FBF1F0; --red-border:#D98A85;
+  --walk:#5B4CC4; --amber:#B45309; --amber-tint:#FBF0E2; --amber-border:#E0A868;
+  --past-bg:#F0F2F2; --past-line:#C7CBCB; --past-ink:#6E7378; --past-faint:#9CA0A4;
+  --gap:#E7ECEC;
+
+  /* Datos — categórica B "contenida" (ELEGIDA por Gabriel). A quedó como
+     alternativa descartada (.pal-a, solo para el comparativo de Sistema). */
+  --viz-cat-1:#008F76; --viz-cat-2:#35619F; --viz-cat-3:#9C500F;
+  --viz-cat-4:#4F42B5; --viz-cat-5:#9C3F73; --viz-otros:#9CA0A4;
+  --viz-seq-1:#EBFAF8; --viz-seq-2:#C7F2EC; --viz-seq-3:#8FE3D3;
+  --viz-seq-4:#4CC9AF; --viz-seq-5:#17A98C; --viz-seq-6:#018271; --viz-seq-7:#025F53;
+  --viz-hueco-1:#F6EDE0; --viz-hueco-2:#EFDCC0; --viz-hueco-3:#E7C99D; --viz-hueco-4:#E0A868;
+
+  /* Rejilla: UNA unidad. Todo espacio es múltiplo de 4. */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px;
+
+  /* Elevación: hairline es la norma; la ÚNICA sombra es para lo que flota. */
+  --hairline:1px solid var(--line);
+  --shadow-float:0 8px 28px -8px rgba(16,40,38,.22);
+  --r-card:16px; --r-ctl:10px;
+
+  /* Movimiento: 2 duraciones, 2 curvas. Nada fuera de estos tokens. */
+  --dur-1:140ms;                             /* micro: tap, toggle */
+  --dur-2:260ms;                             /* estructura: pestaña, disclosure, entrada de dato */
+  --ease-out:cubic-bezier(.2,.8,.2,1);       /* lo que entra o crece */
+  --ease-inout:cubic-bezier(.4,0,.2,1);      /* lo que se transforma en su lugar */
+  --stagger:30ms;                            /* riqueza = secuencia, no velocidad */
+}
+/* Variante A — la primera validada, descartada a favor de B (solo Sistema) */
+.pal-a{ --viz-cat-1:#008F76; --viz-cat-2:#3E6FB8; --viz-cat-3:#B45309;
+        --viz-cat-4:#5B4CC4; --viz-cat-5:#B4508A; }
+
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{font-family:'Inter',ui-sans-serif,system-ui,sans-serif;background:#DDE3E3;color:var(--ink);
+     -webkit-font-smoothing:antialiased}
+
+/* ═══ 2 · ESCALA TIPOGRÁFICA (cerrada: 6 estilos, 4 pesos, nunca 700) ══════ */
+.t-display{font-size:40px;line-height:44px;font-weight:300;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.t-d2{font-size:26px;line-height:32px;font-weight:300;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.t-title{font-size:20px;line-height:26px;font-weight:600;letter-spacing:-.01em}
+.t-body{font-size:15px;line-height:22px;font-weight:400}
+.t-meta{font-size:13px;line-height:18px;font-weight:400;color:var(--ink-2)}
+.t-cap{font-size:11px;line-height:16px;font-weight:500;letter-spacing:.02em;color:var(--faint)}
+.t-kicker{font-size:11px;line-height:16px;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:var(--faint)}
+.num{font-variant-numeric:tabular-nums}
+strong{font-weight:600}
+.up{color:var(--teal-ink)} .down{color:var(--red-ink)} .warn{color:var(--amber)}
+
+/* ═══ 3 · SUPERFICIES (elevación) ══════════════════════════════════════════ */
+.phone{width:375px;margin:24px auto;background:var(--canvas);min-height:812px;
+       box-shadow:var(--shadow-float);border-radius:28px;overflow:hidden;position:relative}
+.screen{height:812px;overflow-y:auto;padding-bottom:96px}
+.card{background:var(--card);border:var(--hairline);border-radius:var(--r-card);
+      padding:var(--s4);margin:0 var(--s4)}
+.card + .card{margin-top:var(--s5)}
+.hero-card{border-left:2px solid var(--teal)}
+.rows>*+*{border-top:var(--hairline)}
+.row{display:flex;align-items:center;gap:var(--s3);min-height:44px} /* táctil */
+
+/* ═══ 4 · CONTROLES (todo lo tocable responde; hit ≥44px) ═════════════════ */
+.btn{font:inherit;font-size:13px;line-height:18px;font-weight:500;color:var(--teal-ink);
+     background:var(--tint-1);border:1px solid var(--teal-border);border-radius:var(--r-ctl);
+     padding:var(--s2) var(--s3);cursor:pointer;white-space:nowrap;position:relative;
+     transition:transform var(--dur-1) var(--ease-inout),background var(--dur-1) var(--ease-inout)}
+.btn::after{content:'';position:absolute;inset:-6px}     /* hit area 44px sin crecer visual */
+.btn:active{transform:scale(.97);background:var(--tint-2)}
+.btn.sending{color:var(--faint);border-color:var(--line-2);background:var(--card);
+             pointer-events:none;animation:sk-pulse 1.2s ease-in-out infinite}
+.btn.sent{color:var(--faint);background:var(--card);border-color:var(--line-2);pointer-events:none}
+.btn.fail{color:var(--red-ink);background:var(--red-tint);border-color:var(--red-border)}
+.btn.gated{color:var(--past-faint);background:var(--past-bg);border-color:var(--past-line);
+           pointer-events:none;cursor:default}   /* no disponible: sin affordance */
+.reason{display:none}
+.reason.on{display:block;animation:tab-in var(--dur-2) var(--ease-out)}
+.linklike{font:inherit;font-size:13px;font-weight:500;color:var(--teal-ink);background:none;
+          border:none;cursor:pointer;padding:var(--s3) 0;min-height:44px;position:relative;
+          white-space:nowrap;transition:opacity var(--dur-1) var(--ease-inout)}
+.linklike:active{opacity:.6}
+.chip{font-size:11px;line-height:16px;font-weight:500;border-radius:999px;padding:2px var(--s2);display:inline-block}
+.chip-filter{font:inherit;font-size:12px;font-weight:500;border-radius:999px;padding:var(--s1) var(--s3);
+             border:1px solid var(--line-2);background:none;color:var(--ink-2);cursor:pointer;
+             min-height:28px;position:relative;transition:all var(--dur-1) var(--ease-inout)}
+.chip-filter::after{content:'';position:absolute;inset:-8px}
+.chip-filter:active{transform:scale(.97)}
+.chip-filter.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+.dot-s{width:6px;height:6px;border-radius:50%;display:inline-block;flex:none}
+.icon{width:18px;height:18px;stroke-width:1.5;flex:none}
+.chev{color:var(--faint);transition:transform var(--dur-2) var(--ease-inout)}
+[aria-expanded="true"] .chev{transform:rotate(90deg)}
+
+/* ═══ 5 · GRÁFICAS (marcas finas; pista universal --gap) ══════════════════ */
+.track{background:var(--gap);border-radius:4px;overflow:hidden;display:flex;gap:2px}
+.track .seg{height:100%}
+.hbar{height:6px}
+.cell{border-radius:3px}
+.hatch{background:repeating-linear-gradient(135deg,var(--past-bg),var(--past-bg) 4px,var(--card) 4px,var(--card) 8px)}
+
+/* Entrada de gráficas: la magnitud se CONSTRUYE desde su eje (dur-2 + stagger).
+   Las barras de composición (100%) no crecen — la proporción aparece, no se anima. */
+.enter [data-grow]{transform:scaleX(0);transform-origin:left center}
+.enter.in [data-grow]{transform:scaleX(1);
+  transition:transform var(--dur-2) var(--ease-out) calc(var(--i,0)*var(--stagger))}
+.enter [data-rise]{transform:scaleY(0);transform-origin:center bottom}
+.enter.in [data-rise]{transform:scaleY(1);
+  transition:transform var(--dur-2) var(--ease-out) calc(var(--i,0)*var(--stagger))}
+.enter [data-fade]{opacity:0}
+.enter.in [data-fade]{opacity:1;
+  transition:opacity var(--dur-2) var(--ease-out) calc(var(--i,0)*var(--stagger))}
+
+/* ═══ 6 · PESTAÑAS: transición de estructura ══════════════════════════════ */
+section.tab{display:none;padding-top:var(--s5)}
+section.tab.on{display:block;animation:tab-in var(--dur-2) var(--ease-out)}
+@keyframes tab-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ═══ 7 · SKELETONS: la FORMA del contenido que reemplazan ════════════════ */
+.sk{display:none}
+.sk.on{display:block;animation:tab-in var(--dur-2) var(--ease-out)}
+.skb{background:var(--past-bg);border-radius:6px;animation:sk-pulse 1.2s ease-in-out infinite}
+@keyframes sk-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+/* ═══ 8 · DISCLOSURE animada (grid 0fr→1fr) ═══════════════════════════════ */
+.disc-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--dur-2) var(--ease-inout)}
+.disc-body>div{overflow:hidden}
+.disc-body.open{grid-template-rows:1fr}
+
+/* ═══ 9 · TAB BAR: flota de verdad (blur + hairline + safe area) ══════════ */
+nav.tabbar{position:absolute;bottom:0;left:0;right:0;z-index:9;
+  background:rgba(255,255,255,.86);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  border-top:var(--hairline);display:flex;
+  padding-bottom:max(6px, env(safe-area-inset-bottom))}
+nav.tabbar button{flex:1;background:none;border:none;font:inherit;cursor:pointer;
+  font-size:10px;line-height:14px;font-weight:500;color:var(--faint);
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:var(--s2) 0 var(--s1);min-height:52px;
+  transition:color var(--dur-1) var(--ease-inout),transform var(--dur-1) var(--ease-inout)}
+nav.tabbar button:active{transform:scale(.94)}
+nav.tabbar button.on{color:var(--teal-ink)}
+nav.tabbar button svg{width:22px;height:22px}
+nav.tabbar button:last-child{border-left:var(--hairline)}
+nav.tabbar button:last-child.on{color:var(--ink-2)}
+
+/* ═══ 10 · ESTADOS vacío / error ══════════════════════════════════════════ */
+.empty{border:1px dashed var(--line-2);border-radius:var(--r-card);padding:var(--s6) var(--s4);
+       text-align:center;background:var(--card)}
+.empty .icon{width:28px;height:28px;color:var(--past-faint);margin:0 auto var(--s2)}
+.error-box{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0}
+.error-box .icon{color:var(--red-ink)}
+
+/* ═══ 11 · SISTEMA (documento bajo el teléfono) ═══════════════════════════ */
+.sistema{max-width:720px;margin:48px auto 64px;background:var(--card);border:var(--hairline);
+         border-radius:var(--r-card);padding:var(--s8)}
+.sistema section+section{margin-top:var(--s8);padding-top:var(--s6);border-top:var(--hairline)}
+.spec{display:flex;align-items:baseline;gap:var(--s4);padding:var(--s2) 0}
+.spec .t-cap{width:220px;flex:none}
+.swatch{width:36px;height:36px;border-radius:8px}
+.grid-demo{display:flex;align-items:flex-end;gap:var(--s2)}
+.grid-demo div{background:var(--tint-2);border-radius:3px;width:28px}
+table.tok{border-collapse:collapse;width:100%;font-size:13px}
+table.tok td,table.tok th{text-align:left;padding:6px 10px;border-top:var(--hairline)}
+table.tok th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:600}
+
+/* Reduced motion: el lujo nunca marea. TODO se apaga. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .enter [data-grow],.enter [data-rise]{transform:none}
+  .enter [data-fade]{opacity:1}
+}
+</style>
+</head>
+<body>
+<div class="phone">
+<div class="screen" id="screen">
+
+<!-- ══════════════════ SKELETONS (uno por pestaña, con la forma real) ═════ -->
+<div class="sk" id="sk-panorama" aria-hidden="true">
+  <div style="padding:0 var(--s5) var(--s4)"><div class="skb" style="width:96px;height:12px"></div></div>
+  <div class="card hero-card">
+    <div class="skb" style="width:72px;height:12px"></div>
+    <div class="skb" style="width:180px;height:40px;margin-top:var(--s3)"></div>
+    <div style="display:flex;gap:6px;margin-top:var(--s4);align-items:flex-end">
+      <div class="skb" style="flex:1;height:44px"></div><div class="skb" style="flex:1;height:52px"></div>
+      <div class="skb" style="flex:1;height:48px"></div><div class="skb" style="flex:1;height:56px"></div>
+      <div class="skb" style="flex:1;height:24px"></div><div class="skb" style="flex:1;height:24px"></div>
+      <div class="skb" style="flex:1;height:24px"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="skb" style="width:120px;height:12px"></div>
+    <div style="margin-top:var(--s3);display:grid;gap:var(--s3)">
+      <div style="display:flex;gap:var(--s3);align-items:center"><div class="skb" style="width:56px;height:13px"></div><div class="skb" style="flex:1;height:6px"></div><div class="skb" style="width:64px;height:13px"></div></div>
+      <div style="display:flex;gap:var(--s3);align-items:center"><div class="skb" style="width:56px;height:13px"></div><div class="skb" style="flex:1;height:6px"></div><div class="skb" style="width:64px;height:13px"></div></div>
+      <div style="display:flex;gap:var(--s3);align-items:center"><div class="skb" style="width:56px;height:13px"></div><div class="skb" style="flex:1;height:6px"></div><div class="skb" style="width:64px;height:13px"></div></div>
+    </div>
+  </div>
+</div>
+<div class="sk" id="sk-analisis" aria-hidden="true">
+  <div style="padding:0 var(--s5) var(--s4)"><div class="skb" style="width:96px;height:12px"></div></div>
+  <div class="card hero-card">
+    <div class="skb" style="width:72px;height:12px"></div>
+    <div class="skb" style="width:200px;height:40px;margin-top:var(--s3)"></div>
+    <div style="display:flex;gap:var(--s2);margin-top:var(--s4);align-items:flex-end">
+      <div class="skb" style="flex:1;height:8px"></div><div class="skb" style="flex:1;height:16px"></div>
+      <div class="skb" style="flex:1;height:24px"></div><div class="skb" style="flex:1;height:48px"></div>
+      <div class="skb" style="flex:1;height:56px"></div><div class="skb" style="flex:1;height:64px"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="skb" style="width:140px;height:12px"></div>
+    <div style="display:grid;grid-template-columns:repeat(11,1fr);gap:2px;margin-top:var(--s3)">
+      <div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div>
+      <div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div><div class="skb" style="height:20px"></div>
+    </div>
+  </div>
+</div>
+<div class="sk" id="sk-generic" aria-hidden="true">
+  <div style="padding:0 var(--s5) var(--s4)"><div class="skb" style="width:96px;height:12px"></div></div>
+  <div class="card">
+    <div class="skb" style="width:140px;height:12px"></div>
+    <div style="margin-top:var(--s3);display:grid;gap:var(--s3)">
+      <div style="display:flex;gap:var(--s3);align-items:center"><div class="skb" style="width:7px;height:7px;border-radius:50%"></div><div class="skb" style="flex:1;height:15px"></div><div class="skb" style="width:48px;height:13px"></div></div>
+      <div style="display:flex;gap:var(--s3);align-items:center"><div class="skb" style="width:7px;height:7px;border-radius:50%"></div><div class="skb" style="flex:1;height:15px"></div><div class="skb" style="width:48px;height:13px"></div></div>
+      <div style="display:flex;gap:var(--s3);align-items:center"><div class="skb" style="width:7px;height:7px;border-radius:50%"></div><div class="skb" style="flex:1;height:15px"></div><div class="skb" style="width:48px;height:13px"></div></div>
+      <div style="display:flex;gap:var(--s3);align-items:center"><div class="skb" style="width:7px;height:7px;border-radius:50%"></div><div class="skb" style="flex:1;height:15px"></div><div class="skb" style="width:48px;height:13px"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ PANORAMA ═════════════════════════════════════ -->
+<section class="tab on" id="tab-panorama">
+  <div style="padding:0 var(--s5) var(--s4)">
+    <p class="t-kicker">Barbería Demo</p>
+    <p class="t-cap" style="margin-top:2px">jueves 30 de julio</p>
+  </div>
+
+  <!-- HÉROE: LA SEMANA (la unidad mental del negocio; el día vive abajo).
+       Métrica única del strip: ingreso por día REALIZADO. El futuro no se
+       pinta aquí (la proyección vive en "Los próximos 7 días"). -->
+  <div class="card hero-card enter" data-enter>
+    <p class="t-kicker">Esta semana</p>
+    <div style="display:flex;align-items:baseline;gap:var(--s2);margin-top:var(--s3)">
+      <span class="t-display" data-fade style="--i:0">$9,690</span>
+      <!-- SUM(COALESCE(price_charged, services.price)) lun→hoy, semana en curso — derivable de appointments (misma fuente del pulso, agrupada por semana) -->
+      <span class="t-meta">lun–jue</span>
+    </div>
+    <p class="t-meta" data-fade style="--i:1;margin-top:var(--s1)">
+      <span class="num up" style="font-weight:500">▲ $1,240</span>
+      vs la semana pasada a esta altura
+      <!-- comparación mismo-tramo semanal — misma regla de revenueTrend.ts aplicada a semana. -->
+    </p>
+    <div style="display:flex;gap:6px;margin-top:var(--s4);align-items:flex-end;height:72px">
+      <!-- ingreso por día (lun–dom): realizado sólido; hoy con anillo; futuro = pista vacía; dom cerrado = hatch -->
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <p class="t-cap num" data-fade style="--i:2;margin-bottom:var(--s1)">2.1k</p>
+        <div data-rise style="--i:2;height:44%;background:var(--viz-cat-1);border-radius:4px 4px 2px 2px"></div>
+      </div>
+      <!-- lun $2,140 · mar $2,410 · mié $2,180 · jue (hoy) $2,960 parcial -->
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <p class="t-cap num" data-fade style="--i:3;margin-bottom:var(--s1)">2.4k</p>
+        <div data-rise style="--i:3;height:50%;background:var(--viz-cat-1);border-radius:4px 4px 2px 2px"></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <p class="t-cap num" data-fade style="--i:4;margin-bottom:var(--s1)">2.2k</p>
+        <div data-rise style="--i:4;height:45%;background:var(--viz-cat-1);border-radius:4px 4px 2px 2px"></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <p class="t-cap num" data-fade style="--i:5;margin-bottom:var(--s1);color:var(--teal-ink);font-weight:600">3.0k</p>
+        <div data-rise style="--i:5;height:61%;background:var(--viz-cat-1);border-radius:4px 4px 2px 2px;outline:2px solid var(--tint-2);outline-offset:1px"></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%">
+        <div data-fade style="--i:6;height:12%;background:var(--gap);border-radius:4px 4px 2px 2px"></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%">
+        <div data-fade style="--i:7;height:12%;background:var(--gap);border-radius:4px 4px 2px 2px"></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%">
+        <div data-fade style="--i:8;height:12%" class="hatch"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:var(--s1)">
+      <p class="t-cap" style="flex:1;text-align:center">Lun</p><p class="t-cap" style="flex:1;text-align:center">Mar</p>
+      <p class="t-cap" style="flex:1;text-align:center">Mié</p>
+      <p class="t-cap" style="flex:1;text-align:center;color:var(--teal-ink);font-weight:600">Jue</p>
+      <p class="t-cap" style="flex:1;text-align:center">Vie</p><p class="t-cap" style="flex:1;text-align:center">Sáb</p>
+      <p class="t-cap" style="flex:1;text-align:center">Dom</p>
+    </div>
+  </div>
+
+  <!-- HOY, compacto (el ex-héroe, un nivel abajo) -->
+  <div class="card enter" data-enter>
+    <div style="display:flex;align-items:baseline;justify-content:space-between">
+      <p class="t-kicker">Hoy</p>
+      <span class="t-cap num">15% de ocupación · 13 de 88 lugares</span>
+      <!-- lib/pulso.ts: citas ÷ capacidad agendable -->
+    </div>
+    <div style="display:flex;align-items:baseline;gap:var(--s2);margin-top:var(--s2)">
+      <span class="t-d2" data-fade style="--i:0">$2,960</span>
+      <!-- SUM ingresos hoy status='completed' — lib/pulsoHoy.ts -->
+      <span class="t-meta">cobrado</span>
+    </div>
+    <div class="track num" style="height:8px;margin-top:var(--s3)">
+      <div class="seg" data-grow style="--i:1;width:17%;background:var(--viz-cat-1)"></div>
+      <!-- hecho 17% · agendado $0 (segmento omitido) · resto huecos — lib/pulso.ts projectionLayers -->
+      <div class="seg" style="width:83%;background:var(--gap)"></div>
+    </div>
+    <p class="t-cap" data-fade style="--i:2;margin-top:var(--s2)">$0 agendado · <span class="num">$15,000</span> en huecos si se llenan</p>
+    <div style="display:flex;margin-top:var(--s3);padding-top:var(--s3);border-top:var(--hairline)">
+      <div style="flex:1"><p class="t-body num" style="font-weight:600">13 <span class="t-cap down">−2</span></p><p class="t-cap">citas</p></div>
+      <!-- COUNT hoy · delta vs mismo día sem. pasada — lib/pulsoHoy.ts -->
+      <div style="flex:1"><p class="t-body num" style="font-weight:600">0</p><p class="t-cap">no-shows</p></div>
+      <div style="flex:1"><p class="t-body num" style="font-weight:600">0</p><p class="t-cap">walk-ins</p></div>
+      <div style="flex:1;text-align:right"><p class="t-body num" style="font-weight:600">5</p><p class="t-cap">barberos</p></div>
+    </div>
+  </div>
+
+  <!-- Barberos hoy -->
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Barberos hoy</p>
+    <div class="rows" style="margin-top:var(--s1)">
+      <!-- ocupación de SU jornada + cobrado — lib/pulsoHoy.ts barberos[] -->
+      <div class="row"><span class="t-meta" style="width:60px;font-weight:500;color:var(--ink)">Carlos</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:0;width:15%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:82px;text-align:right">15% · $840</span></div>
+      <div class="row"><span class="t-meta" style="width:60px;font-weight:500;color:var(--ink)">Andrés</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:1;width:22%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:82px;text-align:right">22% · $760</span></div>
+      <div class="row"><span class="t-meta" style="width:60px;font-weight:500;color:var(--ink)">Miguel</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:2;width:13%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:82px;text-align:right">13% · $580</span></div>
+      <div class="row"><span class="t-meta" style="width:60px;font-weight:500;color:var(--ink)">Beto</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:3;width:18%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:82px;text-align:right">18% · $480</span></div>
+      <div class="row"><span class="t-meta" style="width:60px;font-weight:500;color:var(--ink)">Diego</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:4;width:8%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:82px;text-align:right">8% · $300</span></div>
+    </div>
+    <p class="t-cap" style="margin-top:var(--s2)">Ocupación de su jornada y lo cobrado. Sin propinas.</p>
+  </div>
+
+  <!-- Los próximos 7 días (LA PROYECCIÓN — el futuro vive aquí, no en el héroe) -->
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Los próximos 7 días</p>
+    <div style="display:flex;gap:6px;margin-top:var(--s4);align-items:flex-end">
+      <!-- citas futuras ÷ capacidad por día — lib/pulsoSemana.ts (dayCapacity) -->
+      <div style="flex:1;text-align:center"><p class="t-cap num" data-fade style="--i:0;margin-bottom:var(--s1)">13%</p>
+        <div style="height:56px;background:var(--gap);border-radius:4px;position:relative;overflow:hidden">
+          <div data-rise style="--i:0;position:absolute;bottom:0;left:0;right:0;height:13%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s1)">Vie</p></div>
+      <div style="flex:1;text-align:center"><p class="t-cap num" data-fade style="--i:1;margin-bottom:var(--s1)">7%</p>
+        <div style="height:56px;background:var(--gap);border-radius:4px;position:relative;overflow:hidden;outline:2px solid var(--amber-border);outline-offset:-2px">
+          <div data-rise style="--i:1;position:absolute;bottom:0;left:0;right:0;height:7%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s1)">Sáb</p></div>
+      <div style="flex:1;text-align:center"><p class="t-cap num" data-fade style="--i:2;margin-bottom:var(--s1)">—</p>
+        <div class="hatch" style="height:56px;border-radius:4px"></div>
+        <p class="t-cap" style="margin-top:var(--s1)">Dom</p></div>
+      <div style="flex:1;text-align:center"><p class="t-cap num" data-fade style="--i:3;margin-bottom:var(--s1)">11%</p>
+        <div style="height:56px;background:var(--gap);border-radius:4px;position:relative;overflow:hidden">
+          <div data-rise style="--i:3;position:absolute;bottom:0;left:0;right:0;height:11%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s1)">Lun</p></div>
+      <div style="flex:1;text-align:center"><p class="t-cap num" data-fade style="--i:4;margin-bottom:var(--s1)">15%</p>
+        <div style="height:56px;background:var(--gap);border-radius:4px;position:relative;overflow:hidden">
+          <div data-rise style="--i:4;position:absolute;bottom:0;left:0;right:0;height:15%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s1)">Mar</p></div>
+      <div style="flex:1;text-align:center"><p class="t-cap num" data-fade style="--i:5;margin-bottom:var(--s1)">4%</p>
+        <div style="height:56px;background:var(--gap);border-radius:4px;position:relative;overflow:hidden;outline:2px solid var(--amber-border);outline-offset:-2px">
+          <div data-rise style="--i:5;position:absolute;bottom:0;left:0;right:0;height:4%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s1)">Mié</p></div>
+      <div style="flex:1;text-align:center"><p class="t-cap num" data-fade style="--i:6;margin-bottom:var(--s1)">7%</p>
+        <div style="height:56px;background:var(--gap);border-radius:4px;position:relative;overflow:hidden">
+          <div data-rise style="--i:6;position:absolute;bottom:0;left:0;right:0;height:7%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s1)">Jue</p></div>
+    </div>
+    <p class="t-cap" style="margin-top:var(--s3)"><span class="dot-s" style="background:var(--amber-border)"></span>
+      Sábado (<span class="num">52</span> libres) y miércoles (<span class="num">69</span> libres), donde más lugar queda.</p>
+      <!-- pulsoSemana: freeSlots; solo se nombran los 2 mayores -->
+  </div>
+
+  <!-- Para recuperar: top 3 + expandir animado -->
+  <div class="card enter" data-enter>
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <p class="t-kicker">Para recuperar</p>
+      <span class="t-cap num">57 atrasados de su ritmo</span>
+      <!-- lib/cadence.ts computeRetentionFeed → porRecuperar -->
+    </div>
+    <div class="rows" style="margin-top:var(--s1)">
+      <!-- top 3 del ranking por valor en juego (cadence.ts). El botón asume la acción (composición). -->
+      <div class="row" style="padding:var(--s2) 0">
+        <span class="dot" style="background:var(--red-ink)"></span>
+        <div style="flex:1;min-width:0">
+          <p class="t-body" style="font-weight:500">Armando Gómez</p>
+          <p class="t-cap num" style="margin-top:1px">cada 3 días · lleva 7 sin venir · 20 visitas</p>
+        </div>
+        <button class="btn js-send">Mensaje</button>
+      </div>
+      <div class="row" style="padding:var(--s2) 0">
+        <span class="dot" style="background:var(--red-ink)"></span>
+        <div style="flex:1;min-width:0">
+          <p class="t-body" style="font-weight:500">Rafa Millona</p>
+          <p class="t-cap num" style="margin-top:1px">cada 3 días · lleva 13 sin venir · 14 visitas</p>
+          <p class="t-cap reason" style="color:var(--red-ink);margin-top:2px">No llegó · fuera de la ventana de WhatsApp</p>
+          <!-- estado honesto: el fallo con su razón legible (error Meta 131047 = fuera de 24h) -->
+        </div>
+        <button class="btn js-send" data-outcome="fail">Mensaje</button>
+      </div>
+      <div class="row" style="padding:var(--s2) 0">
+        <span class="dot" style="background:var(--red-ink)"></span>
+        <div style="flex:1;min-width:0">
+          <p class="t-body" style="font-weight:500">Samuel Gómez</p>
+          <p class="t-cap num" style="margin-top:1px">cada 2 días · lleva 5 sin venir · 14 visitas</p>
+        </div>
+        <button class="btn js-send">Mensaje</button>
+      </div>
+    </div>
+    <!-- el resto, plegado: al abrir, las filas ENTRAN como parte de la misma lista -->
+    <div class="disc-body" id="disc-recuperar"><div>
+      <div class="rows" style="border-top:var(--hairline)">
+        <div class="row" style="padding:var(--s2) 0">
+          <span class="dot" style="background:var(--red-ink)"></span>
+          <div style="flex:1;min-width:0">
+            <p class="t-body" style="font-weight:500">Alberto Jiménez</p>
+            <p class="t-cap num" style="margin-top:1px">cada 4 días · lleva 7 sin venir · 20 visitas</p>
+          </div>
+          <button class="btn js-send">Mensaje</button>
+        </div>
+        <div class="row" style="padding:var(--s2) 0">
+          <span class="dot" style="background:var(--amber)"></span>
+          <div style="flex:1;min-width:0">
+            <p class="t-body" style="font-weight:500">Rodrigo López</p>
+            <p class="t-cap num" style="margin-top:1px">cada 11 días · lleva 4 semanas · 5 visitas</p>
+          </div>
+          <button class="btn js-send">Mensaje</button>
+        </div>
+        <div class="row" style="padding:var(--s2) 0">
+          <span class="dot" style="background:var(--past-faint)"></span>
+          <div style="flex:1;min-width:0">
+            <p class="t-body" style="font-weight:500">Manuel Cruz</p>
+            <p class="t-cap num" style="margin-top:1px">cada 6 días · lleva 4 semanas · 4 visitas</p>
+          </div>
+          <button class="btn js-send">Mensaje</button>
+        </div>
+      </div>
+    </div></div>
+    <div style="display:flex;gap:var(--s4);align-items:center;margin-top:var(--s2);padding-top:var(--s2);border-top:var(--hairline)">
+      <span class="t-cap"><span class="dot-s" style="background:var(--red-ink)"></span> <span class="num">42</span> campeones</span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--amber)"></span> <span class="num">9</span> yéndose</span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--past-faint)"></span> <span class="num">6</span> perdidos</span>
+      <!-- conteo por urgencia — feed.rows[].urgency -->
+      <button class="linklike" id="btn-recuperar" aria-expanded="false" style="margin-left:auto">
+        Ver todos <span class="chev">›</span></button>
+    </div>
+  </div>
+
+  <!-- La fuga -->
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Capacidad sin usar · últimos 7 días</p>
+    <div style="display:flex;align-items:baseline;gap:var(--s2);margin-top:var(--s3)">
+      <span class="t-d2" data-fade style="--i:0">160 h</span>
+      <!-- lib/fugaData.ts: capacidad (tiling) − citas, día×franja -->
+      <span class="t-meta">sin usar ≈ <span class="num">$64,000</span> en servicios</span>
+    </div>
+    <div style="display:grid;grid-template-columns:52px repeat(7,1fr);gap:3px;margin-top:var(--s4);align-items:center">
+      <span></span>
+      <p class="t-cap" style="text-align:center">Vie</p><p class="t-cap" style="text-align:center">Sáb</p>
+      <p class="t-cap" style="text-align:center">Dom</p><p class="t-cap" style="text-align:center">Lun</p>
+      <p class="t-cap" style="text-align:center">Mar</p><p class="t-cap" style="text-align:center">Mié</p>
+      <p class="t-cap" style="text-align:center">Jue</p>
+      <p class="t-cap">mañana</p>
+      <!-- fuga.buckets[día][franja] → ramp --viz-hueco-*; entrada por columna = orden del tiempo -->
+      <div class="cell" data-fade style="--i:0;height:22px;background:var(--viz-hueco-2)"></div>
+      <div class="cell" data-fade style="--i:1;height:22px;background:var(--viz-hueco-1)"></div>
+      <div class="cell hatch" data-fade style="--i:2;height:22px"></div>
+      <div class="cell" data-fade style="--i:3;height:22px;background:var(--viz-hueco-2)"></div>
+      <div class="cell" data-fade style="--i:4;height:22px;background:var(--viz-hueco-1)"></div>
+      <div class="cell" data-fade style="--i:5;height:22px;background:var(--viz-hueco-2)"></div>
+      <div class="cell" data-fade style="--i:6;height:22px;background:var(--viz-hueco-3)"></div>
+      <p class="t-cap">tarde</p>
+      <div class="cell" data-fade style="--i:0;height:22px;background:var(--viz-hueco-3)"></div>
+      <div class="cell" data-fade style="--i:1;height:22px;background:var(--viz-hueco-4)"></div>
+      <div class="cell hatch" data-fade style="--i:2;height:22px"></div>
+      <div class="cell" data-fade style="--i:3;height:22px;background:var(--viz-hueco-2)"></div>
+      <div class="cell" data-fade style="--i:4;height:22px;background:var(--viz-hueco-2)"></div>
+      <div class="cell" data-fade style="--i:5;height:22px;background:var(--viz-hueco-3)"></div>
+      <div class="cell" data-fade style="--i:6;height:22px;background:var(--viz-hueco-4)"></div>
+    </div>
+    <p class="t-cap" style="margin-top:var(--s3)">Los huecos más grandes: <strong style="color:var(--ink-2)">jueves y sábado por la tarde</strong>. Es dónde tienes espacio para crecer.</p>
+  </div>
+
+  <!-- Faltas repetidas -->
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Faltas repetidas · este mes</p>
+    <div class="rows" style="margin-top:var(--s1)">
+      <!-- customers con 2+ no_show en el mes — fugaData -->
+      <div class="row"><p class="t-body" style="font-weight:500;flex:1">Héctor Aguilar</p>
+        <span style="display:flex;gap:3px"><span class="dot" style="background:var(--red-border)"></span><span class="dot" style="background:var(--red-border)"></span><span class="dot" style="background:var(--red-border)"></span><span class="dot" style="background:var(--red-border)"></span></span>
+        <span class="t-cap num" style="width:92px;text-align:right">4 faltas · 29 jul</span></div>
+      <div class="row"><p class="t-body" style="font-weight:500;flex:1">Raúl Martínez</p>
+        <span style="display:flex;gap:3px"><span class="dot" style="background:var(--red-border)"></span><span class="dot" style="background:var(--red-border)"></span><span class="dot" style="background:var(--red-border)"></span></span>
+        <span class="t-cap num" style="width:92px;text-align:right">3 faltas · 29 jul</span></div>
+      <div class="row"><p class="t-body" style="font-weight:500;flex:1">Rodrigo López</p>
+        <span style="display:flex;gap:3px"><span class="dot" style="background:var(--red-border)"></span><span class="dot" style="background:var(--red-border)"></span></span>
+        <span class="t-cap num" style="width:92px;text-align:right">2 faltas · 15 jul</span></div>
+    </div>
+    <p class="t-cap" style="margin-top:var(--s2)">El dato, para que lo tengas presente al reservarles.</p>
+  </div>
+  <div style="height:var(--s6)"></div>
+</section>
+
+<!-- ═══════════════════════ ANÁLISIS (pestaña NUEVA) ═════════════════════ -->
+<section class="tab" id="tab-analisis">
+  <div style="padding:0 var(--s5) var(--s4)">
+    <p class="t-kicker">Análisis</p>
+    <p class="t-cap" style="margin-top:2px">La historia del negocio — meses, patrones y canales.</p>
+  </div>
+
+  <!-- HÉROE: el mes -->
+  <div class="card hero-card enter" data-enter>
+    <div style="display:flex;align-items:baseline;justify-content:space-between">
+      <p class="t-kicker">Ingresos · julio</p>
+      <span class="chip" style="border:var(--hairline);color:var(--faint)">estimado</span>
+    </div>
+    <p class="t-display" data-fade style="--i:0;margin-top:var(--s3)">$95,510</p>
+    <!-- SUM(COALESCE(price_charged, services.price)) mes — lib/negocioMetrics.ts -->
+    <p class="t-meta" data-fade style="--i:1;margin-top:var(--s1)">
+      <span class="num up" style="font-weight:500">▲ $9,120</span> vs junio a esta altura (<span class="num">$86,390</span>)
+      <!-- comparación mismo-tramo — lib/revenueTrend.ts -->
+    </p>
+    <div style="display:flex;align-items:flex-end;gap:var(--s2);height:84px;margin-top:var(--s4)">
+      <!-- 6 meses — negocioMetrics.monthlySpecs; feb–abr sin datos (cero honesto, barra mínima) -->
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <div data-rise style="--i:0;height:2px;background:var(--past-line)"></div><p class="t-cap" style="margin-top:var(--s1)">feb</p></div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <div data-rise style="--i:1;height:2px;background:var(--past-line)"></div><p class="t-cap" style="margin-top:var(--s1)">mar</p></div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <div data-rise style="--i:2;height:2px;background:var(--past-line)"></div><p class="t-cap" style="margin-top:var(--s1)">abr</p></div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <p class="t-cap num" data-fade style="--i:3;margin-bottom:var(--s1)">72k</p>
+        <div data-rise style="--i:3;height:54%;background:var(--viz-cat-1);border-radius:4px 4px 0 0"></div>
+        <p class="t-cap" style="margin-top:var(--s1)">may</p></div>
+        <!-- $71,630 -->
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <p class="t-cap num" data-fade style="--i:4;margin-bottom:var(--s1)">83k</p>
+        <div data-rise style="--i:4;height:62%;background:var(--viz-cat-1);border-radius:4px 4px 0 0"></div>
+        <p class="t-cap" style="margin-top:var(--s1)">jun</p></div>
+        <!-- $82,890 -->
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+        <p class="t-cap num" data-fade style="--i:5;margin-bottom:var(--s1);color:var(--teal-ink);font-weight:600">96k</p>
+        <div data-rise style="--i:5;height:71%;background:var(--tint-2);border:1px dashed var(--teal-border);border-bottom:none;border-radius:4px 4px 0 0"></div>
+        <p class="t-cap" style="margin-top:var(--s1)">jul</p></div>
+        <!-- $95,510 en curso — punteado -->
+    </div>
+  </div>
+
+  <!-- Semana típica -->
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Ocupación · semana típica</p>
+    <p class="t-meta" style="margin-top:var(--s2)"><span class="t-d2" style="font-size:22px;line-height:26px" data-fade>34%</span> de tus sillas ocupadas, últimas 8 semanas.</p>
+    <!-- lib/occupancy.ts overallPct -->
+    <div style="display:grid;grid-template-columns:30px repeat(11,1fr);gap:2px;margin-top:var(--s3);align-items:center">
+      <span></span>
+      <p class="t-cap" style="text-align:center;font-size:9px">10</p><p class="t-cap" style="text-align:center;font-size:9px">11</p><p class="t-cap" style="text-align:center;font-size:9px">12</p><p class="t-cap" style="text-align:center;font-size:9px">13</p><p class="t-cap" style="text-align:center;font-size:9px">14</p><p class="t-cap" style="text-align:center;font-size:9px">15</p><p class="t-cap" style="text-align:center;font-size:9px">16</p><p class="t-cap" style="text-align:center;font-size:9px">17</p><p class="t-cap" style="text-align:center;font-size:9px">18</p><p class="t-cap" style="text-align:center;font-size:9px">19</p><p class="t-cap" style="text-align:center;font-size:9px">20</p>
+      <!-- occupancy.cells → --viz-seq-*; entrada por columna (orden del tiempo) -->
+      <p class="t-cap">Lun</p>
+      <div class="cell" data-fade style="--i:0;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:1;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:2;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:3;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:4;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:5;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:6;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:7;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:8;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:9;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:10;height:20px;background:var(--viz-seq-1)"></div>
+      <p class="t-cap">Mar</p>
+      <div class="cell" data-fade style="--i:0;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:1;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:2;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:3;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:4;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:5;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:6;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:7;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:8;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:9;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:10;height:20px;background:var(--viz-seq-2)"></div>
+      <p class="t-cap">Mié</p>
+      <div class="cell" data-fade style="--i:0;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:1;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:2;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:3;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:4;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:5;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:6;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:7;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:8;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:9;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:10;height:20px;background:var(--viz-seq-1)"></div>
+      <p class="t-cap">Jue</p>
+      <div class="cell" data-fade style="--i:0;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:1;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:2;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:3;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:4;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:5;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:6;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:7;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:8;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:9;height:20px;background:var(--viz-seq-3)"></div><div class="cell" data-fade style="--i:10;height:20px;background:var(--viz-seq-2)"></div>
+      <p class="t-cap">Vie</p>
+      <div class="cell" data-fade style="--i:0;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:1;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:2;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:3;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:4;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:5;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:6;height:20px;background:var(--viz-seq-6)"></div><div class="cell" data-fade style="--i:7;height:20px;background:var(--viz-seq-6)"></div><div class="cell" data-fade style="--i:8;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:9;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:10;height:20px;background:var(--viz-seq-3)"></div>
+      <p class="t-cap">Sáb</p>
+      <div class="cell" data-fade style="--i:0;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:1;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:2;height:20px;background:var(--viz-seq-6)"></div><div class="cell" data-fade style="--i:3;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:4;height:20px;background:var(--viz-seq-5)"></div><div class="cell" data-fade style="--i:5;height:20px;background:var(--viz-seq-6)"></div><div class="cell" data-fade style="--i:6;height:20px;background:var(--viz-seq-7)"></div><div class="cell" data-fade style="--i:7;height:20px;background:var(--viz-seq-6)"></div><div class="cell" data-fade style="--i:8;height:20px;background:var(--viz-seq-4)"></div><div class="cell" data-fade style="--i:9;height:20px;background:var(--viz-seq-2)"></div><div class="cell" data-fade style="--i:10;height:20px;background:var(--viz-seq-1)"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--s2);margin-top:var(--s2)">
+      <span class="t-cap">menos</span>
+      <div style="display:flex;gap:2px">
+        <div class="cell" style="width:14px;height:8px;background:var(--viz-seq-1)"></div>
+        <div class="cell" style="width:14px;height:8px;background:var(--viz-seq-3)"></div>
+        <div class="cell" style="width:14px;height:8px;background:var(--viz-seq-5)"></div>
+        <div class="cell" style="width:14px;height:8px;background:var(--viz-seq-7)"></div>
+      </div>
+      <span class="t-cap">más ocupado</span>
+      <span class="t-cap" style="margin-left:auto"><span class="dot-s" style="background:var(--amber-border)"></span> Lun 10–12, casi vacío</span>
+      <!-- occupancy.opportunities → franja con capacidad y baja ocupación -->
+    </div>
+  </div>
+
+  <!-- Mezcla por servicio -->
+  <div class="card enter" data-enter>
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <p class="t-kicker">Servicios · julio</p>
+      <span class="t-cap num">$95,510</span>
+    </div>
+    <div class="rows" style="margin-top:var(--s1)">
+      <!-- COUNT + SUM(rev) por servicio, mes — appointments JOIN services (query existente en espíritu; superficie NUEVA) -->
+      <div class="row"><span class="t-meta" style="width:104px;font-weight:500;color:var(--ink)">Corte</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:0;width:100%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:58px;text-align:right">$40,200</span></div>
+      <div class="row"><span class="t-meta" style="width:104px;font-weight:500;color:var(--ink)">Corte + barba</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:1;width:84%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:58px;text-align:right">$33,920</span></div>
+      <div class="row"><span class="t-meta" style="width:104px;font-weight:500;color:var(--ink)">Corte premium</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:2;width:20%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:58px;text-align:right">$8,100</span></div>
+      <div class="row"><span class="t-meta" style="width:104px;font-weight:500;color:var(--ink)">Barba</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:3;width:17%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:58px;text-align:right">$6,660</span></div>
+      <div class="row"><span class="t-meta" style="width:104px;font-weight:500;color:var(--ink)">Otros 4</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:4;width:16%;background:var(--viz-otros)"></div></div>
+        <span class="t-meta num" style="width:58px;text-align:right">$6,630</span></div>
+    </div>
+  </div>
+
+  <!-- Canal + ventana al bot -->
+  <div class="card enter" data-enter>
+    <p class="t-kicker">De dónde vienen las citas · julio</p>
+    <div style="display:flex;height:12px;border-radius:4px;overflow:hidden;margin-top:var(--s3);gap:2px" data-fade>
+      <!-- appointments.source, mes: bot 223 / manual 161 / walkin 79 -->
+      <div style="width:48%;background:var(--viz-cat-1)"></div>
+      <div style="width:35%;background:var(--viz-cat-2)"></div>
+      <div style="width:17%;background:var(--walk)"></div>
+    </div>
+    <div style="display:flex;gap:var(--s4);margin-top:var(--s2)">
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-1)"></span> Bot <strong class="num" style="color:var(--ink-2)">48%</strong></span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-2)"></span> Manual <strong class="num" style="color:var(--ink-2)">35%</strong></span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--walk)"></span> Walk-in <strong class="num" style="color:var(--ink-2)">17%</strong></span>
+    </div>
+    <!-- La ventana al bot: el diferenciador, visible por primera vez para el dueño -->
+    <div style="display:flex;margin-top:var(--s4);padding-top:var(--s3);border-top:var(--hairline)">
+      <div style="flex:1"><p class="t-body num" style="font-weight:600" data-fade>47</p><p class="t-cap">conversaciones<br>esta semana</p></div>
+      <!-- COUNT bot_conversations con last_message ≥ lunes -->
+      <div style="flex:1"><p class="t-body num" style="font-weight:600" data-fade>23</p><p class="t-cap">citas agendadas<br>por el bot</p></div>
+      <!-- COUNT appointments source='bot' semana -->
+      <div style="flex:1"><p class="t-body num" style="font-weight:600" data-fade>2</p><p class="t-cap">tomadas por<br>tu equipo</p></div>
+      <!-- COUNT bot_conversations session_mode='human' (takeovers de la semana) -->
+    </div>
+  </div>
+
+  <!-- Recompra -->
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Barberos · recompra</p>
+    <p class="t-cap" style="margin-top:var(--s1)">De los clientes de cada barbero, cuántos volvieron a él. Promedio del local: <span class="num" style="font-weight:500;color:var(--ink-2)">64%</span> (la línea).</p>
+    <!-- lib/staffRecompra.ts -->
+    <div class="rows" style="margin-top:var(--s1)">
+      <div style="padding:var(--s2) 0">
+        <div style="display:flex;justify-content:space-between"><span class="t-meta" style="font-weight:500;color:var(--ink)">Carlos</span><span class="t-meta num" style="font-weight:600;color:var(--ink)">78%</span></div>
+        <div style="position:relative;height:6px;border-radius:4px;background:var(--tint-1);margin-top:var(--s1)">
+          <div data-grow style="--i:0;height:100%;width:78%;border-radius:4px;background:var(--viz-cat-1)"></div>
+          <div style="position:absolute;top:-2px;bottom:-2px;left:64%;width:1px;background:var(--ink);opacity:.5"></div>
+        </div>
+      </div>
+      <div style="padding:var(--s2) 0">
+        <div style="display:flex;justify-content:space-between"><span class="t-meta" style="font-weight:500;color:var(--ink)">Miguel</span><span class="t-meta num" style="font-weight:600;color:var(--ink)">71%</span></div>
+        <div style="position:relative;height:6px;border-radius:4px;background:var(--tint-1);margin-top:var(--s1)">
+          <div data-grow style="--i:1;height:100%;width:71%;border-radius:4px;background:var(--viz-cat-1)"></div>
+          <div style="position:absolute;top:-2px;bottom:-2px;left:64%;width:1px;background:var(--ink);opacity:.5"></div>
+        </div>
+      </div>
+      <div style="padding:var(--s2) 0">
+        <div style="display:flex;justify-content:space-between"><span class="t-meta" style="font-weight:500;color:var(--ink)">Andrés</span><span class="t-meta num" style="font-weight:600;color:var(--ink)">59%</span></div>
+        <div style="position:relative;height:6px;border-radius:4px;background:var(--tint-1);margin-top:var(--s1)">
+          <div data-grow style="--i:2;height:100%;width:59%;border-radius:4px;background:var(--amber-border)"></div>
+          <div style="position:absolute;top:-2px;bottom:-2px;left:64%;width:1px;background:var(--ink);opacity:.5"></div>
+        </div>
+      </div>
+      <div class="row"><span class="t-meta" style="font-weight:500;color:var(--ink);flex:1">Beto</span><span class="t-cap">aún juntando datos</span></div>
+      <!-- <5 clientes maduros → sin barra (regla del módulo) -->
+    </div>
+    <p class="t-cap" style="margin-top:var(--s1)">La recompra cambia por horario y antigüedad. Úsalo para conversar, no para castigar.</p>
+  </div>
+  <div style="height:var(--s6)"></div>
+</section>
+
+<!-- ═══════════════════════ CLIENTELA ════════════════════════════════════ -->
+<section class="tab" id="tab-clientela">
+  <div style="padding:0 var(--s5) var(--s4)">
+    <p class="t-kicker">Clientela</p>
+    <p class="t-cap" style="margin-top:2px">La base como un todo — sin nombres ni teléfonos.</p>
+  </div>
+
+  <div class="card hero-card enter" data-enter>
+    <div style="display:flex;align-items:baseline;gap:var(--s2)">
+      <span class="t-display" data-fade style="--i:0">125</span>
+      <!-- COUNT(customers) -->
+      <span class="t-meta">clientes</span>
+      <span class="t-cap num" style="margin-left:auto">+5 este mes</span>
+      <!-- COUNT created_at ≥ inicio de mes -->
+    </div>
+    <div style="display:flex;height:14px;border-radius:4px;overflow:hidden;margin-top:var(--s4);gap:2px" data-fade style="--i:1">
+      <!-- composición: el color sigue al ciclo de vida (pertenencia teal secuencial; nuevos azul; yéndose ámbar; perdidos gris) -->
+      <div style="width:38%;background:var(--viz-seq-6)"></div>
+      <div style="width:22%;background:var(--viz-seq-4)"></div>
+      <div style="width:4%;background:var(--viz-cat-2)"></div>
+      <div style="width:21%;background:var(--amber-border)"></div>
+      <div style="width:15%;background:var(--past-line)"></div>
+    </div>
+    <div class="rows" style="margin-top:var(--s3)">
+      <!-- segmentos on-the-fly — lib/cadence.ts -->
+      <div class="row"><span class="dot" style="background:var(--viz-seq-6)"></span>
+        <span class="t-meta" style="flex:1"><strong style="color:var(--ink)">Campeones</strong> · tus más fieles</span>
+        <span class="t-d2" style="font-size:20px;line-height:26px" data-fade>48</span></div>
+      <div class="row"><span class="dot" style="background:var(--viz-seq-4)"></span>
+        <span class="t-meta" style="flex:1"><strong style="color:var(--ink)">Regulares</strong> · vienen a su ritmo</span>
+        <span class="t-d2" style="font-size:20px;line-height:26px" data-fade>28</span></div>
+      <div class="row"><span class="dot" style="background:var(--viz-cat-2)"></span>
+        <span class="t-meta" style="flex:1"><strong style="color:var(--ink)">Nuevos</strong> · aún sin patrón</span>
+        <span class="t-d2" style="font-size:20px;line-height:26px" data-fade>5</span></div>
+      <div class="row"><span class="dot" style="background:var(--amber-border)"></span>
+        <span class="t-meta" style="flex:1"><strong style="color:var(--ink)">Se están yendo</strong> · atrasados de su ritmo</span>
+        <span class="t-d2 warn" style="font-size:20px;line-height:26px" data-fade>26</span></div>
+      <div class="row"><span class="dot" style="background:var(--past-line)"></span>
+        <span class="t-meta" style="flex:1"><strong style="color:var(--ink)">Perdidos</strong> · hace mucho que no vuelven</span>
+        <span class="t-d2" style="font-size:20px;line-height:26px;color:var(--past-ink)" data-fade>18</span></div>
+    </div>
+  </div>
+
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Quién vuelve</p>
+    <div style="display:flex;gap:var(--s4);margin-top:var(--s3)">
+      <div style="flex:1">
+        <span class="t-d2" data-fade style="--i:0">86%</span>
+        <!-- 1ª visita hace 1–3 meses, volvieron ≤30d -->
+        <div class="track" style="height:4px;margin-top:var(--s2)"><div class="seg" data-grow style="--i:0;width:86%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s2)">Nuevos que vuelven<br><span class="num">95 de 110</span> · 1ª visita hace 1–3 meses</p>
+      </div>
+      <div style="width:1px;background:var(--line)"></div>
+      <div style="flex:1">
+        <span class="t-d2" data-fade style="--i:1">98%</span>
+        <!-- ≥3 visitas con visita en 60d -->
+        <div class="track" style="height:4px;margin-top:var(--s2)"><div class="seg" data-grow style="--i:1;width:98%;background:var(--viz-cat-1)"></div></div>
+        <p class="t-cap" style="margin-top:var(--s2)">Recompra de base<br><span class="num">118 de 120</span> · clientes de ≥3 visitas</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Cómo se mueven · vs cierre de junio</p>
+    <div class="rows" style="margin-top:var(--s1)">
+      <!-- transiciones de segmento — ClientelaView -->
+      <div class="row">
+        <span class="t-d2 up" style="font-size:22px;line-height:28px" data-fade>6</span>
+        <div style="flex:1"><p class="t-body" style="font-weight:500">Nuevos → Regulares</p>
+          <p class="t-cap">los estás fidelizando</p></div>
+        <svg class="icon up" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25"/></svg>
+      </div>
+      <div class="row">
+        <span class="t-d2 warn" style="font-size:22px;line-height:28px" data-fade>8</span>
+        <div style="flex:1"><p class="t-body" style="font-weight:500">Regulares → Se están yendo</p>
+          <p class="t-cap">se están enfriando</p></div>
+        <svg class="icon warn" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 4.5l15 15m0 0V8.25m0 11.25H8.25"/></svg>
+      </div>
+    </div>
+    <p class="t-cap" style="margin-top:var(--s2)">Otras 75 transiciones sin cambio de rumbo.</p>
+  </div>
+  <div style="height:var(--s6)"></div>
+</section>
+
+<!-- ═══════════════════════ ADMINISTRAR ══════════════════════════════════ -->
+<section class="tab" id="tab-administrar">
+  <div style="padding:0 var(--s5) var(--s4);display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <p class="t-kicker">Administrar</p>
+      <p class="t-body" style="font-weight:600;margin-top:2px">Jueves 30 de julio</p>
+    </div>
+    <div style="display:flex;gap:var(--s2)">
+      <button class="chip-filter" aria-label="Día anterior" style="width:36px;height:36px;border-radius:10px">‹</button>
+      <button class="chip-filter" aria-label="Día siguiente" style="width:36px;height:36px;border-radius:10px">›</button>
+    </div>
+  </div>
+
+  <div class="card hero-card enter" data-enter>
+    <div style="display:flex;align-items:baseline;gap:var(--s2)">
+      <span class="t-d2" data-fade>$2,960</span>
+      <!-- SUM ingresos hoy -->
+      <span class="t-meta"><span class="num">11</span> completadas · <span class="num">10</span> por atender</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:var(--s3);padding-bottom:var(--s2);border-bottom:var(--hairline)">
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-1)"></span> Carlos</span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-2)"></span> Andrés</span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-3)"></span> Miguel</span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-4)"></span> Beto</span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-5)"></span> Diego</span>
+    </div>
+    <!-- Riel del día: pasado atenuado por COLOR (past-ink), no por opacity -->
+    <div>
+      <!-- appointments hoy JOIN services JOIN staff -->
+      <div class="row" data-fade style="--i:0">
+        <span class="t-cap num" style="width:38px;text-align:right;color:var(--past-faint)">11:00</span>
+        <span style="width:3px;height:30px;border-radius:2px;background:var(--viz-cat-1);opacity:.4"></span>
+        <div style="flex:1"><p class="t-meta" style="color:var(--past-ink)">Corte · Miguel Ochoa</p><p class="t-cap" style="color:var(--past-faint)">Carlos</p></div>
+        <span class="chip" style="background:var(--past-bg);color:var(--past-ink)">✓</span>
+      </div>
+      <div class="row" data-fade style="--i:1;border-top:var(--hairline)">
+        <span class="t-cap num" style="width:38px;text-align:right;color:var(--past-faint)">12:00</span>
+        <span style="width:3px;height:30px;border-radius:2px;background:var(--viz-cat-3);opacity:.4"></span>
+        <div style="flex:1"><p class="t-meta" style="color:var(--past-ink)">Tinte · Cristina Aguilera</p><p class="t-cap" style="color:var(--past-faint)">Miguel</p></div>
+        <span class="chip" style="background:var(--past-bg);color:var(--past-ink)">✓</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--s2);margin:2px 0" data-fade style="--i:2">
+        <span class="t-cap num" style="width:38px;text-align:right;color:var(--red-ink);font-weight:600">17:40</span>
+        <div style="flex:1;height:2px;background:var(--red-border);border-radius:1px"></div>
+      </div>
+      <div class="row" data-fade style="--i:3">
+        <span class="t-cap num" style="width:38px;text-align:right">18:00</span>
+        <span style="width:3px;height:38px;border-radius:2px;background:var(--viz-cat-1)"></span>
+        <div style="flex:1"><p class="t-body" style="font-weight:500">Corte · Paul Hodique</p><p class="t-cap">Carlos</p></div>
+        <button class="btn">Terminó</button>
+        <!-- completeAppointment / noShowAppointment (acciones existentes) -->
+      </div>
+      <div class="row" data-fade style="--i:4;border-top:var(--hairline)">
+        <span class="t-cap num" style="width:38px;text-align:right">18:00</span>
+        <span style="width:3px;height:38px;border-radius:2px;background:var(--viz-cat-5)"></span>
+        <div style="flex:1"><p class="t-body" style="font-weight:500">Corte + barba · Gustavo Ramírez</p><p class="t-cap">Diego</p></div>
+        <button class="btn">Terminó</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--s2);padding:var(--s2) 0;border-top:1px dashed var(--line-2)" data-fade style="--i:5">
+        <span style="width:38px"></span>
+        <p class="t-cap" style="flex:1;text-align:center;color:var(--past-faint)">30 min libres · Andrés y Beto</p>
+        <!-- hueco entre citas — se dibuja, no se anuncia -->
+      </div>
+      <div class="row" data-fade style="--i:6;border-top:var(--hairline)">
+        <span class="t-cap num" style="width:38px;text-align:right">19:00</span>
+        <span style="width:3px;height:38px;border-radius:2px;background:var(--viz-cat-1)"></span>
+        <div style="flex:1"><p class="t-body" style="font-weight:500">Corte · Adrián Morales</p><p class="t-cap">Carlos</p></div>
+        <button class="btn">Terminó</button>
+      </div>
+    </div>
+    <button class="linklike" style="width:100%;text-align:center">Ver las 21 citas <span class="chev">›</span></button>
+  </div>
+
+  <!-- Equipo semana -->
+  <div class="card enter" data-enter>
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <p class="t-kicker">El equipo · esta semana</p>
+      <span class="t-cap num">$8,690 total</span>
+      <!-- SUM revenue semana por barbero — misma fuente StaffMetricsPanel -->
+    </div>
+    <div class="rows" style="margin-top:var(--s1)">
+      <div class="row"><span class="dot" style="background:var(--viz-cat-3)"></span>
+        <span class="t-meta" style="width:52px;font-weight:500;color:var(--ink)">Miguel</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:0;width:43%;background:var(--viz-cat-3)"></div></div>
+        <span class="t-meta num" style="width:56px;text-align:right;font-weight:600">$3,740</span></div>
+      <div class="row"><span class="dot" style="background:var(--viz-cat-1)"></span>
+        <span class="t-meta" style="width:52px;font-weight:500;color:var(--ink)">Carlos</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:1;width:19%;background:var(--viz-cat-1)"></div></div>
+        <span class="t-meta num" style="width:56px;text-align:right;font-weight:600">$1,680</span></div>
+      <div class="row"><span class="dot" style="background:var(--viz-cat-4)"></span>
+        <span class="t-meta" style="width:52px;font-weight:500;color:var(--ink)">Beto</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:2;width:19%;background:var(--viz-cat-4)"></div></div>
+        <span class="t-meta num" style="width:56px;text-align:right;font-weight:600">$1,660</span></div>
+      <div class="row"><span class="dot" style="background:var(--viz-cat-2)"></span>
+        <span class="t-meta" style="width:52px;font-weight:500;color:var(--ink)">Andrés</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:3;width:12%;background:var(--viz-cat-2)"></div></div>
+        <span class="t-meta num" style="width:56px;text-align:right;font-weight:600">$1,030</span></div>
+      <div class="row"><span class="dot" style="background:var(--viz-cat-5)"></span>
+        <span class="t-meta" style="width:52px;font-weight:500;color:var(--ink)">Diego</span>
+        <div class="track hbar" style="flex:1"><div class="seg" data-grow style="--i:4;width:7%;background:var(--viz-cat-5)"></div></div>
+        <span class="t-meta num" style="width:56px;text-align:right;font-weight:600">$580</span></div>
+    </div>
+    <p class="t-cap" style="margin-top:var(--s2)">Miguel <span class="num">1 falta</span> · Beto <span class="num">1 falta</span> · el resto sin faltas.</p>
+    <!-- no_show semana por barbero; staff sin citas NO se lista -->
+  </div>
+
+  <!-- Configuración: disclosure rows animadas -->
+  <div class="card enter" data-enter style="padding:var(--s1) var(--s4)">
+    <div class="rows">
+      <!-- cada fila abre el panel CRUD existente (aquí, demo con la 1ª) -->
+      <button class="row js-disc" aria-expanded="false" style="width:100%;background:none;border:none;font:inherit;cursor:pointer;text-align:left;min-height:48px" data-disc="disc-servicios">
+        <span class="t-body" style="font-weight:500;flex:1">Servicios y precios</span>
+        <span class="chev">›</span>
+      </button>
+      <div class="disc-body" id="disc-servicios"><div>
+        <div class="rows" style="padding-bottom:var(--s3)">
+          <div class="row"><span class="t-meta" style="flex:1">Corte de cabello</span><span class="t-meta num" style="font-weight:500">$200 · 30 min</span></div>
+          <div class="row"><span class="t-meta" style="flex:1">Corte + barba</span><span class="t-meta num" style="font-weight:500">$320 · 45 min</span></div>
+          <div class="row"><span class="t-meta" style="flex:1">Corte premium</span><span class="t-meta num" style="font-weight:500">$450 · 60 min</span></div>
+          <!-- services.price / duration_minutes — editor real = panel existente -->
+        </div>
+      </div></div>
+      <button class="row" style="width:100%;background:none;border:none;font:inherit;cursor:pointer;text-align:left;min-height:48px">
+        <span class="t-body" style="font-weight:500;flex:1">Barberos, PIN y horarios</span><span class="chev">›</span></button>
+      <button class="row" style="width:100%;background:none;border:none;font:inherit;cursor:pointer;text-align:left;min-height:48px">
+        <span class="t-body" style="font-weight:500;flex:1">Horario del negocio</span><span class="chev">›</span></button>
+      <button class="row" style="width:100%;background:none;border:none;font:inherit;cursor:pointer;text-align:left;min-height:48px">
+        <span class="t-body" style="font-weight:500;flex:1">Clientes inactivos y lista de espera</span>
+        <span class="chip" style="background:var(--amber-tint);color:var(--amber)">4</span><span class="chev">›</span></button>
+      <button class="row" style="width:100%;background:none;border:none;font:inherit;cursor:pointer;text-align:left;min-height:48px">
+        <span class="t-body" style="font-weight:500;flex:1">Reportes y reseñas</span><span class="chev">›</span></button>
+    </div>
+  </div>
+  <div style="height:var(--s6)"></div>
+</section>
+
+<!-- ═══════════════════════ ACTIVIDAD ════════════════════════════════════ -->
+<section class="tab" id="tab-actividad">
+  <div style="padding:0 var(--s5) var(--s4);display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <p class="t-kicker">Actividad</p>
+      <p class="t-cap" style="margin-top:2px">Quién cambió qué</p>
+    </div>
+    <div style="display:flex;gap:var(--s2)">
+      <button class="chip-filter on">Todo</button>
+      <button class="chip-filter">Citas</button>
+      <button class="chip-filter">Gestión</button>
+    </div>
+  </div>
+
+  <div class="card enter" data-enter>
+    <p class="t-kicker">Hoy · jueves 30</p>
+    <div class="rows" style="margin-top:var(--s1)">
+      <!-- appointment_audit + management_audit -->
+      <div class="row" data-fade style="--i:0;align-items:flex-start;padding:var(--s2) 0">
+        <span class="dot" style="background:var(--viz-cat-1);margin-top:6px"></span>
+        <p class="t-meta" style="flex:1"><strong style="color:var(--ink)">Bot</strong> agendó a Adrián Morales <span class="t-cap">· corte, 19:00</span></p>
+        <span class="t-cap num">17:22</span></div>
+      <div class="row" data-fade style="--i:1;align-items:flex-start;padding:var(--s2) 0">
+        <span class="dot" style="background:var(--viz-cat-1);margin-top:6px"></span>
+        <p class="t-meta" style="flex:1"><strong style="color:var(--ink)">Asistente</strong> marcó completada la cita de Benjamín Vargas <span class="t-cap">· 16:00</span></p>
+        <span class="t-cap num">16:34</span></div>
+      <div class="row" data-fade style="--i:2;align-items:flex-start;padding:var(--s2) 0">
+        <span class="dot" style="background:var(--viz-cat-2);margin-top:6px"></span>
+        <p class="t-meta" style="flex:1"><strong style="color:var(--ink)">Dueño</strong> cambió el precio de Corte premium <span class="t-cap num">· $420 → $450</span></p>
+        <span class="t-cap num">15:08</span></div>
+      <div class="row" data-fade style="--i:3;align-items:flex-start;padding:var(--s2) 0">
+        <span class="dot" style="background:var(--viz-cat-1);margin-top:6px"></span>
+        <p class="t-meta" style="flex:1"><strong style="color:var(--ink)">Carlos</strong> reagendó a Tomás Ruiz <span class="t-cap num">· 14:00 → 15:30</span></p>
+        <span class="t-cap num">13:41</span></div>
+    </div>
+
+    <p class="t-kicker" style="margin-top:var(--s4)">Ayer · miércoles 29</p>
+    <div class="rows" style="margin-top:var(--s1)">
+      <div class="row" data-fade style="--i:4;align-items:flex-start;padding:var(--s2) 0">
+        <span class="dot" style="background:var(--viz-cat-2);margin-top:6px"></span>
+        <p class="t-meta" style="flex:1"><strong style="color:var(--ink)">Dueño</strong> aprobó el día libre de Miguel <span class="t-cap">· lun 3 ago</span></p>
+        <span class="t-cap num">20:02</span></div>
+      <div class="row" data-fade style="--i:5;align-items:flex-start;padding:var(--s2) 0">
+        <span class="dot" style="background:var(--viz-cat-1);margin-top:6px"></span>
+        <p class="t-meta" style="flex:1"><strong style="color:var(--ink)">Asistente</strong> canceló la cita de Iván Jiménez <span class="t-cap">· no confirmó</span></p>
+        <span class="t-cap num">18:47</span></div>
+      <div class="row" data-fade style="--i:6;align-items:flex-start;padding:var(--s2) 0">
+        <span class="dot" style="background:var(--viz-cat-1);margin-top:6px"></span>
+        <p class="t-meta" style="flex:1"><strong style="color:var(--ink)">Bot</strong> agendó a Samuel Hernández <span class="t-cap">· corte, jue 30, 13:00</span></p>
+        <span class="t-cap num">17:15</span></div>
+    </div>
+
+    <div style="display:flex;gap:var(--s4);align-items:center;margin-top:var(--s3);padding-top:var(--s2);border-top:var(--hairline)">
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-1)"></span> citas</span>
+      <span class="t-cap"><span class="dot-s" style="background:var(--viz-cat-2)"></span> gestión</span>
+      <button class="linklike" style="margin-left:auto">Cargar más <span class="chev">›</span></button>
+    </div>
+  </div>
+  <div style="height:var(--s6)"></div>
+</section>
+
+</div><!-- /screen -->
+
+<!-- Tab bar: 5 pestañas (límite duro a 375px). Actividad relegada. -->
+<nav class="tabbar">
+  <button class="on" data-tab="panorama" aria-label="Panorama">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/></svg>
+    Panorama</button>
+  <button data-tab="analisis" aria-label="Análisis">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0 0 20.25 18V6A2.25 2.25 0 0 0 18 3.75H6A2.25 2.25 0 0 0 3.75 6v12A2.25 2.25 0 0 0 6 20.25Z"/></svg>
+    Análisis</button>
+  <button data-tab="clientela" aria-label="Clientela">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg>
+    Clientela</button>
+  <button data-tab="administrar" aria-label="Administrar">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.559.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.894.149c-.424.07-.764.383-.929.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 0 1-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.398.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+    Administrar</button>
+  <button data-tab="actividad" aria-label="Actividad">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+    Actividad</button>
+</nav>
+</div><!-- /phone -->
+
+<!-- ═══════════════════════ SISTEMA ════════════════════════════════════════ -->
+<div class="sistema" id="sistema">
+  <p class="t-kicker">Sistema · dueño v3</p>
+  <h1 class="t-title" style="margin-top:var(--s2)">Los tokens y las reglas detrás de la maqueta</h1>
+
+  <section>
+    <p class="t-kicker">"Lujoso", operativamente — 8 propiedades verificables</p>
+    <table class="tok" style="margin-top:var(--s3)">
+      <tr><th>Propiedad</th><th>Cómo se verifica en la maqueta</th></tr>
+      <tr><td>1 · Escala cerrada: 6 estilos, 4 pesos, nunca 700</td><td>inspeccionar font-size: solo 40/26/20/15/13/11</td></tr>
+      <tr><td>2 · Rejilla de 4px en todo espacio vertical</td><td>todo padding/margin/alto ∈ {4,8,12,16,20,24,32}</td></tr>
+      <tr><td>3 · Un héroe por pantalla; 2º nivel ≤ 26px</td><td>un solo 40px por pestaña (Actividad: ninguno, a propósito)</td></tr>
+      <tr><td>4 · Elevación única: hairline norma, sombra solo flota</td><td>contar box-shadow: 1 (marco del teléfono/overlays)</td></tr>
+      <tr><td>5 · Una familia de iconos, un trazo</td><td>todos los svg: viewBox 24, stroke 1.5, esquinas redondas</td></tr>
+      <tr><td>6 · Movimiento solo con tokens y con motivo</td><td>toda transición usa --dur-1/2 y --ease-*; reduce-motion la apaga</td></tr>
+      <tr><td>7 · Táctil ≥44px; lo no tocable, sin affordance</td><td>filas 44px; botones con hit extendido; barras/celdas sin cursor ni tap-state</td></tr>
+      <tr><td>8 · Ningún estado indefinido</td><td>matriz de 6 estados abajo; skeleton con la forma; vacíos diseñados</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <p class="t-kicker">Escala tipográfica</p>
+    <div style="margin-top:var(--s3)">
+      <div class="spec"><span class="t-cap">display · 40/44 · 300 · −0.02em · tabular</span><span class="t-display num">$95,510</span></div>
+      <div class="spec"><span class="t-cap">d2 · 26/32 · 300 · −0.01em · tabular</span><span class="t-d2 num">160 h</span></div>
+      <div class="spec"><span class="t-cap">title · 20/26 · 600 · −0.01em</span><span class="t-title">Título de documento</span></div>
+      <div class="spec"><span class="t-cap">body · 15/22 · 400 (500/600 énfasis)</span><span class="t-body">Corte + barba · Gustavo Ramírez</span></div>
+      <div class="spec"><span class="t-cap">meta · 13/18 · 400</span><span class="t-meta">vs la semana pasada a esta altura</span></div>
+      <div class="spec"><span class="t-cap">cap · 11/16 · 500 · +0.02em</span><span class="t-cap">52 libres · proyección</span></div>
+      <div class="spec"><span class="t-cap">kicker · 11/16 · 600 · +0.10em · MAYÚS</span><span class="t-kicker">Capacidad sin usar</span></div>
+    </div>
+    <p class="t-meta" style="margin-top:var(--s3)">El tracking de +0.10em en el kicker es lo que separa una etiqueta de sección de un texto encogido — la pieza que faltaba. Números: tabular-nums SIEMPRE; el display nunca corre (sin count-up: un número que corre es mentira momentánea).</p>
+  </section>
+
+  <section>
+    <p class="t-kicker">Rejilla y ritmo</p>
+    <div class="grid-demo" style="margin-top:var(--s3)">
+      <div style="height:4px"></div><div style="height:8px"></div><div style="height:12px"></div>
+      <div style="height:16px"></div><div style="height:20px"></div><div style="height:24px"></div><div style="height:32px"></div>
+    </div>
+    <p class="t-cap" style="margin-top:var(--s2)">4 · 8 · 12 · 16 · 20 · 24 · 32</p>
+    <p class="t-meta" style="margin-top:var(--s2)">Interior de card: 16. Entre cards: 20. Entre secciones de página: 24. Filas de lista: mín 44 (táctil). El aire no es sobrante: es el múltiplo que toca.</p>
+  </section>
+
+  <section>
+    <p class="t-kicker">Elevación — decisión: hairline primero</p>
+    <div style="display:flex;gap:var(--s4);margin-top:var(--s3)">
+      <div style="flex:1;background:var(--canvas);border-radius:12px;padding:var(--s4)"><p class="t-cap">0 · canvas</p><p class="t-meta" style="margin-top:var(--s1)">el plano de fondo</p></div>
+      <div style="flex:1;background:var(--card);border:var(--hairline);border-radius:12px;padding:var(--s4)"><p class="t-cap">1 · card</p><p class="t-meta" style="margin-top:var(--s1)">hairline, sin sombra</p></div>
+      <div style="flex:1;background:var(--card);border:var(--hairline);border-radius:12px;padding:var(--s4);box-shadow:var(--shadow-float)"><p class="t-cap">2 · flota</p><p class="t-meta" style="margin-top:var(--s1)">la única sombra: sheets, toasts, el marco</p></div>
+    </div>
+    <p class="t-meta" style="margin-top:var(--s3)">Antes: sombra en 15 cards = niebla. Ahora la sombra significa "está sobre el flujo". La tab bar flota por blur + hairline, no por sombra.</p>
+  </section>
+
+  <section>
+    <p class="t-kicker">Iconografía</p>
+    <div style="display:flex;gap:var(--s5);align-items:center;margin-top:var(--s3)">
+      <svg class="icon" style="width:22px;height:22px" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0 0 20.25 18V6A2.25 2.25 0 0 0 18 3.75H6A2.25 2.25 0 0 0 3.75 6v12A2.25 2.25 0 0 0 6 20.25Z"/></svg>
+      <svg class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25"/></svg>
+      <svg class="icon" style="width:28px;height:28px;color:var(--past-faint)" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+      <span class="chev" style="font-size:18px">›</span>
+    </div>
+    <p class="t-meta" style="margin-top:var(--s3)">Una familia: Heroicons outline (la que ya usa la app) — viewBox 24, trazo 1.5, remates redondos. Tamaños: 22 navegación · 18 inline · 28 sello de estado. <strong>Regla de admisión:</strong> un icono entra solo si (a) navega, (b) es la affordance repetida de una fila (›), o (c) sella un estado vacío/error. Nunca decora un número ni un título. Los emoji del legacy (⚠️ 🔴 🚨) se van: eran la señal más fuerte de "ensamblado".</p>
+  </section>
+
+  <section>
+    <p class="t-kicker">Movimiento — 4 tokens, 6 usos, 0 adorno</p>
+    <table class="tok" style="margin-top:var(--s3)">
+      <tr><th>Token</th><th>Valor</th><th>Se usa para</th></tr>
+      <tr><td class="num">--dur-1</td><td class="num">140 ms</td><td>micro: tap (scale .97 + wash), toggle de filtro</td></tr>
+      <tr><td class="num">--dur-2</td><td class="num">260 ms</td><td>estructura: pestaña, disclosure, entrada de dato</td></tr>
+      <tr><td class="num">--ease-out</td><td class="num">cubic-bezier(.2,.8,.2,1)</td><td>lo que entra o crece</td></tr>
+      <tr><td class="num">--ease-inout</td><td class="num">cubic-bezier(.4,0,.2,1)</td><td>lo que se transforma en su lugar</td></tr>
+      <tr><td class="num">stagger</td><td class="num">30 ms × índice</td><td>secuencia de series (riqueza sin lentitud)</td></tr>
+    </table>
+    <p class="t-meta" style="margin-top:var(--s3)">Cada movimiento explica una relación: la pestaña sube desde la barra que la llamó; el disclosure crece desde su fila; la barra crece desde su eje (la magnitud se construye — es el dato, no un adorno); el heatmap aparece por columnas en el orden del tiempo; las barras de composición (100%) NO crecen — una proporción no "se acumula". El skeleton tiene la forma exacta de lo que reemplaza y pulsa a 1.2s. <code>prefers-reduced-motion</code> apaga todo.</p>
+  </section>
+
+  <section>
+    <p class="t-kicker">Estados — ninguna superficie indefinida</p>
+    <table class="tok" style="margin-top:var(--s3)">
+      <tr><th>Estado</th><th>Regla</th></tr>
+      <tr><td>Lleno</td><td>el diseño base</td></tr>
+      <tr><td>Denso</td><td>tope + resumen + "Ver todos (n)" que expande en su lugar</td></tr>
+      <tr><td>Escaso</td><td>sin colapsos: si cabe, se muestra todo (el colapso es para el exceso, no un hábito)</td></tr>
+      <tr><td>Vacío</td><td>sello (icono 28) + qué va a haber aquí + qué lo llena. Nunca seis ceros</td></tr>
+      <tr><td>Cargando</td><td>skeleton con la FORMA del contenido; pulso 1.2s; nunca spinner</td></tr>
+      <tr><td>Error</td><td>hairline + icono + "No se pudo cargar" + Reintentar. Sin culpa, sin drama</td></tr>
+    </table>
+    <div style="display:flex;gap:var(--s4);margin-top:var(--s4)">
+      <div style="flex:1" class="empty">
+        <svg class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+        <p class="t-body" style="font-weight:500">Aún no hay patrones</p>
+        <p class="t-cap" style="margin-top:var(--s1)">Con algunas visitas más, aquí verás a quién recuperar.</p>
+      </div>
+      <div style="flex:1;border:var(--hairline);border-radius:var(--r-card);padding:var(--s4)">
+        <div class="error-box">
+          <svg class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+          <div style="flex:1"><p class="t-body" style="font-weight:500">No se pudo cargar</p></div>
+          <button class="btn">Reintentar</button>
+        </div>
+      </div>
+      <div style="flex:1;border:var(--hairline);border-radius:var(--r-card);padding:var(--s4)">
+        <div class="skb" style="width:60%;height:12px"></div>
+        <div class="skb" style="width:120px;height:26px;margin-top:var(--s2)"></div>
+        <div style="display:flex;gap:var(--s2);margin-top:var(--s3);align-items:center">
+          <div class="skb" style="flex:1;height:6px"></div><div class="skb" style="width:48px;height:12px"></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="t-kicker" style="margin-top:var(--s6)">El control "Mensaje" — sus 5 estados (una acción nunca miente)</p>
+    <div style="display:flex;gap:var(--s3);margin-top:var(--s3);flex-wrap:wrap;align-items:center">
+      <button class="btn">Mensaje</button>
+      <button class="btn sending" style="animation:none;opacity:.7">Enviando…</button>
+      <button class="btn sent">✓ Enviado</button>
+      <button class="btn fail" style="pointer-events:none">Reintentar</button>
+      <button class="btn gated">Mensaje</button>
+    </div>
+    <p class="t-meta" style="margin-top:var(--s3)">Reposo → enviando (pulso, sin afirmar nada) → <strong>enviado solo si el proveedor confirmó</strong>, o "Reintentar" con la razón legible en la fila ("No llegó · fuera de la ventana de WhatsApp"). El quinto estado es la regla de producción: <strong>mientras la cuenta de WhatsApp del negocio no esté verificada (WABA de prueba), el botón se rinde en la variante sin affordance</strong> — gris, sin tap-state, con una línea única bajo la lista: "El envío se activa cuando WhatsApp esté conectado". Un "✓ Enviado" sobre un envío no confirmado está prohibido por diseño: el endpoint devuelve <code>{sent:false}</code> en silencio y la UI debe decirlo.</p>
+  </section>
+
+  <section>
+    <p class="t-kicker">Paleta categórica — B elegida (la maqueta entera la usa) · A, descartada</p>
+    <div style="display:flex;gap:var(--s6);margin-top:var(--s4)">
+      <div style="flex:1">
+        <p class="t-cap">A — la validada primero</p>
+        <div style="display:flex;gap:var(--s2);margin-top:var(--s2)">
+          <div class="swatch" style="background:#008F76"></div><div class="swatch" style="background:#3E6FB8"></div>
+          <div class="swatch" style="background:#B45309"></div><div class="swatch" style="background:#5B4CC4"></div>
+          <div class="swatch" style="background:#B4508A"></div>
+        </div>
+        <div class="rows" style="margin-top:var(--s3)">
+          <div class="row" style="min-height:36px"><span class="dot" style="background:#B45309"></span><span class="t-meta" style="width:52px">Miguel</span>
+            <div class="track hbar" style="flex:1"><div class="seg" style="width:43%;background:#B45309"></div></div><span class="t-meta num" style="width:52px;text-align:right">$3,740</span></div>
+          <div class="row" style="min-height:36px"><span class="dot" style="background:#008F76"></span><span class="t-meta" style="width:52px">Carlos</span>
+            <div class="track hbar" style="flex:1"><div class="seg" style="width:19%;background:#008F76"></div></div><span class="t-meta num" style="width:52px;text-align:right">$1,680</span></div>
+          <div class="row" style="min-height:36px"><span class="dot" style="background:#5B4CC4"></span><span class="t-meta" style="width:52px">Beto</span>
+            <div class="track hbar" style="flex:1"><div class="seg" style="width:19%;background:#5B4CC4"></div></div><span class="t-meta num" style="width:52px;text-align:right">$1,660</span></div>
+        </div>
+        <p class="t-cap" style="margin-top:var(--s2)">validator: PASS (peor CVD adyacente ΔE 11.9 · peor tritán 5.5)</p>
+      </div>
+      <div style="flex:1">
+        <p class="t-cap">B — contenida (recomendada)</p>
+        <div style="display:flex;gap:var(--s2);margin-top:var(--s2)">
+          <div class="swatch" style="background:#008F76"></div><div class="swatch" style="background:#35619F"></div>
+          <div class="swatch" style="background:#9C500F"></div><div class="swatch" style="background:#4F42B5"></div>
+          <div class="swatch" style="background:#9C3F73"></div>
+        </div>
+        <div class="rows" style="margin-top:var(--s3)">
+          <div class="row" style="min-height:36px"><span class="dot" style="background:#9C500F"></span><span class="t-meta" style="width:52px">Miguel</span>
+            <div class="track hbar" style="flex:1"><div class="seg" style="width:43%;background:#9C500F"></div></div><span class="t-meta num" style="width:52px;text-align:right">$3,740</span></div>
+          <div class="row" style="min-height:36px"><span class="dot" style="background:#008F76"></span><span class="t-meta" style="width:52px">Carlos</span>
+            <div class="track hbar" style="flex:1"><div class="seg" style="width:19%;background:#008F76"></div></div><span class="t-meta num" style="width:52px;text-align:right">$1,680</span></div>
+          <div class="row" style="min-height:36px"><span class="dot" style="background:#4F42B5"></span><span class="t-meta" style="width:52px">Beto</span>
+            <div class="track hbar" style="flex:1"><div class="seg" style="width:19%;background:#4F42B5"></div></div><span class="t-meta num" style="width:52px;text-align:right">$1,660</span></div>
+        </div>
+        <p class="t-cap" style="margin-top:var(--s2)">validator: PASS (peor CVD adyacente ΔE 12.0 · peor tritán 10.2 — mejor que A)</p>
+      </div>
+    </div>
+    <p class="t-meta" style="margin-top:var(--s4)">B conserva el teal de marca idéntico y baja la luminosidad de los otros cuatro: más tinta, menos juguete — y mide MEJOR en el canal tritán. La desaturación pura quedó descartada por el validador (croma &lt; 0.1 = "se ve gris"). <strong>Decisión tomada: B — es la que consume toda la maqueta y la que fija el Paso 1 del plan.</strong></p>
+  </section>
+</div>
+
+<script>
+  // ── Modo captura (?full): sin marco, alto libre, sin Sistema ──
+  var isFull = location.search.includes('full');
+  if (isFull) {
+    var ph = document.querySelector('.phone'), sc = document.getElementById('screen');
+    ph.style.margin = '0'; ph.style.borderRadius = '0'; ph.style.boxShadow = 'none'; ph.style.minHeight = '0';
+    sc.style.height = 'auto'; sc.style.overflow = 'visible'; sc.style.paddingBottom = '0';
+    document.querySelector('nav.tabbar').style.position = 'static';
+    document.getElementById('sistema').style.display = 'none';
+    document.body.style.background = 'var(--canvas)';
+  }
+
+  // ── Pestañas: skeleton (primera visita) → contenido con entrada escalonada ──
+  var seen = { panorama: true };
+  var SKEL = { panorama: 'sk-panorama', analisis: 'sk-analisis',
+               clientela: 'sk-generic', administrar: 'sk-generic', actividad: 'sk-generic' };
+  function enterCharts(tabEl) {
+    tabEl.querySelectorAll('[data-enter]').forEach(function (c) { c.classList.remove('in'); });
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      tabEl.querySelectorAll('[data-enter]').forEach(function (c) { c.classList.add('in'); });
+    }); });
+  }
+  function show(key) {
+    document.querySelectorAll('nav.tabbar button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.tab === key);
+    });
+    document.querySelectorAll('section.tab').forEach(function (s) { s.classList.remove('on'); });
+    document.querySelectorAll('.sk').forEach(function (s) { s.classList.remove('on'); });
+    var tabEl = document.getElementById('tab-' + key);
+    var scr = document.getElementById('screen');
+    if (!seen[key] && !isFull) {
+      document.getElementById(SKEL[key]).classList.add('on');
+      scr.scrollTop = 0;
+      setTimeout(function () {
+        document.getElementById(SKEL[key]).classList.remove('on');
+        tabEl.classList.add('on');
+        enterCharts(tabEl);
+        seen[key] = true;
+      }, 420);
+    } else {
+      tabEl.classList.add('on');
+      scr.scrollTop = 0;
+      enterCharts(tabEl);
+    }
+  }
+  document.querySelectorAll('nav.tabbar button').forEach(function (btn) {
+    btn.addEventListener('click', function () { show(btn.dataset.tab); });
+  });
+  // Entrada inicial de Panorama
+  window.addEventListener('load', function () { enterCharts(document.getElementById('tab-panorama')); });
+
+  // ── "Ver todos" (recuperar): el resto entra como parte de la lista ──
+  var btnRec = document.getElementById('btn-recuperar');
+  btnRec.addEventListener('click', function () {
+    var body = document.getElementById('disc-recuperar');
+    var open = body.classList.toggle('open');
+    btnRec.setAttribute('aria-expanded', open);
+    btnRec.firstChild.textContent = open ? 'Ocultar ' : 'Ver todos ';
+  });
+
+  // ── Disclosure de configuración ──
+  document.querySelectorAll('.js-disc').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var body = document.getElementById(b.dataset.disc);
+      var open = body.classList.toggle('open');
+      b.setAttribute('aria-expanded', open);
+    });
+  });
+
+  // ── CTA "Mensaje": máquina de estados HONESTA — reposo → enviando → enviado
+  //    ó no-se-pudo (con la razón legible). El éxito nunca se afirma antes de
+  //    tiempo. data-outcome="fail" demuestra el fallo (Meta 131047: fuera de la
+  //    ventana de 24h). Producción, mientras la WABA sea de prueba: variante
+  //    .gated (sin affordance) — especificada en Sistema.
+  document.querySelectorAll('.js-send').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.classList.add('sending');
+      b.textContent = 'Enviando…';
+      setTimeout(function () {
+        b.classList.remove('sending');
+        if (b.dataset.outcome === 'fail') {
+          b.classList.add('fail');
+          b.textContent = 'Reintentar';
+          var r = b.closest('.row').querySelector('.reason');
+          if (r) r.classList.add('on');
+          b.dataset.outcome = '';           // el reintento demuestra el camino feliz
+        } else {
+          b.classList.add('sent');
+          b.textContent = '✓ Enviado';
+          var row = b.closest('.row');
+          row.style.transition = 'opacity var(--dur-2) var(--ease-inout)';
+          row.style.opacity = '.55';
+          var r2 = b.closest('.row').querySelector('.reason');
+          if (r2) r2.classList.remove('on');
+        }
+      }, 700);
+    });
+  });
+</script>
+</body>
+</html>

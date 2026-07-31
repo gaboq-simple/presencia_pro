@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dueño v3 — actual vs propuesta</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',ui-sans-serif,system-ui,sans-serif;background:#DDE3E3;color:#16181C;padding:32px 16px}
+  h1{font-size:20px;font-weight:600;text-align:center}
+  p.sub{font-size:13px;color:#5A5E63;text-align:center;margin-top:4px}
+  section{max-width:860px;margin:40px auto 0}
+  h2{font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#5A5E63;
+     border-left:2px solid #00C2A8;padding-left:10px}
+  .pair{display:flex;gap:16px;margin-top:12px;align-items:flex-start}
+  .col{flex:1;min-width:0}
+  .col p{font-size:11px;color:#8A8F94;margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em}
+  .col img{width:100%;display:block;border-radius:12px;box-shadow:0 4px 24px rgba(16,40,38,.14);background:#fff}
+  @media (max-width:640px){.pair{flex-direction:column}}
+</style>
+</head>
+<body>
+  <h1>Vista de dueño — actual vs. propuesta v3</h1>
+  <p class="sub">375px · negocio denso (seed) · iteración 2: movimiento + sistema de detalle + quinta pestaña. La maqueta viva (dueno-v3.html) es la referencia; estas capturas son estáticas. Las capturas son página completa: la ALTURA también es parte del juicio.</p>
+
+  <section>
+    <h2>Panorama</h2>
+    <p style="font-size:12px;color:#8A8F94;margin-top:6px">Alto de página: actual 9,145 px → propuesta 1,970 px (4.6× más corta; el BI se mudó a Análisis)</p>
+    <div class="pair">
+      <div class="col"><p>Actual</p><img src="capturas/actual-panorama.png" alt="Panorama actual"></div>
+      <div class="col"><p>Propuesta</p><img src="capturas/maqueta-panorama.png" alt="Panorama propuesta"></div>
+    </div>
+  </section>
+
+
+  <section>
+    <h2>Análisis — pestaña nueva</h2>
+    <p style="font-size:12px;color:#8A8F94;margin-top:6px">No existe hoy: recibe el BI que vivía plegado en Panorama (mes, semana típica, recompra) más dos huecos del diagnóstico (mezcla por servicio, canal + la ventana al bot). Sin contraparte "actual".</p>
+    <div class="pair">
+      <div class="col"><p>Propuesta</p><img src="capturas/maqueta-analisis.png" alt="Análisis propuesta"></div>
+      <div class="col"></div>
+    </div>
+  </section>
+  <section>
+    <h2>Clientela</h2>
+    <p style="font-size:12px;color:#8A8F94;margin-top:6px">Alto de página: actual 1,063 px → propuesta 861 px (1.2× más corta)</p>
+    <div class="pair">
+      <div class="col"><p>Actual</p><img src="capturas/actual-clientela.png" alt="Clientela actual"></div>
+      <div class="col"><p>Propuesta</p><img src="capturas/maqueta-clientela.png" alt="Clientela propuesta"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Administrar</h2>
+    <p style="font-size:12px;color:#8A8F94;margin-top:6px">Alto de página: actual 7,076 px → propuesta 1,202 px (5.9× más corta; servicios y canal viven en Análisis)</p>
+    <div class="pair">
+      <div class="col"><p>Actual</p><img src="capturas/actual-administrar.png" alt="Administrar actual"></div>
+      <div class="col"><p>Propuesta</p><img src="capturas/maqueta-administrar.png" alt="Administrar propuesta"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Actividad</h2>
+    <p style="font-size:12px;color:#8A8F94;margin-top:6px">Alto de página: actual 5,240 px → propuesta 812 px (6.5× más corta)</p>
+    <div class="pair">
+      <div class="col"><p>Actual</p><img src="capturas/actual-actividad.png" alt="Actividad actual"></div>
+      <div class="col"><p>Propuesta</p><img src="capturas/maqueta-actividad.png" alt="Actividad propuesta"></div>
+    </div>
+  </section>
+</body>
+</html>

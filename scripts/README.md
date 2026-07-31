@@ -103,3 +103,27 @@ SELECT COUNT(*) FROM appointments;
 ```
 
 See `RUNBOOK.md` → Section 6 for the full restore procedure.
+
+---
+
+## seed-demo-densa.sql
+
+Resetea la barbería demo (`barberia-demo`) a un estado **denso y conocido**: 5
+barberos con horarios distintos, 8 servicios, ~125 clientes y ~3 meses de citas
+(no-shows, walk-ins, clientes enfriándose, días libres). Para demos a barberías
+reales y para diseñar vistas con densidad real.
+
+- **Idempotente y determinista**: purga las citas del negocio y re-siembra con
+  pseudo-aleatorio por hash (sin `random()`). Fechas relativas a HOY en la
+  timezone del negocio — corre fresco cualquier día.
+- **⚠️ Destructivo** para el negocio objetivo (borra citas, waitlist,
+  notificaciones y su audit — suspende momentáneamente el trigger append-only
+  de `appointment_audit`). **Solo BD demo, nunca producción con datos reales.**
+- Limpia las filas de Actividad con "Acción sin identificar" (SQL directo).
+
+```bash
+psql "$SUPABASE_DB_URL" -f scripts/seed-demo-densa.sql
+```
+
+O pegar el archivo completo en el SQL editor de Supabase. Para otro negocio,
+cambiar el slug en `seed_cfg` (primera línea de configuración del archivo).
