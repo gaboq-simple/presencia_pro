@@ -175,6 +175,55 @@ PostgREST → vacío (patrón de verificación de `appointment_tips`).
 
 ---
 
+## Paso D1b · [SEGURO] Seed denso de caja (demo)
+
+**Objetivo:** la demo deja de heredar 1,316 citas selladas con CERO cortes,
+movimientos y descuadres. Sin esto: (a) la pieza que más diferencia — el
+cuadre — se ve vacía justo en las demos de venta, y (b) la red visual de
+D4/D5 fotografiaría estados vacíos y los aprobaría como correctos.
+
+**Decisión (paso propio, no prerrequisito de D2):** toca un artefacto
+compartido con estándar propio (idempotente, determinista, relativo a hoy) y
+su aceptación es distinta (doble corrida = mismo estado). Como prerrequisito
+difuso dentro de otro paso se ejecutaría tarde o a medias — exactamente el
+hueco que motiva este paso.
+
+**Archivo:** `scripts/seed-demo-densa.sql` (requiere la migración D1 aplicada
+a la demo). Mismo pseudo-aleatorio `pg_temp.h`, sin `random()`.
+
+**Qué agrega:**
+- **Purga** (sección 1 del script): `caja_movimientos` y `caja_cortes` del
+  negocio se suman al borrado inicial.
+- `businesses.caja_fondo = 500` — ÚNICA excepción nueva al "NO TOCA
+  businesses" del header (config numérica, idempotente; documentarla ahí).
+- `payment_method` en las citas completadas del seed: hash ≈75% efectivo /
+  22% tarjeta / 3% transferencia.
+- **Movimientos de ~30 días**: 0–3 por día por hash — entradas walk-in
+  ($100–$250) y producto ($80–$400); 1–2 salidas por semana (insumos/retiro,
+  $60–$200); autor = barbero elegido por hash; `occurred_on` local.
+- **Cortes diarios de las últimas ~4 semanas, con huecos**: domingos sin
+  corte (negocio cerrado) + ~1 día hábil por semana saltado por hash + **HOY
+  sin corte** (para poder crearlo en vivo durante una demo). `expected_*`
+  calculado del propio seed con LA MISMA regla de `lib/corte.ts` (citas por
+  `completed_at` local + entradas − salidas por riel + fondo 500);
+  `counted` = expected + ruido chico de **SIGNO MIXTO** por hash
+  (−$80…+$80, sin cero sistemático — un cuadre perfecto diario es la señal
+  de teatro que el plan mismo vigila); firmado por staff por hash;
+  `created_at` ≈ 21:30 local del día.
+- **Resumen final del script**: + conteo de movimientos, cortes, días sin
+  corte y suma de descuadres.
+
+**Caso de aceptación:** correrlo DOS veces el mismo día → mismos conteos y
+mismos descuadres (determinismo); cuando exista la serie del dueño (D5),
+muestra signos mezclados y HOY aparece "sin corte aún".
+
+**Qué NO tocar:** bot_conversations / conversation_messages / bot_logs /
+`appointment_tips` (igual que hoy); ninguna otra columna de `businesses`.
+**Red visual**: capturas idénticas — **ninguna superficie lee estas tablas
+todavía**.
+
+---
+
 ## Paso D2 · [SEGURO] El cobro real: monto + riel al completar
 
 **Objetivo:** completar una cita registra cuánto entró de verdad y por qué
@@ -343,12 +392,9 @@ ausente se entera el mismo día.
   sin corte aún / resultado del día con firma y hora + serie de 7 días con
   signo (negativo `--color-red-ink`, positivo ámbar — atención, no alarma;
   tokens ya existentes).
-- **Seed** (`scripts/seed-demo-densa.sql`, actualizar EN este paso, antes de
-  la captura "antes"): `payment_method` por hash (≈75% efectivo / 22% tarjeta
-  / 3% transferencia) en las citas completadas; ~30 días de movimientos
-  (0–3/día, deterministas) y de cortes firmados con descuadres chicos de
-  signo variable, `expected_*` calculado del propio seed. Actualizar el
-  resumen final del script.
+- **Seed**: ya denso desde D1b (payment_method + movimientos + cortes con
+  descuadres de signo mixto) — correrlo al inicio del paso como siempre; la
+  serie del dueño y la card nacen con datos, no vacías.
 
 **Caso numérico (a mano, negocio `America/Mexico_City`, servidor `TZ=UTC`):**
 fondo $500. Citas completadas HOY (por `completed_at` local): $200 ef + $320
@@ -440,8 +486,8 @@ con autor.
   fuente nueva; los agregados "de agenda" de equipo/servicios conservan su
   etiqueta).
 - **Orden combinado (dependencias):**
-  `S6-SEC-01 (cierre, fuera de este plan) → dv3-1 → dv3-2 → D1 → D2 → D3 →
-  D4 → D5 → D6 → dv3-3' → dv3-4' → dv3-5 → dv3-6`.
+  `S6-SEC-01 (cierre, fuera de este plan) → dv3-1 → dv3-2 → D1 → D1b → D2 →
+  D3 → D4 → D5 → D6 → dv3-3' → dv3-4' → dv3-5 → dv3-6`.
   dv3-1/2 no comparten archivos con D1–D3 y pueden traslaparse. Cada paso
   deja `main` deployable.
 
@@ -460,14 +506,24 @@ Si aparecen las dos primeras → se adelanta la raya (la captura se vuelve la
 nómina). Si aparece solo la última con las demás en verde → el problema no
 era el dinero; re-examinar la premisa del producto para dueños ausentes.
 
-## Prerrequisitos operativos (manuales, documentar en scripts/README.md)
+## Dependencias manuales, por paso
 
-1. Sembrar en Vault: `edge_base_url`, `edge_invoke_secret` (D3) y
-   `app_base_url` + `cron_secret` para el nudge (D6).
-2. Registrar el `report_whatsapp` del dueño como destinatario de prueba de la
-   WABA (mientras siga sin verificar).
-3. Cliente #1: confirmar modelo de pago y quién cierra el local (si no llega
-   en 48 h: caja única, decisión 7). Configurar `caja_fondo` y
-   `report_whatsapp` al onboardear.
-4. Al verificar los crons de pg_cron, ELIMINAR los schedules manuales del
-   Dashboard de Supabase.
+**Regla para el ejecutor:** ninguna dependencia manual bloquea el MERGE de su
+paso — bloquea solo el efecto externo, que debe quedar en su **estado honesto
+y visible**. PROHIBIDO improvisar fallbacks (email, console.log-como-aviso,
+invocar el cron a mano "para que pase"): un efecto bloqueado que se ve
+bloqueado es correcto; uno maquillado es un bug.
+
+| Paso | Dependencia manual (quién: Gabriel) | Si no está lista al ejecutar |
+|---|---|---|
+| D1 · D1b · D2 · D4 | **ninguna** | — |
+| D3 | Vault: `edge_base_url` + `edge_invoke_secret` (documentar siembra en `scripts/README.md`) | la migración aplica igual; el cron corre y falla VISIBLE en `cron.job_run_details` — esa es la aceptación parcial |
+| D5 | número del dueño (`report_whatsapp`) registrado como destinatario de prueba de la WABA (sigue sin verificar) | captura, foto congelada y descuadre funcionan COMPLETOS; el aviso queda "no entregado" (`notify_error`) — estado honesto, no fallo del paso |
+| D6 | Vault: `app_base_url` + `cron_secret` (nudge) · la misma WABA de D5 | titular "Cobrado" y `owner_last_seen_at` funcionan; el nudge no dispara — visible en `cron.job_run_details` |
+
+**Operativos no ligados a un paso:**
+1. Cliente #1: confirmar modelo de pago y quién cierra el local (si no llega
+   en 48 h desde 2026-08-12: caja única, decisión 7). Configurar `caja_fondo`
+   y `report_whatsapp` al onboardear.
+2. Al verificar los crons de pg_cron (D3/D6), ELIMINAR los schedules manuales
+   del Dashboard de Supabase.
