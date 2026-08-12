@@ -276,6 +276,45 @@ asistente; TODO lo del dueño idéntico píxel a píxel.
 
 ---
 
+## Paso D2b · [SEGURO] El desglose a un tap: drawer de historial por cita
+
+**Objetivo:** que ningún número del dueño sea un número sin origen — tocar una
+cita abre su historial (quién la creó, quién la movió, quién la cobró, cuánto y
+por qué riel), leído del audit que ya se captura.
+
+**De dónde sale este paso (no es alcance nuevo):** era la mitad no construida de
+la capa visible del audit de S6-SEC-01 (Fase 2c-i previó "drawer por cita +
+panel del dueño"). El panel ya vive en la pestaña **Actividad**
+(`lib/activityFeed.ts` → `ActividadView`); el drawer no existe —
+`appointment_audit` no tiene otro lector en la app. **Decisión de Gabriel
+(2026-08-12):** deja de estar diferido sin fecha y se ancla acá, **después de
+D2**, porque antes de D2 el historial de una cita muestra poco más que cambios
+de estado; con D2 el audit ya trae `price_charged` y `payment_method` en
+`new_data`/`changed_fields` (el caso numérico de D2 lo fija: `changed_fields ⊇
+{status, price_charged, payment_method}` con actor staff real) y el drawer se
+vuelve el desglose a un tap del principio de trazabilidad.
+
+**Secuencia:** en cualquier punto **después de D2**; NO bloquea D3–D6 ni
+dv3-3'…6 (nadie depende de él). Si el orden aprieta, va al final.
+
+**Superficie (v1 = el dueño):** la lectura del audit está restringida a
+admin/owner por decisión de 045 — el JSONB lleva PII (`booking_name`, `notes`,
+teléfono por join) y barberos/asistentes NO la leen. El drawer v1 cuelga
+entonces de una superficie del dueño; llevarlo a la ficha del barbero
+(`AppointmentSheet.tsx`) sería **reabrir esa decisión de PII**, no un detalle de
+implementación: si se quiere, se decide aparte.
+
+**Qué NO está especificado todavía (y no se improvisa):** de qué superficie
+exacta del dueño cuelga, y con qué componentes. Este plan no lo fija porque se
+escribió antes de que existieran D2 y el restyle de dv3-3'/4', que son los que
+definen dónde vive un número tocable. Cuando le toque el turno, este paso pide
+el mismo pase de verificación ruta-y-línea que los demás — no arrancar sin él.
+
+**Qué NO tocar:** el trigger de captura (045) y la inmutabilidad — el drawer es
+SOLO lectura; `appointment_tips` (jamás); la RLS de 045.
+
+---
+
 ## Paso D3 · [SEGURO] Cabos sueltos + crons versionados
 
 **Objetivo:** lo pasado sin resolver se ve (nunca se absorbe en un total), y
@@ -488,8 +527,9 @@ con autor.
 - **Orden combinado (dependencias):**
   `S6-SEC-01 (cierre, fuera de este plan) → dv3-1 → dv3-2 → D1 → D1b → D2 →
   D3 → D4 → D5 → D6 → dv3-3' → dv3-4' → dv3-5 → dv3-6`.
-  dv3-1/2 no comparten archivos con D1–D3 y pueden traslaparse. Cada paso
-  deja `main` deployable.
+  dv3-1/2 no comparten archivos con D1–D3 y pueden traslaparse. **D2b** (el
+  drawer) no está en la ruta crítica: cualquier punto después de D2, sin
+  bloquear a nadie. Cada paso deja `main` deployable.
 
 ## Cómo se ve el fracaso (instrumentación desde el día 1)
 
