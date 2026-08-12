@@ -1,6 +1,7 @@
 // ─── State: CONFIRMED ─────────────────────────────────────────────────────────
 // El cliente confirmó la cita. Este handler:
-//   1. Crea el appointment en Supabase con source='bot'.
+//   1. Crea el appointment en Supabase (source='bot', o 'walkin' si pidió "ahorita")
+//      por el RPC atribuido de la migración 056 — ver el comentario del call-site.
 //   2. Actualiza/crea el customer con favorite_staff_id y favorite_service_id.
 //   3. Notifica al barbero asignado vía sendWhatsAppMeta() — best-effort (try/catch).
 //   4. Inserta fila en scheduled_notifications para reminder_1h.
@@ -119,21 +120,24 @@ export async function handleConfirmed(
   }
 
   // ── Crear cita ────────────────────────────────────────────────────────────
-
-  const { data: apptData, error: apptError } = await tenantDb(supabase, business.id)
-    .table('appointments')
-    .insert({
-      staff_id:     context.staffId,
-      service_id:   context.serviceId,
-      customer_id:  context.customerId ?? null,
-      starts_at:    startsAt.toISOString(),
-      ends_at:      endsAt.toISOString(),
-      status:       'confirmed',
-      source:       context.isWalkIn ? 'walkin' : 'bot',
-      booking_name: context.bookingName ?? null,
-    })
-    .select('id')
-    .single();
+  // Vía RPC, no `.insert()` directo: la función de la migración 056 hace
+  // set_config('app.actor_type','bot', is_local=true) + INSERT en la MISMA
+  // transacción, para que el audit de citas (045) firme la fila como 'bot'. Con un
+  // insert de PostgREST el GUC no aplica (cada request es su propia txn) y la cita
+  // de WALK-IN caía en 'unknown' — el residuo de la Fase 2c-ii.
+  // El aislamiento de tenant NO se afloja: `business_id` sigue siendo el
+  // server-derivado (resolución por whatsapp_phone_number_id), y la coherencia
+  // staff/servicio/cliente ↔ negocio la impone el trigger 052 en la BD.
+  const { data: apptData, error: apptError } = await supabase.rpc('bot_create_appointment', {
+    p_business_id:  business.id,
+    p_staff_id:     context.staffId,
+    p_service_id:   context.serviceId,
+    p_customer_id:  context.customerId ?? null,
+    p_starts_at:    startsAt.toISOString(),
+    p_ends_at:      endsAt.toISOString(),
+    p_source:       context.isWalkIn ? 'walkin' : 'bot',
+    p_booking_name: context.bookingName ?? null,
+  });
 
   // Detectar violación del constraint de solapamiento (23P01) o unicidad (23505).
   // Aunque el pre-check reduce la probabilidad, el constraint es la garantía final.
@@ -184,7 +188,8 @@ export async function handleConfirmed(
     };
   }
 
-  const appointmentId = (apptData as { id: string }).id;
+  // El RPC devuelve el uuid pelado (RETURNS uuid), no la fila.
+  const appointmentId = apptData as unknown as string;
 
   // ── Actualizar customer con favoritos ─────────────────────────────────────
 

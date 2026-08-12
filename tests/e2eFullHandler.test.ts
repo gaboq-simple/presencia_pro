@@ -85,7 +85,28 @@ function makeSupabase(tables: TableData) {
     };
     return builder;
   };
-  return { from, rpc: async () => ({ data: null, error: null }) } as never;
+  // El alta de cita del bot va por RPC (migración 056: set_config del actor + INSERT
+  // atómicos, para que el audit la firme 'bot'). El fake modela lo que hace la
+  // función: escribe la fila en `appointments` y devuelve el uuid pelado.
+  const rpc = async (fn: string, args: Record<string, unknown>) => {
+    if (fn !== 'bot_create_appointment') return { data: null, error: null };
+    seq += 1;
+    const id = syntheticId(seq);
+    (tables['appointments'] ?? (tables['appointments'] = [])).push({
+      id,
+      business_id:  args['p_business_id'],
+      staff_id:     args['p_staff_id'],
+      service_id:   args['p_service_id'],
+      customer_id:  args['p_customer_id'],
+      starts_at:    args['p_starts_at'],
+      ends_at:      args['p_ends_at'],
+      status:       'confirmed',
+      source:       args['p_source'],
+      booking_name: args['p_booking_name'],
+    });
+    return { data: id, error: null };
+  };
+  return { from, rpc } as never;
 }
 
 function tables(): TableData {

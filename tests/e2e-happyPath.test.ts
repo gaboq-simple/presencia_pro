@@ -64,7 +64,15 @@ function makeSupabase(tables: TableData) {
     };
     return builder;
   };
-  return { from } as never;
+  // El alta de cita del bot va por RPC (migración 056: set_config del actor +
+  // INSERT atómicos, para que el audit la firme 'bot'). El fake modela lo que
+  // devuelve la función: el uuid pelado de la cita creada.
+  const rpc = async (fn: string) => {
+    if (fn !== 'bot_create_appointment') return { data: null, error: null };
+    seq += 1;
+    return { data: `00000000-0000-4000-8000-${String(seq).padStart(12, '0')}`, error: null };
+  };
+  return { from, rpc } as never;
 }
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
