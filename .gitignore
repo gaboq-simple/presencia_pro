@@ -49,3 +49,4 @@ onboarding/*.md
 
 # credenciales y accesos — NO al repo
 apps/lifestyle/ACCESS.md
+supabase/.temp/
