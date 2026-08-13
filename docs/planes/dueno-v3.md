@@ -188,6 +188,29 @@ cambio. El criterio es `insercion.mjs`: **0 px por encima del punto de corte** y
 mira (en D3 era la deriva del reloj, 12:53→12:55). Sin ese paso no se puede
 distinguir "se insertó una fila" de "se movió algo que nadie pidió".
 
+**Las dos trampas de `insercion.mjs` (medidas en D4, 2026-08-13).** El
+comparador supone que TODO lo que está debajo del corte se desplaza junto. Dos
+cosas de esta app no lo hacen, y las dos acusan decenas de miles de píxeles que
+no son ningún cambio:
+- **Lo `position:fixed` no se corre con el documento.** En una captura
+  `fullPage`, Chromium pinta la tab bar fija de la vista del barbero a la altura
+  del PRIMER viewport (1624 px = 812 × 2 con `deviceScaleFactor: 2`). Comparada
+  con desplazamiento, esa franja queda enfrentada contra contenido que sí se
+  movió: en D4 fueron **146k px** de puro artefacto. Hay que EXCLUIR la banda —
+  la variante `insercion-fix.mjs` toma `<exY1> <exY2>` y salta la fila si cae
+  ahí en cualquiera de las dos imágenes.
+- **`bg-grid` tiene período de 20 px CSS (40 px de imagen).** Si Δ no es
+  múltiplo de él, todas las líneas de la rejilla quedan desalineadas y aparecen
+  bandas PERIÓDICAS de fondo vacío (en D4: 85 bandas, 35k px, una cada 40 px).
+  Se reconocen por la periodicidad y se confirman recortando: mismo fondo, las
+  líneas en otro offset.
+Ninguna de las dos invalida el criterio; lo que invalidan es leer el número
+crudo de `abajo` sin mirar. **El control que sí cierra la discusión es el piso
+de ruido**: dos capturas CONSECUTIVAS del mismo estado (mismo código, misma BD).
+En D4 ese piso fue 3,188 px en barbero y 27,250 px en asistente — más que la
+diferencia que había quedado arriba del corte, que es lo que la vuelve
+irrelevante. Correrlo ANTES de discutir bandas chicas.
+
 **La espera es por CONTENIDO, nunca por tiempo fijo (endurecido 2026-08-12, D1).**
 Varios paneles de Administrar son client-side y tardan más que cualquier timeout
 razonable: `/api/reports/staff-metrics` mide **1–3.3 s** en dev con el seed denso,
@@ -227,6 +250,23 @@ bandas del diff sean **únicamente etiquetas de tiempo**, verificado con recorte
 una banda por fila del log, de la altura de una línea de texto, y al mirarla lo
 único que cambia es el número de minutos. Cualquier banda que no sea eso es un
 cambio real y hay que explicarlo.
+
+**Y desde D3, en Actividad los píxeles dejaron de ser criterio (verificado en
+D4).** El cron de auto-cancel corre CADA MINUTO y escribe filas de
+`appointment_audit`; el feed muestra los 50 eventos más recientes. O sea que la
+ventana **se mueve sola** entre el "antes" y el "después": en D4 entraron ~6
+filas nuevas en los 16 minutos que separaron las dos capturas, y ninguna era del
+paso. Ni el diff plano ni el comparador de inserción pueden separar eso de un
+cambio real. La evidencia en esa pestaña es otra, y son tres piezas:
+1. **SQL de la ventana** — el UNION de las tablas del feed ordenado por
+   `created_at DESC LIMIT 50`, que dice exactamente cuántas filas del paso
+   entraron y cuántas desplazaron (en D4: 48 audit + 2 caja);
+2. **recorte del encabezado** con el cambio pedido a la vista (el chip nuevo, la
+   fila nueva con su etiqueta);
+3. **la lista leída por RUTA REAL** (login, filtro, `innerText`), que prueba el
+   contenido y no su forma.
+El diff de píxeles se sigue corriendo, pero como termómetro: sirve para decir
+"esto es lo que se movió", no para aprobar ni reprobar el paso.
 
 La BD demo es densa y reproducible: si hace falta resetearla,
 `scripts/seed-demo-densa.sql` (destructivo, solo demo — ver scripts/README.md).

@@ -32,6 +32,7 @@ Este protocolo **debe** seguirse al pie de la letra. Si Claude Code se desvía, 
 2. Si algo falla o se desvió, lo documenta en "Notas de ejecución" de esa tarea.
 3. Cambia estado a `🟢 done` con fecha.
 4. **Merge a main (regla de protocolo, 2026-08-12):** un paso con sus gates y su red de seguridad visual en verde se mergea como parte del cierre — `git checkout main && git merge --ff-only <rama> && git push origin main` — salvo instrucción contraria de Gabriel. Un paso cerrado no se queda esperando en una rama: el siguiente ejecutor arranca de `origin/main` y tiene que ver lo que ya está verificado. Si el `--ff-only` no aplica, **frenar y avisar** en vez de forzar un merge o rebasar a ciegas.
+   **Precedencia (2026-08-13):** este punto 4 manda sobre cualquier línea anterior de este archivo o de `docs/` que diga lo contrario — "Claude Code no mergea", "sin merge (lo dispara Gabriel)", "commit local, sin merge/PR". Esas líneas viven dentro de tareas ya cerradas y son el REGISTRO del protocolo de entonces, no la regla vigente; se dejan como están porque reescribirlas falsearía lo que pasó. Si al ejecutar aparece una que se lea como instrucción presente, gana el punto 4.
 5. Reporta a Gabriel: "Tarea X cerrada. Cambios en archivos A, B, C. Pendiente de revisión humana: Y."
 6. **NO** avanza a la siguiente tarea automáticamente.
 

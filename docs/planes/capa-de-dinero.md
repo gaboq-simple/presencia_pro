@@ -114,15 +114,29 @@ paso agrega una fila, todo lo de abajo se recorre y un diff plano acusa "cambió
 media pantalla" (en D3, 52% y 34% sin ningún otro cambio). El estándar ahí es el
 comparador con desplazamiento —`insercion.mjs`, en el bloque de `dueno-v3.md`
 junto a `cap.mjs`—: **0 px por encima del punto de corte** y `antes[y] ==
-después[y+Δ]` por debajo, más el recorte del residuo que quede. **UI interactiva (D2 en adelante):** cuando lo que
+después[y+Δ]` por debajo, más el recorte del residuo que quede. **Ese comparador
+tiene dos trampas, medidas en D4:** lo `position:fixed` NO se corre con el
+documento en una captura `fullPage` (la tab bar del barbero: 146k px de puro
+artefacto) y `bg-grid` se desalinea si Δ no es múltiplo de 20 px (bandas
+periódicas de fondo vacío). Y el control que cierra la discusión no es el cero
+sino **el piso de ruido de dos capturas consecutivas del mismo estado** (en D4:
+3,188 px barbero / 27,250 px asistente, más que lo que quedaba arriba del
+corte). Las tres cosas están junto al script, en `dueno-v3.md` — leerlas antes
+de discutir bandas chicas. **UI interactiva (D2 en adelante):** cuando lo que
 el paso entrega solo existe durante un gesto (el chip de la ventana de Deshacer,
 una hoja abierta), el estático prueba la AUSENCIA de cambios no pedidos y la
 evidencia del cambio pedido son **capturas del gesto + aserciones en la BD** —
 cero bandas estructurales es entonces el resultado correcto, no uno pobre.
 **Excepción en Actividad:** su log rinde tiempos
 relativos ("hace 3 min"), así que el 0 es inalcanzable por construcción — ahí el
-criterio es que las bandas sean **solo etiquetas de tiempo**, verificado con
-recorte; cualquier otra banda es un cambio real. Para las vistas de staff (pasos D2/D4/D5): mismo
+criterio era que las bandas fueran **solo etiquetas de tiempo**, verificado con
+recorte. **Desde D3 ni eso alcanza (verificado en D4): en Actividad los píxeles
+dejaron de ser criterio.** El cron de auto-cancel corre cada minuto y escribe
+`appointment_audit`; como el feed muestra los 50 eventos más recientes, la
+ventana se mueve sola entre el antes y el después (en D4 entraron ~6 filas
+ajenas al paso en 16 minutos). La evidencia ahí es **SQL de la ventana + recorte
+del encabezado + la lista leída por ruta real**; el diff se corre como
+termómetro, no como veredicto. Para las vistas de staff (pasos D2/D4/D5): mismo
 viewport y reglas, login por PIN en `/barberia-demo/staff` (barbero 1234,
 asistente 5678).
 
