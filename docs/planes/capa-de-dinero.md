@@ -67,7 +67,10 @@ nace con D2 activo, así que no tendrá ninguna.
 - **Gates por paso**: `cd apps/lifestyle && npx tsc --noEmit` → 0 errores ·
   `npx eslint .` → 0 errores nuevos · `npm test` (raíz) completo en verde.
 - **Cálculo nuevo = módulo puro** (sin DB/red/React) en `apps/lifestyle/src/lib/`
-  con tests `node:test` — el patrón de `lib/pulso.ts`.
+  con tests `node:test` en **`tests/` de la RAÍZ del repo** (lo que `npm test`
+  corre por lista explícita; `apps/lifestyle/tests/` no existe) — el patrón de
+  `lib/pulso.ts`. Agregar el archivo a la lista del script `test` del
+  `package.json` raíz: si no está en la lista, no corre.
 - **Verificación con `TZ=UTC`**: dev server `TZ=UTC` (config `lifestyle-utc`
   de `.claude/launch.json`, puerto 3210). Los bugs de TZ se esconden si la
   máquina está en hora de México.
@@ -91,7 +94,11 @@ nace con D2 activo, así que no tendrá ninguna.
 
 **Prerrequisito: `scripts/seed-demo-densa.sql` corrido contra la BD demo al
 inicio del paso** (antes de la captura "antes") y **prohibido re-sembrarlo
-entre el antes y el después del mismo paso**. Capturas a 375px, página
+entre el antes y el después del mismo paso**. Con la re-siembra programada de
+D1b (GitHub Action a las 05:00 CDMX), el "antes" y el "después" del mismo paso
+se capturan **el mismo día local** — si el paso cruza la medianoche, la corrida
+nocturna re-siembra en medio y la comparación deja de ser sobre los mismos
+datos. Capturas a 375px, página
 completa, comparadas contra el criterio del paso ("qué debe cambiar / qué no").
 Procedimiento Playwright temporal: el bloque de `docs/planes/dueno-v3.md`
 (sección "Red de seguridad visual") — mismo script `cap.mjs`, mismas
@@ -143,6 +150,12 @@ ninguna superficie cambie todavía.
 
 Índice `(business_id, occurred_on)`. Trigger append-only: bloquea UPDATE y
 DELETE siempre.
+
+**Nota de retención:** `note` es texto libre que fluirá a Actividad (D4). La
+deuda 🟠 de retención (SPRINT, disparador "antes del primer cliente real")
+debe cubrir también `caja_movimientos`/`caja_cortes`: o las filas de dinero
+son permanentes y solo `note` lleva política, o se cubren completas. Nada que
+construir aquí — que la deuda las nombre.
 
 **Tabla `caja_cortes`:**
 
@@ -222,23 +235,21 @@ muestra signos mezclados y HOY aparece "sin corte aún".
 **Red visual**: capturas idénticas — **ninguna superficie lee estas tablas
 todavía**.
 
-**Pregunta abierta que se decide EN este paso (no antes, no por el ejecutor):
-¿re-siembra programada del demo de madrugada?** El seed es relativo a HOY y
-caduca en días: verificado el 2026-08-12, el demo llevaba una semana vencido y
-estaba **sin citas hoy y sin futuras** (documentado en `scripts/README.md`). Eso
-degrada dos cosas a la vez — el demo como herramienta de venta se ve muerto, y
-la red de seguridad visual se vuelve un sello de goma (dos pantallas vacías
-idénticas "prueban" que nada se rompió). Con `pg_cron` ya versionado por D3, un
-`cron.schedule` nocturno que re-siembre `barberia-demo` es barato de construir.
-**El riesgo a sopesar, y por eso no se decide de antemano:** el seed es
-DESTRUCTIVO — borra las citas del negocio — así que una re-siembra automática
-puede tirar el estado creado EN VIVO durante una demo o una verificación (una
-cita agendada delante del cliente, un corte capturado a mano). Variantes a
-considerar cuando toque: no hacer nada (seguir corriéndolo a mano, con la señal
-de vencimiento del README), cron nocturno a secas, cron con guardia (saltar si
-hubo escritura de la app en las últimas N horas), o re-siembra sin purga
-(extender la ventana de fechas en vez de borrar). **Dependencia:** cualquier
-variante con cron va DESPUÉS de D3.
+**Re-siembra programada (resuelto 2026-08-12): GitHub Action, no pg_cron.**
+`.github/workflows/reseed-demo.yml` — cron `0 11 * * *` (05:00 CDMX, minimiza
+choque con demos en vivo) + `workflow_dispatch`; corre
+`psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f scripts/seed-demo-densa.sql`
+con el **SESSION POOLER** (regla de `scripts/README.md` — runners IPv4-only).
+Por qué no pg_cron: exigiría el seed como función en la BD (dos fuentes de
+verdad, drift contra el archivo versionado) y dejaría un job residente con
+permiso permanente de suspender `trg_appt_audit_immutable`; un runner externo
+con secret es mejor postura. El secret es `SUPABASE_DB_URL` — el MISMO que
+bloquea el backup R2 (S6-OPS-01): una siembra manual de Gabriel destraba dos
+deudas. El seed es destructivo: la corrida de las 05:00 tira lo creado en
+vivo el día anterior (aceptable en demo — documentarlo en el header del
+workflow). El workflow entra CON este paso; seed fallido = workflow rojo,
+visible. Consecuencia en la red visual (aplicada también en Reglas globales):
+el "antes" y el "después" del mismo paso se capturan el **mismo día local**.
 
 ---
 
@@ -452,6 +463,14 @@ ausente se entera el mismo día.
 - **Seed**: ya denso desde D1b (payment_method + movimientos + cortes con
   descuadres de signo mixto) — correrlo al inicio del paso como siempre; la
   serie del dueño y la card nacen con datos, no vacías.
+- **`onboarding/guion-corte.md` nuevo — el guion del corte.** La explicación
+  de ~5 líneas para quien cuenta la caja el primer día, escrita JUNTO con el
+  microcopy de la card (mismo vocabulario, o divergen): qué contar (efectivo
+  del cajón, voucher de la terminal), qué teclear, que la app revela el
+  esperado DESPUÉS, que la diferencia con signo es dato y no regaño, y que
+  corregir = fila nueva (nada se borra). Reglas de copy del plan aplican
+  (cero SAT, cero juicio, mexicano neutro). El dueño de DECIRLA es Gabriel en
+  el onboarding; el artefacto queda versionado.
 
 **Caso numérico (a mano, negocio `America/Mexico_City`, servidor `TZ=UTC`):**
 fondo $500. Citas completadas HOY (por `completed_at` local): $200 ef + $320
@@ -467,6 +486,9 @@ altera la fila congelada — aparece como "después del corte" en la card.
 `report_whatsapp` del dueño como destinatario de prueba de la WABA mientras
 siga sin verificar; sin eso el aviso mostrará "no entregado" (estado honesto,
 la captura y el descuadre funcionan igual).
+
+**Aceptación (suma):** el guion existe y cada término que usa aparece igual en
+la UI de la card (verificación cruzada a mano).
 
 **Qué NO tocar:** el titular del dueño (D6); `appointment_tips`; el esperado
 jamás viaja al cliente antes del contado.
@@ -515,6 +537,58 @@ pestañas idénticas.
 
 ---
 
+## Paso D7 · [SEGURO] Digest del operador — las señales llegan solas
+
+**Objetivo:** la tabla "Cómo se ve el fracaso" gana lector sin depender de la
+memoria de nadie: un correo semanal al operador (Gabriel) con las 4 señales,
+SIEMPRE, por un canal que funciona hoy (Resend — la WABA no lo gatea).
+
+**Por qué no el aviso diario del corte:** audiencia equivocada
+(`report_whatsapp` = el dueño del negocio, no el operador), gateado por la
+WABA, y "días sin corte" no puede viajar en un aviso que solo existe cuando
+hubo corte. Si el DUEÑO ve señales de teatro sobre su propio personal es
+decisión de producto aparte — abierta, no se construye en v1.
+
+**Archivos:**
+- `apps/lifestyle/src/lib/senales.ts` **nuevo** (puro) + `tests/senales.test.ts`
+  (raíz). Entradas: cortes de los últimos 14 días locales (resueltos por
+  `replaces_id` — la última fila por día manda, regla de D5), movimientos,
+  cobrado por día (`lib/cobrado.ts`, D6), `owner_last_seen_at`, hoy local.
+  Las 4 señales:
+  1. **Ritual:** cortes firmados / días lun–sáb de los últimos 7 días locales
+     (supuesto v1 documentado: hábil = lun–sáb).
+  2. **Convergencia:** por corte,
+     `pct = (|cash_diff| + |card_diff|) / max(1, (expected_cash − fondo_snapshot) + expected_card)`;
+     mediana de la ventana de 14 y comparación semana reciente vs anterior.
+  3. **Teatro:** (a) cortes de los últimos 7 con `cash_diff = 0 AND
+     card_diff = 0` exactos; (b) sábados de la ventana con cobrado ≥ mediana
+     diaria de la ventana y CERO movimientos fuera de agenda.
+  4. **Dueño:** días desde `owner_last_seen_at` ("nunca" si NULL).
+- `app/api/internal/senales-digest/route.ts` (Bearer `CRON_SECRET`, patrón
+  del nudge de D6): negocios activos → UN correo con sección por negocio →
+  `sendEmail` de `@presenciapro/engine/notifications`
+  (`packages/engine/src/notifications/email.ts`, puro, credenciales
+  inyectadas) a `OPS_ALERT_EMAIL`. **Siempre se envía, aunque todo esté en
+  verde:** el silencio de un lunes es el meta-aviso de tubería rota. Asunto:
+  `Zlot · señales · semana del {lunes}`.
+- Migración de cron (patrón D3): `cron.schedule` `0 14 * * 1` UTC = lunes
+  08:00 CDMX.
+
+**Regla de copy:** dato + umbral de la tabla de fracaso al lado
+("mediana 3.2% · umbral 10%"), sin juicio.
+
+**Caso numérico (liga con el de D5):** corte con `cash_diff = −50`,
+`card_diff = 0`, `expected_cash = 1,230`, `fondo_snapshot = 500`,
+`expected_card = 850` → `pct = 50 / ((1,230 − 500) + 850) = 50 / 1,580 =`
+**3.2%**. Ritual: 5 cortes en 6 días lun–sáb → "5/6". Teatro: 0 cortes en
+cero exacto → "0/5".
+
+**Qué NO tocar:** el aviso del dueño (D5) y el nudge (D6) quedan idénticos;
+ninguna superficie de la app cambia.
+**Red visual:** capturas idénticas — nada de UI. Gates estándar.
+
+---
+
 ## La raya — palanca de retención (NO es un paso de este plan)
 
 La raya (liquidación por barbero según `compensation_model`) se difiere por
@@ -544,7 +618,7 @@ con autor.
   etiqueta).
 - **Orden combinado (dependencias):**
   `S6-SEC-01 (cierre, fuera de este plan) → dv3-1 → dv3-2 → D1 → D1b → D2 →
-  D3 → D4 → D5 → D6 → dv3-3' → dv3-4' → dv3-5 → dv3-6`.
+  D3 → D4 → D5 → D6 → D7 → dv3-3' → dv3-4' → dv3-5 → dv3-6`.
   dv3-1/2 no comparten archivos con D1–D3 y pueden traslaparse. **D2b** (el
   drawer) no está en la ruta crítica: cualquier punto después de D2, sin
   bloquear a nadie. Cada paso deja `main` deployable.
@@ -575,9 +649,10 @@ bloqueado es correcto; uno maquillado es un bug.
 | Paso | Dependencia manual (quién: Gabriel) | Si no está lista al ejecutar |
 |---|---|---|
 | D1 · D1b · D2 · D4 | **ninguna** | — |
-| D3 | Vault: `edge_base_url` + `edge_invoke_secret` (documentar siembra en `scripts/README.md`) | la migración aplica igual; el cron corre y falla VISIBLE en `cron.job_run_details` — esa es la aceptación parcial |
+| D3 | Vault: `edge_base_url` + `edge_invoke_secret` (documentar siembra en `scripts/README.md`) + **deploy de la edge function `dispatch-auto-cancel`** (la versión con RPC, pendiente desde 2c-ii) | la migración aplica igual; el cron corre y falla VISIBLE en `cron.job_run_details` — esa es la aceptación parcial. Sin el deploy el cron invocaría la versión vieja: los `no_show` caerían `actor_type='unknown'` y la aceptación fallaría sin razón obvia — desplegar ANTES de correr la aceptación |
 | D5 | número del dueño (`report_whatsapp`) registrado como destinatario de prueba de la WABA (sigue sin verificar) | captura, foto congelada y descuadre funcionan COMPLETOS; el aviso queda "no entregado" (`notify_error`) — estado honesto, no fallo del paso |
 | D6 | Vault: `app_base_url` + `cron_secret` (nudge) · la misma WABA de D5 | titular "Cobrado" y `owner_last_seen_at` funcionan; el nudge no dispara — visible en `cron.job_run_details` |
+| D7 | `RESEND_API_KEY` + `OPS_ALERT_EMAIL` en el env de Vercel · el mismo `app_base_url`/`cron_secret` de D6 en Vault | `lib/senales.ts` y la route se prueban por curl con Bearer; el envío fallido queda visible en la respuesta — nunca fingir envío |
 
 **Operativos no ligados a un paso:**
 1. Cliente #1: confirmar modelo de pago y quién cierra el local (si no llega

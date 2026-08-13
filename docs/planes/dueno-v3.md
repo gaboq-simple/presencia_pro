@@ -145,7 +145,10 @@ presentacionales reutilizables, con la matemática en un módulo puro testeado.
   mínimo visual 2% si valor>0), `seqStep(intensidad)` → 1..7,
   `huecoStep(horas, maxHoras)` → 1..4, `foldOtros(filas, tope)` (top-N + fila
   "Otros k" agregada).
-- `apps/lifestyle/tests/viz.test.ts` (mismo runner `node:test` del repo).
+- `tests/viz.test.ts` (mismo runner `node:test` del repo) *(raíz del repo — lo
+  que `npm test` corre por lista explícita; `apps/lifestyle/tests/` no existe)*.
+- `apps/lifestyle/src/app/globals.css` — **solo agregar** (keyframes,
+  `--stagger`, `--animate-*`, reduced-motion); ningún token existente cambia.
 - `apps/lifestyle/src/components/admin/viz/`: `BarraFila.tsx` (label + pista
   `--color-gap` + relleno + valor tabular derecha), `Apilada.tsx` (100%,
   segmentos con gap 2px, SIN animación de crecimiento — una proporción no se
@@ -155,6 +158,42 @@ presentacionales reutilizables, con la matemática en un módulo puro testeado.
   Todos Server Components; entrada por CSS animation con
   `animation-delay: calc(var(--i)*30ms)` (índice por prop).
 
+**Movimiento del kit (hueco cerrado 2026-08-12).** dv3-1 declaró duraciones y
+curvas pero ningún `@keyframes`; el kit los necesita. Entran aquí:
+
+```css
+/* :root — junto a --dur-1/--dur-2 (dv3-1) */
+--stagger: 30ms;
+
+/* Nivel superior del archivo — CSS plano. El nombre lo resuelve el navegador
+   en runtime; la poda de @theme (hallazgo dv3-1) no los puede tocar. */
+@keyframes viz-grow-x  { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+@keyframes viz-grow-y  { from { transform: scaleY(0) } to { transform: scaleY(1) } }
+@keyframes viz-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes viz-sk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+
+/* Dentro del bloque @theme static de dv3-1 (emisión garantizada, mismo motivo) */
+--animate-viz-grow-x:  viz-grow-x  var(--dur-2) var(--ease-out) backwards;
+--animate-viz-grow-y:  viz-grow-y  var(--dur-2) var(--ease-out) backwards;
+--animate-viz-fade-in: viz-fade-in var(--dur-2) var(--ease-out) backwards;
+--animate-viz-sk-pulse: viz-sk-pulse 1.2s var(--ease-inout) infinite;
+
+/* Al final del archivo — se apaga por tokens (cubre también las transiciones
+   de los pasos 3'–6, regla 6 del Sistema de la maqueta) */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1: 0ms; --dur-2: 0ms; --stagger: 0ms; }
+  .animate-viz-sk-pulse { animation: none; }
+}
+```
+
+**Asignación:** `BarraFila` relleno = `animate-viz-grow-x` + `origin-left` ·
+`Columnas` = `animate-viz-grow-y` + `origin-bottom` · `HeatmapGrid` celdas =
+`animate-viz-fade-in` con `--i` = índice de **columna** (orden temporal) ·
+`StatFila` = `animate-viz-fade-in` · `Apilada` = **sin animación** (regla
+existente) · `Esqueletos` = `animate-viz-sk-pulse`. `backwards` porque un
+elemento con delay debe nacer oculto. El delay del paso cambia de `30ms`
+literal a `calc(var(--i) * var(--stagger))` (mecanismo de la maqueta, línea 134).
+
 **Regla escrita:** magnitud = un matiz (cat-1); identidad = categórica en orden
 fijo; composición 100% no crece; heatmap aparece por columnas (orden del
 tiempo); números `tabular-nums` siempre; el número héroe nunca hace count-up.
@@ -163,6 +202,23 @@ tiempo); números `tabular-nums` siempre; el número héroe nunca hace count-up.
 `pctWidth(1, 388) → 2` (mínimo visual); `pctWidth(0, 388) → 0`;
 `seqStep(0) → 1`, `seqStep(0.99) → 7`; `foldOtros(8 servicios, tope 4)` → 5
 filas y la 5ª suma los otros 4.
+
+**Aceptación:**
+(a) pre-flight del punto 0.4 del encargo
+(`git grep -n "@keyframes\|--stagger\|--animate" apps/lifestyle/src/app/globals.css`)
+**vacío** antes de editar. ⚠️ *Observado 2026-08-12: NO está vacío y no puede
+estarlo — el archivo ya traía `data-beat`, `card-in` y `rise-in` con sus
+`--animate-*` desde antes de este plan, y después de este paso traerá además los
+`viz-*`. Lo que el criterio protege es la **colisión de nombres**: el chequeo
+ejecutable es que ninguno de los nombres a agregar (`viz-grow-x`, `viz-grow-y`,
+`viz-fade-in`, `viz-sk-pulse`, `--stagger`, `--animate-viz-*`) aparezca ya en el
+grep. Verificado sin colisión.*
+(b) el CSS servido contiene los 4 `@keyframes viz-*` y las clases
+`animate-viz-*` que el kit usa (mismo criterio "visible en el CSS servido" del
+Paso 1).
+(c) con `prefers-reduced-motion: reduce` emulado en DevTools, el kit renderiza
+en estado final (barras a ancho completo, sin pulso).
+(d) red visual igual: capturas idénticas — el kit sigue sin montarse.
 
 **Qué NO tocar:** ninguna vista los monta todavía.
 **Red visual** *(prerrequisito: `scripts/seed-demo-densa.sql` corrido — sin datos densos la comparación no prueba nada)*: capturas idénticas — **nada debe cambiar**.
