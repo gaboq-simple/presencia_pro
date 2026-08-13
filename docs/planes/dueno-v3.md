@@ -84,10 +84,35 @@ await page.waitForURL('**/dashboard**'); await page.waitForTimeout(4000);
 for (const t of TABS) {
   try { await page.getByRole('button', { name: t, exact: true }).click({ force: true }); } catch { continue; }
   await page.waitForTimeout(2500);
+  // NUNCA disparar con una espera fija sola: ver "La espera es por contenido" abajo.
+  try {
+    await page.waitForFunction(
+      () => !/Cargando…|Cargando\.\.\./.test(document.body.innerText),
+      { timeout: 20000 },
+    );
+  } catch { console.log(`   (aviso: ${t} sigue con "Cargando…" tras 20s)`); }
+  await page.waitForTimeout(500);
   await page.screenshot({ path: `${tag}-${t}.png`, fullPage: true });
 }
 await b.close();
 ```
+
+**La espera es por CONTENIDO, nunca por tiempo fijo (endurecido 2026-08-12, D1).**
+Varios paneles de Administrar son client-side y tardan más que cualquier timeout
+razonable: `/api/reports/staff-metrics` mide **1–3.3 s** en dev con el seed denso,
+contra los 2.5 s fijos que esperaba la versión original del script. Resultado: el
+panel "Rendimiento del equipo" salía en "Cargando…" en unas corridas y cargado en
+otras, cambiando el alto de la página en ~6,900 px — un diff enorme que no
+corresponde a ningún cambio de código. Es el peor modo de falla posible de esta
+red: **puede inventar un cambio que no existe y, al revés, tapar uno real** dentro
+de una zona que en una corrida no llegó a renderizar. Por eso la espera es "que no
+quede ningún 'Cargando…' visible", con un aviso explícito si a los 20 s sigue ahí.
+
+**Cuando una captura acuse diff, el estándar es descartar primero el artefacto:**
+localizar la banda con un diff de píxeles, recortarla y MIRARLA, y correr dos
+capturas consecutivas del mismo estado — si esas dos dan 0 píxeles, el estado es
+estable y la diferencia estaba en la captura, no en el código. Nunca se firma "es
+artefacto" sin esas dos corridas.
 
 La BD demo es densa y reproducible: si hace falta resetearla,
 `scripts/seed-demo-densa.sql` (destructivo, solo demo — ver scripts/README.md).

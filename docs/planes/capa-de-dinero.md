@@ -102,7 +102,14 @@ datos. Capturas a 375px, página
 completa, comparadas contra el criterio del paso ("qué debe cambiar / qué no").
 Procedimiento Playwright temporal: el bloque de `docs/planes/dueno-v3.md`
 (sección "Red de seguridad visual") — mismo script `cap.mjs`, mismas
-credenciales del dueño. Para las vistas de staff (pasos D2/D4/D5): mismo
+credenciales del dueño. **La espera antes de disparar es por CONTENIDO ("que no
+quede ningún 'Cargando…' visible"), nunca por tiempo fijo**: los paneles
+client-side de Administrar tardan 1–3.3 s y con una espera fija el mismo estado
+produce alturas distintas entre corridas — un diff que no corresponde a ningún
+cambio, y peor, una zona sin renderizar donde podría esconderse uno real. Si una
+captura acusa diff: localizar la banda, recortarla y mirarla, y correr **dos
+capturas consecutivas** del mismo estado; solo si esas dan 0 píxeles se puede
+concluir que era artefacto. Para las vistas de staff (pasos D2/D4/D5): mismo
 viewport y reglas, login por PIN en `/barberia-demo/staff` (barbero 1234,
 asistente 5678).
 
