@@ -263,7 +263,7 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
                       className="flex flex-1 items-center gap-2 rounded-card border border-dashed border-line bg-tint-1 px-3 py-2.5 text-left text-xs font-medium text-teal-ink"
                     >
                       <span aria-hidden="true">↑</span>
-                      <span className="truncate">{appt.customer?.name ?? 'Cliente'} · lo tenés arriba</span>
+                      <span className="truncate">{appt.customer?.name ?? 'Cliente'} · lo tienes arriba</span>
                     </button>
                   ) : (
                     <SwipeCard

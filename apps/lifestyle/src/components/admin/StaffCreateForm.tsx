@@ -71,7 +71,7 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
 
     // 'barber' necesita al menos un servicio (regla del backend, espejada acá).
     if (role === 'barber' && selected.size === 0) {
-      setError('Seleccioná al menos un servicio que haga el barbero.');
+      setError('Selecciona al menos un servicio que haga el barbero.');
       return;
     }
 
@@ -180,7 +180,7 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
 
         {noServicesForBarber ? (
           <p className="mt-1 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-4 text-center text-xs text-amber-700">
-            Creá al menos un servicio en “Catálogo de servicios” antes de dar de alta un barbero.
+            Crea al menos un servicio en “Catálogo de servicios” antes de dar de alta un barbero.
           </p>
         ) : services.length === 0 ? (
           <p className="mt-1 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-xs text-gray-400">

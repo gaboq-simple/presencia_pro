@@ -113,7 +113,7 @@ export default function BusinessHoursPanel() {
         setError(b.error ?? 'Error al guardar');
       }
     } catch {
-      setError('Error de red — intentá de nuevo');
+      setError('Error de red — intenta de nuevo');
     } finally {
       setSaving(false);
     }
@@ -138,7 +138,7 @@ export default function BusinessHoursPanel() {
       <p className="mt-1 text-xs leading-relaxed text-gray-400">
         Este es el horario que ven tus clientes en tu página y el que usa el asistente para
         saber cuándo estás abierto. Para controlar en qué horarios se pueden agendar citas,
-        ajustá la disponibilidad de cada barbero.
+        ajusta la disponibilidad de cada barbero.
       </p>
 
       <div className="mt-3 space-y-2">

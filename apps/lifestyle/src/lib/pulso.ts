@@ -79,7 +79,7 @@ export function projectionLayers(input: {
 
 // ── Banda de señal (para "señalar sin concluir") ──────────────────────────────
 // Traduce una ocupación a una banda visual — el color señala dónde mirar; NO opina.
-// 'flojo' = mucho hueco (mirá acá), 'lleno' = casi tope (orgullo), 'medio' = neutro.
+// 'flojo' = mucho hueco (mira acá), 'lleno' = casi tope (orgullo), 'medio' = neutro.
 // null (sin capacidad) → 'cerrado'. Los umbrales son datos, no juicios: el dueño
 // saca la conclusión. Un día "flojo" no dice "mal día", solo "acá hay lugar".
 export type OccBand = 'cerrado' | 'flojo' | 'medio' | 'lleno';

@@ -172,7 +172,7 @@ export default function ActividadView({
           <p className="mt-1 text-sm text-ink-2">
             {events.length === 0
               ? 'Cuando tú o tu equipo hagan cambios (citas, servicios, staff, horarios), aquí queda el registro de quién hizo qué.'
-              : 'Probá con otro filtro para ver más actividad.'}
+              : 'Prueba con otro filtro para ver más actividad.'}
           </p>
         </div>
       )}

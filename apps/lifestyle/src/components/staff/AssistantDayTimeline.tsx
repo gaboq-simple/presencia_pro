@@ -592,7 +592,7 @@ export default function AssistantDayTimeline({
                   className="flex w-full items-center gap-2 rounded-lg border border-dashed border-line bg-tint-1 px-3 py-2 text-left text-xs font-medium text-teal-ink"
                 >
                   <span aria-hidden="true">↑</span>
-                  <span className="truncate">{appt.customer?.name ?? 'Cliente'} · lo tenés arriba</span>
+                  <span className="truncate">{appt.customer?.name ?? 'Cliente'} · lo tienes arriba</span>
                 </button>
               ) : (
                 <AssistantAppointmentCard

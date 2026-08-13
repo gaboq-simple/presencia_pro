@@ -65,11 +65,11 @@ function ServiciosTab({ initial }: { initial: AdminServiceRow[] }): React.ReactE
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
         body: JSON.stringify(body),
       });
-      if (!res.ok) { setRows(prev); setErr('No se pudo guardar. Intentá de nuevo.'); return false; }
+      if (!res.ok) { setRows(prev); setErr('No se pudo guardar. Intenta de nuevo.'); return false; }
       const updated = (await res.json()) as AdminServiceRow;
       setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...updated } : r)));
       return true;
-    } catch { setRows(prev); setErr('No se pudo guardar. Intentá de nuevo.'); return false; }
+    } catch { setRows(prev); setErr('No se pudo guardar. Intenta de nuevo.'); return false; }
     finally { setBusyId(null); }
   }
 
@@ -149,7 +149,7 @@ function EquipoTab({ initial }: { initial: AdminStaffManagementRow[] }): React.R
   }
 
   async function submitDayOff(s: AdminStaffManagementRow, force: boolean) {
-    if (!dayOffDate) { setErr('Elegí una fecha.'); return; }
+    if (!dayOffDate) { setErr('Elige una fecha.'); return; }
     setBusyId(s.id); setErr(null); setMsg(null); setWarn(null);
     try {
       const res = await fetch(`/api/staff/${s.id}/day-off`, {

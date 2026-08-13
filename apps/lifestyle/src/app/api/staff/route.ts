@@ -119,7 +119,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Regla: 'barber' DEBE tener ≥1 servicio (no se crean barberos sin servicios).
   if (d.role === 'barber' && requestedServiceIds.length === 0) {
     return NextResponse.json(
-      { error: 'Un barbero necesita al menos un servicio. Seleccioná uno o creá un servicio primero.' },
+      { error: 'Un barbero necesita al menos un servicio. Selecciona uno o crea un servicio primero.' },
       { status: 400 },
     );
   }

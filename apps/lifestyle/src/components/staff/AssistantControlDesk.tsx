@@ -350,7 +350,7 @@ export default function AssistantControlDesk({
         if (walkinFitsAt(aim.staffId, aim.startMin, move.dur, { ignorePast: true })) {
           setPastConfirm({ move, staffId: aim.staffId, startMin: aim.startMin });
         } else {
-          setToast({ msg: 'No cabe ahí — elegí un hueco', kind: 'warn' });
+          setToast({ msg: 'No cabe ahí — elige un hueco', kind: 'warn' });
           setWalkin(move);
         }
         return;
@@ -359,7 +359,7 @@ export default function AssistantControlDesk({
         void handleWalkinPlace(move, aim.staffId, aim.startMin);
         return;
       }
-      setToast({ msg: 'No cabe ahí — elegí un hueco', kind: 'warn' });
+      setToast({ msg: 'No cabe ahí — elige un hueco', kind: 'warn' });
     }
     setWalkin(move); // place-mode: iluminan los chips donde el servicio entra
   }

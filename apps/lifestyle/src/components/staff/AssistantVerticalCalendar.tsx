@@ -1375,7 +1375,7 @@ export default function AssistantVerticalCalendar({
           <>
             <span className="flex items-center gap-2">
               <span className="inline-block h-2 w-2 rounded-pill bg-teal-ink animate-data-beat motion-reduce:animate-none" aria-hidden />
-              Moviendo a {placing.name} · tocá el nuevo horario
+              Moviendo a {placing.name} · toca el nuevo horario
             </span>
             <button
               type="button"

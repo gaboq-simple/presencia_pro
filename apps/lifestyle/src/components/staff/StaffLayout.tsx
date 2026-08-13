@@ -253,7 +253,7 @@ export default function StaffLayout({
             </div>
           )}
 
-          {/* Hero — el cliente que tenés enfrente (Paso 3). Fijo (dentro del header
+          {/* Hero — el cliente que tienes enfrente (Paso 3). Fijo (dentro del header
               sticky) y condensa a barra fina al scrollear. Solo en Hoy. */}
           {tab === 'hoy' && (
             <div className="mt-3">
