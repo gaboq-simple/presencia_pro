@@ -114,6 +114,15 @@ capturas consecutivas del mismo estado — si esas dos dan 0 píxeles, el estado
 estable y la diferencia estaba en la captura, no en el código. Nunca se firma "es
 artefacto" sin esas dos corridas.
 
+**Excepción de Actividad (verificada 2026-08-12, D1b): ahí "0 píxeles" es
+inalcanzable por construcción.** El log rinde tiempos RELATIVOS ("hace 3 min"),
+así que dos capturas separadas por minutos siempre difieren, y la regla de las
+dos corridas no puede cerrar. El criterio en esa pestaña es distinto: que las
+bandas del diff sean **únicamente etiquetas de tiempo**, verificado con recorte —
+una banda por fila del log, de la altura de una línea de texto, y al mirarla lo
+único que cambia es el número de minutos. Cualquier banda que no sea eso es un
+cambio real y hay que explicarlo.
+
 La BD demo es densa y reproducible: si hace falta resetearla,
 `scripts/seed-demo-densa.sql` (destructivo, solo demo — ver scripts/README.md).
 

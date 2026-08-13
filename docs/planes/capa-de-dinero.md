@@ -109,7 +109,10 @@ produce alturas distintas entre corridas — un diff que no corresponde a ningú
 cambio, y peor, una zona sin renderizar donde podría esconderse uno real. Si una
 captura acusa diff: localizar la banda, recortarla y mirarla, y correr **dos
 capturas consecutivas** del mismo estado; solo si esas dan 0 píxeles se puede
-concluir que era artefacto. Para las vistas de staff (pasos D2/D4/D5): mismo
+concluir que era artefacto. **Excepción en Actividad:** su log rinde tiempos
+relativos ("hace 3 min"), así que el 0 es inalcanzable por construcción — ahí el
+criterio es que las bandas sean **solo etiquetas de tiempo**, verificado con
+recorte; cualquier otra banda es un cambio real. Para las vistas de staff (pasos D2/D4/D5): mismo
 viewport y reglas, login por PIN en `/barberia-demo/staff` (barbero 1234,
 asistente 5678).
 
