@@ -204,15 +204,9 @@ tiempo); números `tabular-nums` siempre; el número héroe nunca hace count-up.
 filas y la 5ª suma los otros 4.
 
 **Aceptación:**
-(a) pre-flight del punto 0.4 del encargo
-(`git grep -n "@keyframes\|--stagger\|--animate" apps/lifestyle/src/app/globals.css`)
-**vacío** antes de editar. ⚠️ *Observado 2026-08-12: NO está vacío y no puede
-estarlo — el archivo ya traía `data-beat`, `card-in` y `rise-in` con sus
-`--animate-*` desde antes de este plan, y después de este paso traerá además los
-`viz-*`. Lo que el criterio protege es la **colisión de nombres**: el chequeo
-ejecutable es que ninguno de los nombres a agregar (`viz-grow-x`, `viz-grow-y`,
-`viz-fade-in`, `viz-sk-pulse`, `--stagger`, `--animate-viz-*`) aparezca ya en el
-grep. Verificado sin colisión.*
+(a) pre-flight: ninguno de los nombres a agregar (`viz-grow-x`, `viz-grow-y`,
+`viz-fade-in`, `viz-sk-pulse`, `--stagger`, `--animate-viz-*`) aparece ya en
+`git grep "@keyframes\|--stagger\|--animate" apps/lifestyle/src/app/globals.css`.
 (b) el CSS servido contiene los 4 `@keyframes viz-*` y las clases
 `animate-viz-*` que el kit usa (mismo criterio "visible en el CSS servido" del
 Paso 1).
@@ -331,6 +325,13 @@ en toda la vista: cero paleta numérica, cero voseo, cero emoji.
   BlockRequestsInbox` en `components/admin/`): reemplazo mecánico de clases
   numéricas de Tailwind (`gray-*`, `green-*`, `red-*`, `blue-*`…) por tokens de
   marca; emojis (⚠️ 🔴 🚨 ✓ …) por chips/puntos del sistema.
+- **Movimiento legacy (candidato del barrido, NO antes):** los tres `--animate-*`
+  previos a dv3 llevan duración y curva hardcodeadas y casi coinciden con los
+  tokens de dv3-1 — `card-in` y `rise-in` usan `cubic-bezier(0.2, 0.8, 0.25, 1)`
+  contra `--ease-out: cubic-bezier(.2,.8,.2,1)`, y los 0.22s de `card-in` contra
+  `--dur-2: 260ms`; las duraciones de `rise-in` (0.5s) y `data-beat` (1.8s) son
+  propias. Tokenizarlos es del barrido, con su red visual: tocan la vista del
+  barbero y el Home, no solo al dueño.
 - **Voseo** (una línea cada uno, TODOS): `BusinessHoursPanel.tsx` "ajustá";
   `NegocioView.tsx` "pagás", "Definí", "trabajás" (si sobreviven al Paso 3/6);
   `AdminInlinePanel.tsx` "Elegí"; `StaffCreateForm.tsx` "Seleccioná", "Creá";
