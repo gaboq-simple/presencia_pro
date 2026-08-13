@@ -376,10 +376,17 @@ los crons dejan de vivir en el Dashboard.
 **Archivos:**
 - `apps/lifestyle/src/lib/cabos.ts` **nuevo**: citas `pending|confirmed` con
   `starts_at < ahora`, ventana 14 días, count + lista. Puro + query scopeada.
+- `apps/lifestyle/src/lib/cabosData.ts` **nuevo**: la query scopeada (patrón
+  `fuga.ts`/`fugaData.ts` — puro y datos separados). **Agregado a la lista al
+  ejecutar el paso:** `DashboardLayout` declara en su encabezado "NO fetcha
+  datos propios — recibe todo del page.tsx", así que la línea del dueño se
+  alimenta desde la página, no desde el componente. Respetar ese contrato
+  obliga a tocar `app/dashboard/page.tsx`, que entra por la misma razón.
 - Superficies mínimas v1 (el restyle llega con dv3-4'):
   `components/staff/AssistantControlDesk.tsx` (fila "N sin resolver" con
   resolución inline vía las actions existentes) y
-  `components/admin/DashboardLayout.tsx` (línea de conteo para el dueño).
+  `components/admin/DashboardLayout.tsx` (línea de conteo para el dueño)
+  + `app/dashboard/page.tsx` (le pasa el conteo, ver arriba).
 - **Migración** `supabase/migrations/<fecha>_crons_versionados.sql`:
   `CREATE EXTENSION pg_cron` + `pg_net` (ambas disponibles en el proyecto,
   verificado; `supabase_vault` ya instalada). Función `invoke_edge(fn text)`
@@ -389,6 +396,27 @@ los crons dejan de vivir en el Dashboard.
   `dispatch-lifestyle-notifications`. **El schedule queda versionado; el
   secret se siembra UNA vez en Vault** (documentarlo en `scripts/README.md` —
   operación manual inevitable: los secretos no viven en el repo).
+- **El gate de invocación y su límite real (medido al ejecutar D3, 2026-08-13).**
+  La function se despliega con `verify_jwt=true` porque **no implementa
+  autenticación propia** (`Deno.serve(async (_req)` ignora el request): abierta
+  sería invocable por cualquiera y muta estado. Consecuencia: el gateway exige
+  una credencial VÁLIDA del proyecto, así que `edge_invoke_secret` **no puede
+  ser un secreto nuevo aleatorio** — no autenticaría. Se usa la **publishable
+  key**, y se midió qué tan pública es:
+  · la publishable key **NO** aparece en el bundle de cliente (verificado con
+    `grep` sobre `.next/static` tras `next build`);
+  · la **anon JWT legacy SÍ** aparece ahí (`lib/supabase/client.ts` la usa en el
+    browser vía `NEXT_PUBLIC_SUPABASE_ANON_KEY`) — usarla habría dejado el gate
+    literalmente público.
+  **Límite conocido:** una publishable key es no-secreta POR DISEÑO (para eso
+  existe). El gate frena escaneo anónimo de internet —hace falta *alguna*
+  credencial del proyecto— pero no es autenticación de verdad. **Daño acotado:**
+  la function solo hace lo que el cron ya hace cada minuto (barrer citas
+  vencidas → `no_show`, con el guard `status='confirmed'` dentro del RPC), así
+  que invocarla de más no produce ningún efecto que el cron no produjera solo.
+  **Fix encolado (no acá):** que la function valide un secreto propio de su env
+  y desplegarla con `verify_jwt=false` — exige tocar su lógica interna, que este
+  paso prohíbe; entra cuando esa lógica se pueda tocar.
 - Ajuste del RPC `mark_appointment_no_show` (lo usa
   `supabase/functions/dispatch-auto-cancel/index.ts:295`): `set_config(
   'app.actor_type','system',true)` antes del UPDATE si no lo hace ya (leer

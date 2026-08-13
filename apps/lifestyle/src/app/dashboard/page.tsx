@@ -28,6 +28,7 @@ import {
 } from '@/lib/dashboard.types';
 import { todayStrInTz } from '@/lib/dayWindow';
 import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
+import { getCabos } from '@/lib/cabosData';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
 import OwnerTabs from '@/components/admin/OwnerTabs';
@@ -178,6 +179,10 @@ export default async function DashboardPage({
     getActivityFeed(businessId),
   ]);
 
+  // 7. Cabos sueltos (D3) — citas pasadas que nadie resolvió. Se fetchea ACÁ y no
+  //    en DashboardLayout porque ese componente declara no fetchar datos propios.
+  const cabos = await getCabos(businessId);
+
   const dashboardPanel = (
     <DashboardLayout
       businessId={businessId}
@@ -191,6 +196,7 @@ export default async function DashboardPage({
       staffForPhotos={staffForPhotos}
       staffForManagement={staffForManagement}
       servicesForManagement={servicesForManagement}
+      cabosCount={cabos.total}
     />
   );
 

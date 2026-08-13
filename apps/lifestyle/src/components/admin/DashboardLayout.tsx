@@ -48,6 +48,9 @@ type Props = {
   staffForPhotos: AdminStaffPhotoRow[];
   staffForManagement: AdminStaffManagementRow[];
   servicesForManagement: AdminServiceRow[];
+  /** Cabos sueltos (D3): citas pasadas que nadie resolvió, ventana 14 días. Lo
+      calcula page.tsx — este componente no fetcha datos propios (ver encabezado). */
+  cabosCount: number;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -90,6 +93,7 @@ export default function DashboardLayout({
   staffForPhotos,
   staffForManagement,
   servicesForManagement,
+  cabosCount,
 }: Props) {
   const prevDate = offsetDay(date, -1);
   const nextDate = offsetDay(date, +1);
@@ -192,6 +196,21 @@ export default function DashboardLayout({
             {dayRevenue.completedCount === 1 ? 'cita completada' : 'citas completadas'}
           </p>
         </div>
+
+        {/* Cabos sueltos (D3) — lo pasado sin resolver se VE, nunca se absorbe en
+            un total: una cita sin cerrar no suma al ingreso ni cuenta como falta,
+            así que desaparecería del cuadre sin dejar rastro. Dato y nada más. */}
+        {cabosCount > 0 && (
+          <div className="rounded-lg border border-gray-200 px-4 py-3">
+            <p className="text-xs text-gray-500">Sin cerrar</p>
+            <p className="mt-0.5 text-sm text-gray-900">
+              {cabosCount === 1
+                ? '1 cita pasada sigue sin resolver'
+                : `${cabosCount} citas pasadas siguen sin resolver`}
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500">Últimos 14 días</p>
+          </div>
+        )}
 
         {/* Bandeja de solicitudes de bloqueo */}
         <BlockRequestsInbox initialRequests={pendingBlockRequests} />

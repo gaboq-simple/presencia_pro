@@ -44,6 +44,7 @@ import PanoramaTimeline, {
 import AssistantVerticalCalendar from './AssistantVerticalCalendar';
 import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
 import CobroFields from './CobroFields';
+import { listarCabos, type CaboSuelto } from '@/app/staff/cabos-actions';
 import { DEFAULT_RAIL, type Rail } from '@/lib/cobro';
 import {
   type EngineLane,
@@ -162,6 +163,13 @@ function fmtHora(min: number): string {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+
+/** Fecha corta del cabo en la tz del negocio ("mar 5 · 13:00"). */
+function fmtFechaCabo(ms: number, tz: string): string {
+  return new Intl.DateTimeFormat('es-MX', {
+    timeZone: tz, weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(ms));
+}
 
 export default function AssistantControlDesk({
   businessId,
@@ -795,6 +803,16 @@ export default function AssistantControlDesk({
   // Completar en la mesa NO es el swipe de 2 segundos del barbero: acá se cobra
   // de frente, así que el gesto abre el par monto+riel y confirma. El riel viaja
   // siempre (default efectivo); el monto solo si lo teclean.
+  // Cabos sueltos (D3): citas pasadas sin resolver de los últimos 14 días. La
+  // mesa es client component, así que el conteo viene por server action propia
+  // (assistant-actions.ts no se toca: los cabos viven en su módulo).
+  const [cabos, setCabos] = useState<{ total: number; lista: CaboSuelto[] } | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    void listarCabos().then((r) => { if (vivo) setCabos(r); });
+    return () => { vivo = false; };
+  }, [appointments]);
+
   const [cobroFor, setCobroFor]       = useState<DashboardAppointment | null>(null);
   const [cobroAmount, setCobroAmount] = useState('');
   const [cobroMethod, setCobroMethod] = useState<Rail>(DEFAULT_RAIL);
@@ -833,6 +851,43 @@ export default function AssistantControlDesk({
   return (
     <div className="min-h-dvh bg-canvas bg-grid text-ink">
       <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col gap-3 p-3 sm:p-4">
+        {/* Cabos sueltos (D3) — lo pasado sin resolver se VE. Una cita sin cerrar
+            no suma al cobrado ni cuenta como falta: se evapora del cuadre. Acá se
+            resuelve inline con las mismas actions de siempre. */}
+        {cabos && cabos.total > 0 && (
+          <details className="rounded-card border border-amber-border bg-amber-tint px-4 py-3 text-sm">
+            <summary className="cursor-pointer font-semibold text-amber">
+              {cabos.total === 1 ? '1 cita sin cerrar' : `${cabos.total} citas sin cerrar`}
+              <span className="ml-2 font-normal text-ink-2">· de los últimos 14 días</span>
+            </summary>
+            <ul className="mt-3 space-y-2">
+              {cabos.lista.slice(0, 8).map((c) => (
+                <li key={c.id} className="flex items-center justify-between gap-3 border-t border-line pt-2">
+                  <span className="min-w-0 flex-1 truncate text-ink">
+                    {c.cliente ?? 'Sin cliente'}
+                    <span className="ml-2 text-xs tabular-nums text-ink-2">{fmtFechaCabo(c.startsAtMs, timezone)}</span>
+                    {c.llego && <span className="ml-2 text-xs text-teal-ink">llegó</span>}
+                  </span>
+                  <span className="flex shrink-0 gap-2">
+                    <button
+                      onClick={() => handleComplete(c.id)}
+                      className="min-h-[36px] rounded-lg bg-teal-ink px-3 text-xs font-semibold text-card"
+                    >
+                      Terminó
+                    </button>
+                    <button
+                      onClick={() => void handleNoShow(c.id)}
+                      className="min-h-[36px] rounded-lg border border-line bg-card px-3 text-xs font-semibold text-ink-2"
+                    >
+                      No vino
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
         {/* ── Tarjeta de la mesa de control ── */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-card shadow-card">
           {/* ── Header ── */}
