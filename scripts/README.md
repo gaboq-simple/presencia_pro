@@ -125,5 +125,35 @@ reales y para diseñar vistas con densidad real.
 psql "$SUPABASE_DB_URL" -f scripts/seed-demo-densa.sql
 ```
 
-O pegar el archivo completo en el SQL editor de Supabase. Para otro negocio,
-cambiar el slug en `seed_cfg` (primera línea de configuración del archivo).
+O pegar el archivo completo en el SQL editor de Supabase / MCP `execute_sql`
+(en la máquina de trabajo no hay `psql` ni `SUPABASE_DB_URL`; si lo pegás, primero
+verificá por `diff` que lo pegado sea idéntico al archivo versionado). Para otro
+negocio, cambiar el slug en `seed_cfg` (primera línea de configuración del archivo).
+
+### ⚠️ El seed CADUCA — correrlo es prerrequisito, no un extra
+
+Las fechas son relativas a HOY (citas de hoy−90 a hoy+7), así que **el estado se
+pudre solo en días**: una semana después de la última corrida, el negocio demo se
+queda **sin citas hoy y sin futuras**, y las vistas del dueño (pulso de hoy, la
+semana que viene, la fuga) rinden estados degradados o vacíos.
+
+Esto no es cosmético: la **red de seguridad visual** de los planes
+(`docs/planes/dueno-v3.md`, `docs/planes/capa-de-dinero.md`) compara capturas
+antes/después de cada paso, y sobre un demo vencido comparás dos pantallas vacías
+idénticas y firmás "no se rompió nada" sin haber probado nada — un sello de goma.
+Lo mismo vale para enseñar el producto: un demo vencido se ve muerto.
+
+**Regla:** correr el seed al inicio de CUALQUIER paso, antes de la captura
+"antes", y **no volver a correrlo** entre el antes y el después del mismo paso.
+
+**Señal de vencimiento** (chequear sin adivinar; `<business_id>` = el de la demo):
+
+```sql
+select max(starts_at)::date as ultima,
+       count(*) filter (where starts_at > now()) as futuras,
+       count(*) filter (where starts_at::date = (now() at time zone 'America/Mexico_City')::date) as hoy
+from appointments where business_id = '<business_id>';
+```
+
+`futuras = 0` o `hoy = 0` → **vencido, re-sembrar antes de capturar nada**. Recién
+corrido se ven ~45 futuras y varias decenas hoy.

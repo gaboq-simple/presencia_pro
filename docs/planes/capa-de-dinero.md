@@ -222,6 +222,24 @@ muestra signos mezclados y HOY aparece "sin corte aún".
 **Red visual**: capturas idénticas — **ninguna superficie lee estas tablas
 todavía**.
 
+**Pregunta abierta que se decide EN este paso (no antes, no por el ejecutor):
+¿re-siembra programada del demo de madrugada?** El seed es relativo a HOY y
+caduca en días: verificado el 2026-08-12, el demo llevaba una semana vencido y
+estaba **sin citas hoy y sin futuras** (documentado en `scripts/README.md`). Eso
+degrada dos cosas a la vez — el demo como herramienta de venta se ve muerto, y
+la red de seguridad visual se vuelve un sello de goma (dos pantallas vacías
+idénticas "prueban" que nada se rompió). Con `pg_cron` ya versionado por D3, un
+`cron.schedule` nocturno que re-siembre `barberia-demo` es barato de construir.
+**El riesgo a sopesar, y por eso no se decide de antemano:** el seed es
+DESTRUCTIVO — borra las citas del negocio — así que una re-siembra automática
+puede tirar el estado creado EN VIVO durante una demo o una verificación (una
+cita agendada delante del cliente, un corte capturado a mano). Variantes a
+considerar cuando toque: no hacer nada (seguir corriéndolo a mano, con la señal
+de vencimiento del README), cron nocturno a secas, cron con guardia (saltar si
+hubo escritura de la app en las últimas N horas), o re-siembra sin purga
+(extender la ventana de fechas en vez de borrar). **Dependencia:** cualquier
+variante con cron va DESPUÉS de D3.
+
 ---
 
 ## Paso D2 · [SEGURO] El cobro real: monto + riel al completar
