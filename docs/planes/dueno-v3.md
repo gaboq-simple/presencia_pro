@@ -97,6 +97,97 @@ for (const t of TABS) {
 await b.close();
 ```
 
+**Las tres herramientas de comparación viven acá, no en el contexto de quien
+ejecuta** (se montan en el mismo directorio temporal que `cap.mjs`). Sin ellas
+el estándar de abajo no se puede cumplir: pide localizar bandas, mirarlas y
+descartar la inserción, y eso no se hace a ojo.
+
+```js
+// /tmp/capturas-dueno/diff.mjs — node diff.mjs Panorama Clientela …
+// Cuenta píxeles distintos entre antes-<tab>.png y despues-<tab>.png y los
+// agrupa en bandas verticales (no hay ImageMagick: se usa el Chromium de Playwright).
+import { chromium } from 'playwright';
+import { readFileSync } from 'fs';
+const b = await chromium.launch(); const page = await b.newPage();
+for (const t of process.argv.slice(2)) {
+  const [a, d] = ['antes', 'despues'].map((p) => readFileSync(`${p}-${t}.png`).toString('base64'));
+  const r = await page.evaluate(async ([a, d]) => {
+    const load = (x) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.src = 'data:image/png;base64,' + x; });
+    const [ia, id] = await Promise.all([load(a), load(d)]);
+    const W = Math.max(ia.width, id.width), H = Math.max(ia.height, id.height);
+    const g = (img) => { const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const x = c.getContext('2d'); x.drawImage(img, 0, 0); return x.getImageData(0, 0, W, H).data; };
+    const pa = g(ia), pd = g(id); let diff = 0; const bandas = [];
+    for (let y = 0; y < H; y++) { let n = 0;
+      for (let x = 0; x < W; x++) { const i = (y * W + x) * 4;
+        if (pa[i] !== pd[i] || pa[i+1] !== pd[i+1] || pa[i+2] !== pd[i+2]) n++; }
+      if (n) { diff += n; const l = bandas[bandas.length-1];
+        if (l && y - l.y2 <= 3) { l.y2 = y; l.px += n; } else bandas.push({ y1: y, y2: y, px: n }); } }
+    return { dims: [ia.height, id.height], diff, bandas };
+  }, [a, d]);
+  console.log(`\n== ${t} ==  alto ${r.dims[0]} → ${r.dims[1]} · ${r.diff} px en ${r.bandas.length} banda(s)`);
+  for (const x of r.bandas.slice(0, 12)) console.log(`   y ${x.y1}–${x.y2} (${x.px}px)`);
+}
+await b.close();
+```
+
+```js
+// /tmp/capturas-dueno/insercion.mjs — node insercion.mjs <tab> <y-del-corte>
+// ¿El diff es una INSERCIÓN pura? Compara antes[y] contra después[y+Δ] a partir
+// del corte. Si arriba da 0 y abajo también, lo único que pasó es que entró una
+// fila nueva y el resto se recorrió: no hubo ningún otro cambio.
+import { chromium } from 'playwright';
+import { readFileSync } from 'fs';
+const [tab, y0s] = process.argv.slice(2); const y0 = Number(y0s);
+const b = await chromium.launch(); const page = await b.newPage();
+const [a, d] = ['antes', 'despues'].map((p) => readFileSync(`${p}-${tab}.png`).toString('base64'));
+const r = await page.evaluate(async ([a, d, y0]) => {
+  const load = (x) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.src = 'data:image/png;base64,' + x; });
+  const [ia, id] = await Promise.all([load(a), load(d)]);
+  const D = id.height - ia.height;
+  const g = (img) => { const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0); return x.getImageData(0, 0, img.width, img.height).data; };
+  const pa = g(ia), pd = g(id), W = ia.width;
+  const dif = (y, yy) => { let n = 0; for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * 4, j = (yy * W + x) * 4;
+    if (pa[i] !== pd[j] || pa[i+1] !== pd[j+1] || pa[i+2] !== pd[j+2]) n++; } return n; };
+  let arriba = 0, abajo = 0; const bandas = [];
+  for (let y = 0; y < y0; y++) arriba += dif(y, y);
+  for (let y = y0; y < ia.height; y++) { const n = dif(y, y + D);
+    if (n) { abajo += n; const l = bandas[bandas.length-1];
+      if (l && y - l.y2 <= 3) { l.y2 = y; l.px += n; } else bandas.push({ y1: y, y2: y, px: n }); } }
+  return { delta: D, arriba, abajo, bandas };
+}, [a, d, y0]);
+console.log(`${tab}: Δ=${r.delta}px · arriba del corte: ${r.arriba} px · abajo ya desplazado: ${r.abajo} px en ${r.bandas.length} banda(s)`);
+for (const x of r.bandas.slice(0, 8)) console.log(`   y ${x.y1}–${x.y2} (${x.px}px)`);
+await b.close();
+```
+
+```js
+// /tmp/capturas-dueno/crop.mjs — node crop.mjs <archivo.png> <y1> <y2> <salida.png>
+// Recorta una banda para MIRARLA (una captura de 16.000 px no se inspecciona entera).
+import { chromium } from 'playwright';
+import { readFileSync, writeFileSync } from 'fs';
+const [file, y1, y2, out] = process.argv.slice(2);
+const b = await chromium.launch(); const page = await b.newPage();
+const res = await page.evaluate(async ([b64, y1, y2]) => {
+  const img = await new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = 'data:image/png;base64,' + b64; });
+  const c = document.createElement('canvas'); c.width = img.width; c.height = y2 - y1;
+  c.getContext('2d').drawImage(img, 0, -y1);
+  return c.toDataURL('image/png').split(',')[1];
+}, [readFileSync(file).toString('base64'), Number(y1), Number(y2)]);
+writeFileSync(out, Buffer.from(res, 'base64'));
+await b.close();
+```
+
+**Cambios de INSERCIÓN (D3 en adelante): el estándar es el comparador.** Cuando
+el paso agrega una fila, todo lo de abajo se recorre y un diff plano acusa
+"cambió media pantalla" — en D3 marcó 52% y 34% sin que hubiera ningún otro
+cambio. El criterio es `insercion.mjs`: **0 px por encima del punto de corte** y
+`antes[y] == después[y+Δ]` por debajo; el residuo que quede se recorta y se
+mira (en D3 era la deriva del reloj, 12:53→12:55). Sin ese paso no se puede
+distinguir "se insertó una fila" de "se movió algo que nadie pidió".
+
 **La espera es por CONTENIDO, nunca por tiempo fijo (endurecido 2026-08-12, D1).**
 Varios paneles de Administrar son client-side y tardan más que cualquier timeout
 razonable: `/api/reports/staff-metrics` mide **1–3.3 s** en dev con el seed denso,

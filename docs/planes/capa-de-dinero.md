@@ -109,7 +109,12 @@ produce alturas distintas entre corridas — un diff que no corresponde a ningú
 cambio, y peor, una zona sin renderizar donde podría esconderse uno real. Si una
 captura acusa diff: localizar la banda, recortarla y mirarla, y correr **dos
 capturas consecutivas** del mismo estado; solo si esas dan 0 píxeles se puede
-concluir que era artefacto. **UI interactiva (D2 en adelante):** cuando lo que
+concluir que era artefacto. **Cambios de INSERCIÓN (D3 en adelante):** cuando el
+paso agrega una fila, todo lo de abajo se recorre y un diff plano acusa "cambió
+media pantalla" (en D3, 52% y 34% sin ningún otro cambio). El estándar ahí es el
+comparador con desplazamiento —`insercion.mjs`, en el bloque de `dueno-v3.md`
+junto a `cap.mjs`—: **0 px por encima del punto de corte** y `antes[y] ==
+después[y+Δ]` por debajo, más el recorte del residuo que quede. **UI interactiva (D2 en adelante):** cuando lo que
 el paso entrega solo existe durante un gesto (el chip de la ventana de Deshacer,
 una hoja abierta), el estático prueba la AUSENCIA de cambios no pedidos y la
 evidencia del cambio pedido son **capturas del gesto + aserciones en la BD** —
