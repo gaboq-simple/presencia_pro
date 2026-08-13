@@ -137,7 +137,7 @@ export default function MetricsSummary({ businessId, date, initialRevenue }: Pro
           <div className="space-y-4">
             {/* Ingresos */}
             <div>
-              <p className="text-xs text-gray-400">Ingresos</p>
+              <p className="text-xs text-gray-400">Ingresos de agenda</p>
               <p className={`mt-0.5 text-xl font-bold text-gray-900 ${loading ? 'opacity-50' : ''}`}>
                 {formatCurrency(metrics.revenue, metrics.currency)}
               </p>
@@ -184,7 +184,7 @@ export default function MetricsSummary({ businessId, date, initialRevenue }: Pro
         {/* Fallback mientras no hay métricas (primer render usa initialRevenue) */}
         {!metrics && !loading && !error && (
           <div>
-            <p className="text-xs text-gray-400">Ingresos del día</p>
+            <p className="text-xs text-gray-400">Ingresos de agenda del día</p>
             <p className="mt-0.5 text-xl font-bold text-gray-900">
               {formatCurrency(initialRevenue.total, initialRevenue.currency)}
             </p>

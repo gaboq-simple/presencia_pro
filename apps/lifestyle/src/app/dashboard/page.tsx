@@ -30,6 +30,8 @@ import { todayStrInTz } from '@/lib/dayWindow';
 import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
 import { getCabos } from '@/lib/cabosData';
 import { getCortesDesde } from '@/lib/corteData';
+import { after } from 'next/server';
+import { touchOwnerLastSeen } from '@/lib/ownerPresence';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
 import OwnerTabs from '@/components/admin/OwnerTabs';
@@ -85,6 +87,30 @@ export default async function DashboardPage({
   // vacío. La tz también alimenta el "Ir a hoy" del DashboardLayout.
   const timezone = await getBusinessTimezone(businessId);
   const date = isValidDate(rawDate) ? rawDate : todayStrInTz(timezone);
+
+  // ── Instrumentación del riesgo terminal (D6) ───────────────────────────────
+  // "El dueño dejó de abrir la app" es el modo de falla más probable de este
+  // producto y hasta hoy era INVISIBLE: no existe ninguna analítica de uso. Este
+  // touch es el único dato que lo delata, y es el insumo de la señal 4 del digest
+  // (D7).
+  //
+  // 🔴 El guard es `admin`, NO `owner`, y eso se descubrió al verificarlo por
+  // ruta real: el dueño del demo entra con `role='admin'` y la primera versión de
+  // este bloque (que preguntaba por `'owner'`) nunca disparó. El CHECK de la BD
+  // solo admite admin/barber/assistant — `'owner'` sobrevive en el tipo AuthRole
+  // como residuo de las sesiones por token, que ya se retiraron: NINGUNA sesión
+  // viva puede tenerlo. Con el guard viejo, la señal 4 habría dicho "el dueño
+  // nunca abrió la app" para siempre, que es la peor forma de fallar: una alarma
+  // falsa que parece un dato.
+  //
+  // El asistente queda FUERA a propósito: vive dentro del negocio y su visita no
+  // dice nada sobre el dueño, que es a quien se está midiendo.
+  if (session.role === 'admin' || session.role === 'owner') {
+    // `after()` y no un `void` suelto: el fire-and-forget en un Server Component
+    // puede quedar cancelado cuando termina el render. Es el patrón que ya usa
+    // `api/bot/route.ts` para el trabajo posterior a la respuesta.
+    after(() => touchOwnerLastSeen(businessId));
+  }
   const dayOfWeek = new Date(`${date}T12:00:00`).getDay(); // 0=dom … 6=sáb
 
   // ── Vista asistente — mesa de control propia (S6-UI-02) ──────────────────

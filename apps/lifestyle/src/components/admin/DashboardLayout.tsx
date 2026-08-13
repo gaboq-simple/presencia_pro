@@ -195,7 +195,7 @@ export default function DashboardLayout({
 
         {/* Ingresos del día — resumen rápido */}
         <div className="rounded-lg border border-gray-200 px-4 py-3">
-          <p className="text-xs text-gray-500">Ingresos del día</p>
+          <p className="text-xs text-gray-500">Ingresos de agenda del día</p>
           <p className="mt-0.5 text-2xl font-bold text-gray-900">
             {formatCurrency(dayRevenue.total, dayRevenue.currency)}
           </p>

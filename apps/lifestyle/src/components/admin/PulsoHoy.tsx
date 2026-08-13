@@ -104,7 +104,7 @@ const VISIBLE_BARBEROS = 3;
 
 export default function PulsoHoy({ data }: { data: PulsoHoyData }): React.ReactElement {
   const dowName = DOW_NAME[weekdayOf(data.dateStr)] ?? 'la semana';
-  const { projection, occupancyDeltaPoints: dp, comparable } = data;
+  const { projection, cobrado, occupancyDeltaPoints: dp, comparable } = data;
 
   // Regla 3: 3 visibles + resto colapsado.
   const shown = data.barberos.slice(0, VISIBLE_BARBEROS);
@@ -142,17 +142,37 @@ export default function PulsoHoy({ data }: { data: PulsoHoyData }): React.ReactE
 
           {/* Proyección — tres capas de certeza decreciente */}
           <div className="mt-3 rounded-xl border border-line bg-canvas px-3 py-2.5">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Ingreso del día</p>
+            {/* D6 — el titular dejó de derivarse de la agenda: ahora es lo COBRADO
+                (eventos que alguien firmó, atribuidos por completed_at local, más
+                el dinero de fuera de agenda). Por eso la etiqueta dice "Cobrado" y
+                no "Ingreso": es la palabra del estado CONFIRMADO del plan, y lo
+                único que puede ser héroe. */}
+            <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Cobrado hoy</p>
             <p className="mt-1 text-sm text-ink">
-              <span className="text-xl font-bold tabular-nums">{money(projection.piso)}</span> ya hecho
+              <span className="text-xl font-bold tabular-nums">{money(cobrado.total)}</span> ya cobrado
             </p>
             <p className="mt-0.5 text-sm text-ink-2">
               <span className="tabular-nums">+{money(projection.agendado)}</span> agendado
               {' · '}
               <span className="tabular-nums">+{money(projection.huecos)}</span> si llenas los huecos
             </p>
+
+            {/* Las dos líneas nuevas. La de salidas dice explícitamente que NO se
+                resta: netearla dejaría un número que no es ni lo vendido ni lo
+                gastado, y el plan lo prohíbe por nombre. */}
+            {cobrado.entradas > 0 && (
+              <p className="mt-1 text-[11px] text-ink-2">
+                Incluye <span className="tabular-nums">{money(cobrado.entradas)}</span> de fuera de agenda
+              </p>
+            )}
+            {cobrado.salidas > 0 && (
+              <p className="mt-0.5 text-[11px] text-ink-2">
+                Salidas <span className="tabular-nums">{money(cobrado.salidas)}</span> · aparte, no se restan de arriba
+              </p>
+            )}
+
             <p className="mt-1 text-[11px] text-faint">
-              Piso cobrado. Lo demás es potencial de la agenda y los huecos, no un resultado garantizado.
+              Cobrado es lo que alguien cobró y firmó. Lo demás es potencial de la agenda y los huecos, no un resultado garantizado.
             </p>
           </div>
         </div>

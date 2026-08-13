@@ -11,6 +11,8 @@
 import { getServiceClient, loadPulsoContext, loadDateRangeRows, dayCapacity, shiftDateStr } from '@/lib/pulsoData';
 import { tenantDb } from '@/lib/tenantDb';
 import { localDayRangeUtc, todayStrInTz } from '@/lib/dayWindow';
+import { computeCobrado, type Cobrado } from '@/lib/cobrado';
+import { getInsumosDelCorte } from '@/lib/corteData';
 import { projectionLayers, occupancyDeltaPoints, type Projection } from '@/lib/pulso';
 
 // Estados que ocupan un slot (numerador de ocupación). no_show incluido: ocupó el lugar.
@@ -47,6 +49,10 @@ export type PulsoHoy = {
   walkIns: DayMetric;
   noShowRate30d: number | null;    // tasa de no-show en ventana móvil 30 días
   barberos: PulsoBarbero[];
+  /** Cobrado de hoy (D6): eventos firmados, no agenda × lista. El `piso` de la
+   *  proyección sale de acá; `entradas`/`salidas` se rinden como dos líneas
+   *  propias — las salidas JAMÁS se restan del titular. */
+  cobrado: Cobrado;
   /** ¿Hay semana pasada con la cual comparar? El mismo día la semana pasada tuvo
    *  capacidad Y citas. Si es false, la UI omite las comparaciones (regla de robustez
    *  2: negocio nuevo → "sin semana pasada todavía", nunca un +0% inventado). Se deriva
@@ -98,14 +104,22 @@ export async function getPulsoHoy(businessId: string, now: Date = new Date()): P
   const occToday = dayCapacity(today, ctx, rangeRows, bookedByStaff(todayRows));
   const occLastWeek = dayCapacity(lastWeek, ctx, rangeRows, bookedByStaff(lastWeekRows));
 
+  // ── Cobrado de hoy (D6) — el titular deja de derivarse de la agenda ────────
+  // Antes el "piso" era `citas completadas de hoy × precio`, atribuidas por
+  // `starts_at`. Ahora es lo COBRADO: eventos firmados atribuidos por
+  // `completed_at` local, más el dinero que no pasó por la agenda. Se reusa la
+  // query del corte a propósito — una sola implementación de la atribución, que
+  // es lo que hace que el titular y el corte no puedan contradecirse.
+  const insumos = await getInsumosDelCorte(businessId, today, tz);
+  const cobrado = computeCobrado(insumos.citas, insumos.movimientos);
+
   // ── Proyección (tres capas) ──
   const nowMs = now.getTime();
-  const completedRevenue = todayRows.filter((r) => r.status === 'completed').reduce((s, r) => s + priceOf(r), 0);
   const scheduledRevenue = todayRows
     .filter((r) => (r.status === 'confirmed' || r.status === 'pending') && new Date(r.starts_at).getTime() >= nowMs)
     .reduce((s, r) => s + priceOf(r), 0);
   const emptySlots = Math.max(0, occToday.capacity - occToday.booked);
-  const projection = projectionLayers({ completedRevenue, scheduledRevenue, emptySlots, repPrice: ctx.repPrice });
+  const projection = projectionLayers({ completedRevenue: cobrado.total, scheduledRevenue, emptySlots, repPrice: ctx.repPrice });
 
   // ── No-show 30d (ventana móvil) ──
   const noShowRate30d = await getNoShowRate30d(businessId, monthAgo, today, tz);
@@ -134,6 +148,7 @@ export async function getPulsoHoy(businessId: string, now: Date = new Date()): P
     walkIns: { today: countStatus(todayRows, 'walkin'), lastWeek: countStatus(lastWeekRows, 'walkin') },
     noShowRate30d,
     barberos,
+    cobrado,
     // Comparable = el mismo día la semana pasada tuvo capacidad Y citas. Sin eso, no
     // hay con qué comparar honestamente (negocio nuevo / semana pasada vacía).
     comparable: occLastWeek.capacity > 0 && occLastWeek.booked > 0,

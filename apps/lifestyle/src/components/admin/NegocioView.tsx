@@ -345,7 +345,7 @@ export default function NegocioView({ revenue, occupancy, barberos, pulso, seman
       {/* ── Ingresos (héroe) ── */}
       <section className="mt-2 rounded-xl bg-card p-4 shadow-card">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wide text-faint">Ingresos · este mes</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-faint">Ingresos de agenda · este mes</p>
           <span className="rounded-full border border-line-2 px-2 py-0.5 text-[11px] text-faint">estimado</span>
         </div>
 
