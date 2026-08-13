@@ -206,8 +206,12 @@ test('control negativo: una query CRUDA (sin helper) SÍ ve datos de B — la fu
 
 // ─── Sanidad: la lista de tablas de tenant es la esperada ─────────────────────
 
-test('TENANT_TABLES cubre las 14 tablas con business_id', () => {
-  // 14 = las 13 originales + appointment_tips (Paso 7 rediseño barbero).
-  assert.equal(TENANT_TABLES.length, 14);
+test('TENANT_TABLES cubre las 16 tablas con business_id', () => {
+  // 16 = las 13 originales + appointment_tips (Paso 7 rediseño barbero) + las dos
+  // de la capa de dinero (caja_movimientos / caja_cortes, migración D1).
+  assert.equal(TENANT_TABLES.length, 16);
+  for (const t of ['caja_movimientos', 'caja_cortes'] as const) {
+    assert.ok(TENANT_TABLES.includes(t), `${t} debe estar en TENANT_TABLES`);
+  }
   for (const t of SCOPED_TABLES) assert.ok(TENANT_TABLES.includes(t), `${t} debe estar en TENANT_TABLES`);
 });

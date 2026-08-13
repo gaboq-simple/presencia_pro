@@ -55,6 +55,12 @@ export const TENANT_TABLES = [
   'appointment_audit',
   'management_audit',
   'appointment_tips',
+  // Capa de dinero (D1). Entran las DOS aunque D4 solo acceda a `caja_movimientos`:
+  // esta lista es la fuente de verdad de la lint, y una tabla ausente de acá es una
+  // tabla que se puede leer con `.from()` crudo sin que nadie se entere. La regla
+  // del plan es "las tablas nuevas nacen blindadas", no "cuando alguien las use".
+  'caja_movimientos',
+  'caja_cortes',
 ] as const;
 
 export type TenantTable = (typeof TENANT_TABLES)[number];

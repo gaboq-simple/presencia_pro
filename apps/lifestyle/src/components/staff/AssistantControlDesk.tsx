@@ -44,6 +44,7 @@ import PanoramaTimeline, {
 import AssistantVerticalCalendar from './AssistantVerticalCalendar';
 import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
 import CobroFields from './CobroFields';
+import CajaMovimientos from './CajaMovimientos';
 import { listarCabos, type CaboSuelto } from '@/app/staff/cabos-actions';
 import { DEFAULT_RAIL, type Rail } from '@/lib/cobro';
 import {
@@ -887,6 +888,10 @@ export default function AssistantControlDesk({
             </ul>
           </details>
         )}
+
+        {/* Caja del día (D4) — arriba de la mesa, junto a los cabos: los dos son
+            bloques de dinero que NO son la agenda del día. */}
+        <CajaMovimientos date={date} timezone={timezone} />
 
         {/* ── Tarjeta de la mesa de control ── */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-card shadow-card">

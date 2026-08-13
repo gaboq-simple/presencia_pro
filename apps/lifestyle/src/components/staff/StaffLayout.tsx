@@ -39,6 +39,7 @@ import BarberWeekView from './BarberWeekView';
 import BlockRequestForm from './BlockRequestForm';
 import RecurringAvailability from './RecurringAvailability';
 import NewAppointmentForm from './NewAppointmentForm';
+import CajaMovimientos from './CajaMovimientos';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -292,6 +293,12 @@ export default function StaffLayout({
               <span className="text-lg leading-none">+</span>
               Nueva cita
             </button>
+
+            {/* Caja del día (D4) — el dinero que no pasó por la agenda. Va acá,
+                junto a "+ Nueva cita", porque son el mismo tipo de gesto: registrar
+                algo que acaba de pasar. Al final de la pestaña quedaría escondido
+                detrás de un día largo, justo cuando hay más que registrar. */}
+            <CajaMovimientos date={date} timezone={timezone} />
 
             {/* El día se corrió (Paso 6) — aviso NEUTRO arriba del hilo: sujeto =
                 el día, gris, sin alarma. Solo con corrimiento ≥ umbral. */}

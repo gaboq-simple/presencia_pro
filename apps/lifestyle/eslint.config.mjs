@@ -17,6 +17,7 @@ const TENANT_TABLES = [
   'scheduled_notifications', 'bot_conversations', 'conversation_messages',
   'staff_schedule_exceptions', 'bot_logs', 'arco_requests',
   'appointment_audit', 'management_audit', 'appointment_tips',
+  'caja_movimientos', 'caja_cortes',
 ].join('|');
 
 const rawTenantFromRestriction = {

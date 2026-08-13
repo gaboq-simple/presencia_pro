@@ -1,23 +1,30 @@
 // ─── Activity Feed — capa visible del audit (server-only) ─────────────────────
-// Unifica appointment_audit (citas, migración 045) y management_audit (gestión,
-// 053+054) en un feed legible para el dueño. SOLO lectura. Traduce el jsonb crudo
-// a lenguaje humano; resuelve ids → nombres; degrada con gracia si algo no resuelve.
+// Unifica appointment_audit (citas, migración 045), management_audit (gestión,
+// 053+054) y caja_movimientos (dinero fuera de agenda, D4) en un feed legible para
+// el dueño. SOLO lectura. Traduce el jsonb crudo a lenguaje humano; resuelve
+// ids → nombres; degrada con gracia si algo no resuelve.
+//
+// Por qué la caja entra acá y no en un panel propio: el dueño del cliente #1 NO
+// está en el local. Un movimiento que solo se ve en la mesa del asistente es
+// dinero que él nunca mira. En Actividad queda donde ya busca "quién hizo qué",
+// firmado y con hora.
 //
 // Paginación: límite fijo de 50 por página + cursor por created_at ("Cargar más").
 // Cada tabla tiene índice (business_id, created_at DESC) → la query es barata.
 // Se traen 50 de cada tabla, se mezclan, se ordenan y se corta a 50 (los 50 eventos
-// más recientes entre ambas). El cursor es el created_at del último → la siguiente
+// más recientes entre las tres). El cursor es el created_at del último → la siguiente
 // página trae lo anterior. (Empate exacto de created_at en el borde: improbable con
 // timestamptz de microsegundos; se acepta.)
 
 import { createClient } from '@supabase/supabase-js';
 import { tenantDb } from '@/lib/tenantDb';
+import { describeMovimiento } from '@/lib/caja';
 
 const PAGE_SIZE = 50;
 
 // ─── Modelo común para la UI ───────────────────────────────────────────────────
 
-export type ActivityCategory = 'citas' | 'gestion';
+export type ActivityCategory = 'citas' | 'gestion' | 'caja';
 
 export type ActivityEvent = {
   id:         string;
@@ -217,6 +224,11 @@ type ApptRow = {
   actor_staff_id: string | null; actor_type: string;
   old_data: unknown; new_data: unknown;
 };
+type CajaRow = {
+  id: string; created_at: string; type: string; concept: string;
+  amount: number | string; method: string; note: string | null;
+  staff_id: string; reverses_id: string | null;
+};
 
 // ─── Fetch + normalización ──────────────────────────────────────────────────────
 
@@ -247,10 +259,19 @@ export async function getActivityFeed(businessId: string, before?: string): Prom
     .select('id, created_at, entity, entity_id, action, actor_staff_id, actor_type, old_data, new_data, changed_fields')
     .order('created_at', { ascending: false })
     .limit(PAGE_SIZE);
+  let cajaQ = db
+    .table('caja_movimientos')
+    .select('id, created_at, type, concept, amount, method, note, staff_id, reverses_id')
+    .order('created_at', { ascending: false })
+    .limit(PAGE_SIZE);
 
-  if (before) { apptQ = apptQ.lt('created_at', before); mgmtQ = mgmtQ.lt('created_at', before); }
+  if (before) {
+    apptQ = apptQ.lt('created_at', before);
+    mgmtQ = mgmtQ.lt('created_at', before);
+    cajaQ = cajaQ.lt('created_at', before);
+  }
 
-  const [apptRes, mgmtRes] = await Promise.all([apptQ, mgmtQ]);
+  const [apptRes, mgmtRes, cajaRes] = await Promise.all([apptQ, mgmtQ, cajaQ]);
 
   const apptEvents: ActivityEvent[] = ((apptRes.data ?? []) as ApptRow[]).map((r) => {
     const actor = actorLabel(r.actor_staff_id, r.actor_type, maps);
@@ -270,7 +291,24 @@ export async function getActivityFeed(businessId: string, before?: string): Prom
     };
   });
 
-  const events = [...apptEvents, ...mgmtEvents]
+  // Un movimiento de caja no tiene "antes": es un hecho append-only, no la
+  // edición de algo que existía. De ahí `detail: null` — la fila no esconde nada
+  // que el resumen no diga ya, incluida la nota.
+  const cajaEvents: ActivityEvent[] = ((cajaRes.data ?? []) as CajaRow[]).map((r) => {
+    const actor = actorLabel(r.staff_id, 'staff', maps);
+    const frase = describeMovimiento({
+      type: r.type, concept: r.concept, amount: Number(r.amount),
+      method: r.method, anula: r.reverses_id !== null,
+    });
+    return {
+      id: `c:${r.id}`, at: r.created_at, category: 'caja',
+      actorLabel: actor,
+      summary: `${actor} ${frase}${r.note ? ` — ${r.note}` : ''}`,
+      detail: null,
+    };
+  });
+
+  const events = [...apptEvents, ...mgmtEvents, ...cajaEvents]
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
     .slice(0, PAGE_SIZE);
 

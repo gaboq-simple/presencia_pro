@@ -15,13 +15,17 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: 'todo',    label: 'Todo' },
   { key: 'citas',   label: 'Citas' },
   { key: 'gestion', label: 'Gestión' },
+  { key: 'caja',    label: 'Caja' },
 ];
 
+// La caja va en violeta (`walk`) porque es el color con el que el panorama ya
+// pinta lo que entra FUERA de la agenda reservada — la misma idea, otra pantalla.
 const CATEGORY_PILL: Record<ActivityCategory, string> = {
   citas:   'bg-tint-1 text-teal-ink border border-teal-border',
   gestion: 'bg-past-bg text-past-ink border border-past-line',
+  caja:    'bg-walk-tint text-walk border border-walk-border',
 };
-const CATEGORY_LABEL: Record<ActivityCategory, string> = { citas: 'Cita', gestion: 'Gestión' };
+const CATEGORY_LABEL: Record<ActivityCategory, string> = { citas: 'Cita', gestion: 'Gestión', caja: 'Caja' };
 
 // Tiempo relativo (tz local del que mira; el "cuándo" de la cita ya viene formateado
 // en hora del negocio dentro del summary).
