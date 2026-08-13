@@ -9,6 +9,11 @@
 -- atrás y ~1 semana hacia adelante, con no-shows (3 reincidentes en el mes),
 -- walk-ins, cancelaciones, ~12 clientes "enfriándose" (sin visitas recientes,
 -- alimentan "Para recuperar"), días libres y bloqueos aprobados.
+-- Y la CAJA (D1b): riel de cobro en las citas cobradas, ~30 días de movimientos
+-- fuera de agenda y ~4 semanas de cortes con descuadres chicos de signo MIXTO.
+-- Sin esa capa, la pieza que más diferencia —el cuadre— se ve vacía justo en las
+-- demos de venta, y la red visual de D4/D5 fotografiaría estados vacíos y los
+-- aprobaría como correctos.
 --
 -- Propiedades:
 --   · IDEMPOTENTE: purga las citas del negocio y re-siembra. Correrlo dos veces
@@ -19,8 +24,11 @@
 --   · SIN RUIDO DE AUDIT: todo entra por INSERT con valores finales (cero
 --     UPDATEs sobre appointments) y al final limpia las filas viejas de
 --     appointment_audit con actor desconocido ("Acción sin identificar").
---   · NO TOCA: bot_conversations, conversation_messages, bot_logs, businesses,
+--   · NO TOCA: bot_conversations, conversation_messages, bot_logs,
 --     appointment_tips, ni los horarios ya cargados de barberos existentes.
+--     ÚNICA excepción en businesses: `caja_fondo` (config numérica del fondo de
+--     cambio, idempotente — la capa de dinero la necesita para que el descuadre
+--     de efectivo no cargue un offset sistemático).
 --
 -- ⚠️ DESTRUCTIVO para el negocio objetivo: borra TODAS sus citas, waitlist,
 --    scheduled_notifications y su appointment_audit. Solo para la BD demo.
@@ -69,6 +77,21 @@ delete from staff_blocks k
 using staff s
 where k.staff_id = s.id and s.business_id = (select id from seed_biz)
   and k.reason in ('Compromiso familiar', 'Cita médica');
+
+-- Caja (D1b). Las dos tablas son append-only por trigger (migración
+-- 20260812000000): igual que con el audit, SOLO en la demo se suspenden para la
+-- purga y se re-habilitan de inmediato — el resto del seed solo inserta.
+alter table caja_movimientos disable trigger trg_caja_mov_immutable;
+alter table caja_cortes      disable trigger trg_caja_cortes_immutable;
+delete from caja_cortes      where business_id = (select id from seed_biz);
+delete from caja_movimientos where business_id = (select id from seed_biz);
+alter table caja_movimientos enable trigger trg_caja_mov_immutable;
+alter table caja_cortes      enable trigger trg_caja_cortes_immutable;
+
+-- Fondo de cambio del cajón. ÚNICA columna de businesses que este seed toca
+-- (ver encabezado): sin fondo, el esperado de efectivo del corte queda corrido
+-- por la misma cantidad todos los días y el descuadre deja de significar algo.
+update businesses set caja_fondo = 500 where id = (select id from seed_biz);
 
 -- ─── 2. Servicios (crear los que falten, por nombre) ──────────────────────────
 insert into services (business_id, name, description, duration_minutes, price, currency, active)
@@ -189,7 +212,8 @@ from seed_warm limit 3;
 -- Llenado = base del barbero × día de semana × mes × (futuro al 45%), decidido por
 -- hash del slot → determinista y sin solapes (una cita por barbero-hora como máximo).
 insert into appointments (business_id, staff_id, service_id, customer_id, starts_at, ends_at,
-                          status, source, booking_name, price_charged, arrived_at, completed_at, created_at)
+                          status, source, booking_name, price_charged, arrived_at, completed_at, created_at,
+                          payment_method)
 select
   g.business_id, g.staff_id, g.service_id, g.customer_id, g.starts_utc,
   g.starts_utc + make_interval(mins => g.dur),
@@ -205,7 +229,16 @@ select
        then g.starts_utc - make_interval(mins => (g.r_arrive * 10)::int) end,
   case when g.status = 'completed'
        then g.starts_utc + make_interval(mins => g.dur + (g.r_arrive * 5)::int) end,
-  g.starts_utc - interval '2 days'
+  g.starts_utc - interval '2 days',
+  -- Riel de cobro (D1b): solo en lo cobrado. Mezcla ≈75/22/3 — el efectivo domina
+  -- en barbería, y esa proporción es la que hace que el descuadre de efectivo sea
+  -- la señal interesante. El hash va sobre la clave del SLOT, no sobre el id de la
+  -- cita: los ids se regeneran en cada corrida y romperían el determinismo.
+  case when g.status = 'completed' then
+    case when g.r_pay < 0.75 then 'efectivo'
+         when g.r_pay < 0.97 then 'tarjeta'
+         else 'transferencia' end
+  end
 from (
   select
     b.id as business_id, sl.staff_id, sl.starts_utc, sl.d, sl.hh,
@@ -213,6 +246,7 @@ from (
     cu.cust_id as customer_id, cu.cust_name,
     pg_temp.h(sl.key || ':src')    as r_source,
     pg_temp.h(sl.key || ':arrive') as r_arrive,
+    pg_temp.h(sl.key || ':pay')    as r_pay,
     case
       when sl.d < b.hoy then
         case when pg_temp.h(sl.key || ':st') < 0.82 then 'completed'
@@ -325,7 +359,128 @@ join (values ('Andrés', 2, interval '16 hours', interval '21 hours', 'Compromis
              ('Carlos', 5, interval '10 hours', interval '13 hours', 'Cita médica')) v(name, off, st, en, reason)
   on lower(v.name) = lower(s.name);
 
--- ─── 7. Stats de clientes (el trigger solo corre en UPDATE, no en el seed) ────
+-- ─── 7. Caja: movimientos fuera de agenda (~30 días) ──────────────────────────
+-- El dinero que no pasa por la agenda. Sin él, el descuadre POSITIVO (ingreso sin
+-- capturar) sería indistinguible de un error de conteo, que es justo la confusión
+-- que la capa de dinero existe para deshacer.
+-- Determinismo: el hash va sobre (día, índice) — nada de ids regenerados.
+create temp table seed_barberos as
+select s.id, row_number() over (order by s.name) as rn, (count(*) over ())::int as total
+from staff s join seed_biz b on s.business_id = b.id
+where s.role = 'barber' and s.active;
+
+insert into caja_movimientos (business_id, type, amount, method, concept, note,
+                              staff_id, occurred_on, created_at)
+select
+  b.id, 'entrada',
+  case when m.r_con < 0.60
+       then round((100 + m.r_amt * 150)::numeric, 0)     -- walk-in  $100–$250
+       else round(( 80 + m.r_amt * 320)::numeric, 0) end,-- producto $80–$400
+  case when m.r_met < 0.70 then 'efectivo'
+       when m.r_met < 0.95 then 'tarjeta' else 'transferencia' end,
+  case when m.r_con < 0.60 then 'walkin' else 'producto' end,
+  null,
+  (select id from seed_barberos where rn = 1 + floor(m.r_bar * (select total from seed_barberos limit 1))::int),
+  m.d,
+  (m.d::timestamp + interval '13 hours' + make_interval(hours => m.idx)) at time zone b.timezone
+from seed_biz b
+cross join lateral (
+  select dd.d::date as d, i.idx,
+         pg_temp.h(dd.d::text || ':mov:' || i.idx)          as r_gate,
+         pg_temp.h(dd.d::text || ':mov:' || i.idx || ':c')  as r_con,
+         pg_temp.h(dd.d::text || ':mov:' || i.idx || ':a')  as r_amt,
+         pg_temp.h(dd.d::text || ':mov:' || i.idx || ':m')  as r_met,
+         pg_temp.h(dd.d::text || ':mov:' || i.idx || ':b')  as r_bar
+  from generate_series(b.hoy - 29, b.hoy, interval '1 day') dd(d)
+  cross join generate_series(0, 2) i(idx)
+) m
+-- 0–3 por día: compuerta decreciente por índice → ~1.6 movimientos/día de promedio.
+where extract(dow from m.d)::int <> 0
+  and m.r_gate < (case m.idx when 0 then 0.75 when 1 then 0.55 else 0.30 end);
+
+-- Salidas: 1–2 por semana (insumos o retiro). Son las que hacen que el descuadre
+-- negativo tenga una explicación posible además de "falta dinero".
+insert into caja_movimientos (business_id, type, amount, method, concept, note,
+                              staff_id, occurred_on, created_at)
+select
+  b.id, 'salida',
+  round((60 + s.r_amt * 140)::numeric, 0),                 -- $60–$200
+  case when s.r_met < 0.80 then 'efectivo' else 'tarjeta' end,
+  case when s.r_con < 0.60 then 'insumos' else 'retiro' end,
+  null,
+  (select id from seed_barberos where rn = 1 + floor(s.r_bar * (select total from seed_barberos limit 1))::int),
+  s.d,
+  (s.d::timestamp + interval '19 hours') at time zone b.timezone
+from seed_biz b
+cross join lateral (
+  select dd.d::date as d,
+         pg_temp.h(dd.d::text || ':sal')      as r_gate,
+         pg_temp.h(dd.d::text || ':sal:c')    as r_con,
+         pg_temp.h(dd.d::text || ':sal:a')    as r_amt,
+         pg_temp.h(dd.d::text || ':sal:m')    as r_met,
+         pg_temp.h(dd.d::text || ':sal:b')    as r_bar
+  from generate_series(b.hoy - 29, b.hoy, interval '1 day') dd(d)
+) s
+where extract(dow from s.d)::int <> 0
+  and s.r_gate < 0.22;
+
+-- ─── 8. Caja: cortes de las últimas ~4 semanas, con huecos ────────────────────
+-- El esperado se calcula con la MISMA regla que usará lib/corte.ts (D5): día de
+-- caja de una cita = fecha LOCAL de completed_at (el dinero cuenta cuando se
+-- cobró), efectivo lleva el fondo y la tarjeta no, y las transferencias quedan
+-- FUERA de la comparación (no hay artefacto físico que contar).
+--
+-- Huecos a propósito: domingos (cerrado), ~1 día hábil por semana por hash, y HOY
+-- sin corte — para poder capturarlo EN VIVO durante una demo.
+-- El ruido del conteo es de SIGNO MIXTO (−$80…+$80): un cuadre perfecto todos los
+-- días es la señal de teatro que el propio plan vigila, así que el seed no la
+-- fabrica.
+insert into caja_cortes (business_id, corte_date, staff_id, cash_counted, card_counted,
+                         expected_cash, expected_card, fondo_snapshot, created_at)
+select
+  b.id, c.d,
+  (select id from seed_barberos where rn = 1 + floor(c.r_bar * (select total from seed_barberos limit 1))::int),
+  greatest(0, c.exp_cash + c.ruido_cash),
+  greatest(0, c.exp_card + c.ruido_card),
+  c.exp_cash, c.exp_card, 500,
+  (c.d::timestamp + interval '21 hours 30 minutes') at time zone b.timezone
+from seed_biz b
+cross join lateral (
+  select
+    dd.d::date as d,
+    pg_temp.h(dd.d::text || ':corte:b') as r_bar,
+    round(((pg_temp.h(dd.d::text || ':corte:rc') - 0.5) * 160)::numeric, 0) as ruido_cash,
+    round(((pg_temp.h(dd.d::text || ':corte:rt') - 0.5) * 160)::numeric, 0) as ruido_card,
+    pg_temp.h(dd.d::text || ':corte:skip') as r_skip,
+    500
+      + coalesce((select sum(a.price_charged) from appointments a
+                   where a.business_id = b.id and a.status = 'completed'
+                     and a.payment_method = 'efectivo'
+                     and (a.completed_at at time zone b.timezone)::date = dd.d::date), 0)
+      + coalesce((select sum(m.amount) from caja_movimientos m
+                   where m.business_id = b.id and m.occurred_on = dd.d::date
+                     and m.type = 'entrada' and m.method = 'efectivo'), 0)
+      - coalesce((select sum(m.amount) from caja_movimientos m
+                   where m.business_id = b.id and m.occurred_on = dd.d::date
+                     and m.type = 'salida' and m.method = 'efectivo'), 0)
+      as exp_cash,
+        coalesce((select sum(a.price_charged) from appointments a
+                   where a.business_id = b.id and a.status = 'completed'
+                     and a.payment_method = 'tarjeta'
+                     and (a.completed_at at time zone b.timezone)::date = dd.d::date), 0)
+      + coalesce((select sum(m.amount) from caja_movimientos m
+                   where m.business_id = b.id and m.occurred_on = dd.d::date
+                     and m.type = 'entrada' and m.method = 'tarjeta'), 0)
+      - coalesce((select sum(m.amount) from caja_movimientos m
+                   where m.business_id = b.id and m.occurred_on = dd.d::date
+                     and m.type = 'salida' and m.method = 'tarjeta'), 0)
+      as exp_card
+  from generate_series(b.hoy - 27, b.hoy - 1, interval '1 day') dd(d)
+) c
+where extract(dow from c.d)::int <> 0     -- domingo: cerrado, no hay qué contar
+  and c.r_skip >= 0.18;                   -- ~1 día hábil por semana sin corte
+
+-- ─── 9. Stats de clientes (el trigger solo corre en UPDATE, no en el seed) ────
 with agg as (
   select a.customer_id,
          count(*) filter (where a.status = 'completed')                 as vc,
@@ -351,7 +506,7 @@ set visit_count = 0, last_visit = null, noshow_count = 0, is_flagged = false
 where c.business_id = (select id from seed_biz)
   and not exists (select 1 from appointments a where a.customer_id = c.id);
 
--- ─── 8. Limpieza del audit "Acción sin identificar" ───────────────────────────
+-- ─── 10. Limpieza del audit "Acción sin identificar" ──────────────────────────
 -- Los UPDATEs de este seed (reincidentes, paso 5) y cualquier SQL ad-hoc previo
 -- dejan filas de audit con actor desconocido que ensucian Actividad. Fuera.
 delete from appointment_audit
@@ -370,4 +525,15 @@ select
   (select count(*) from appointments a join seed_biz b on a.business_id = b.id)                                as citas,
   (select count(*) from appointments a join seed_biz b on a.business_id = b.id where a.status = 'no_show')     as no_shows,
   (select count(*) from appointments a join seed_biz b on a.business_id = b.id
-    where a.starts_at >= (b.hoy + 1)::timestamp at time zone b.timezone)                                       as futuras;
+    where a.starts_at >= (b.hoy + 1)::timestamp at time zone b.timezone)                                       as futuras,
+  (select count(*) from caja_movimientos m join seed_biz b on m.business_id = b.id)                            as movimientos,
+  (select count(*) from caja_cortes c join seed_biz b on c.business_id = b.id)                                 as cortes,
+  -- Días hábiles de la ventana de cortes SIN corte (incluye el de hoy, a propósito).
+  (select count(*) from seed_biz b
+   cross join generate_series(b.hoy - 27, b.hoy, interval '1 day') dd(d)
+   where extract(dow from dd.d)::int <> 0
+     and not exists (select 1 from caja_cortes c
+                      where c.business_id = b.id and c.corte_date = dd.d::date))                               as dias_sin_corte,
+  -- Suma de descuadres CON SIGNO: si diera 0 exacto, el ruido no sería mixto.
+  (select coalesce(sum(c.cash_diff + c.card_diff), 0) from caja_cortes c
+     join seed_biz b on c.business_id = b.id)                                                                  as suma_descuadres;

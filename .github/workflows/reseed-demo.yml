@@ -1,0 +1,58 @@
+name: Reseed demo barbershop
+
+# Re-siembra diaria de la barbería demo (`barberia-demo`).
+#
+# POR QUÉ EXISTE: el seed es relativo a HOY (citas de hoy−90 a hoy+7), así que el
+# demo se pudre solo en días — una semana sin correrlo y el negocio queda sin citas
+# hoy y sin futuras. Eso rompe dos cosas a la vez: el demo como herramienta de
+# venta se ve muerto, y la red de seguridad visual de los planes se vuelve un sello
+# de goma (comparar dos pantallas vacías idénticas y firmar "no se rompió nada").
+#
+# ⚠️ DESTRUCTIVO: el seed BORRA las citas, waitlist, notificaciones, movimientos y
+# cortes del negocio demo. La corrida de las 05:00 CDMX tira lo que se haya creado
+# EN VIVO el día anterior (una cita agendada delante de un cliente, un corte
+# capturado a mano). Es aceptable en la demo y por eso corre de madrugada, no en
+# horario de trabajo. Nunca apuntar este workflow a un negocio con datos reales:
+# el objetivo está fijado por el slug en `seed_cfg`, primera línea del script.
+#
+# POR QUÉ NO pg_cron: exigiría meter el seed como función dentro de la BD (dos
+# fuentes de verdad que se desincronizan contra el archivo versionado) y dejaría un
+# job residente con permiso permanente de suspender el trigger de inmutabilidad del
+# audit. Un runner externo con un secret es mejor postura.
+
+on:
+  schedule:
+    # 11:00 UTC = 05:00 CDMX (México sin horario de verano desde 2022). De
+    # madrugada para minimizar el choque con una demo en vivo.
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+
+jobs:
+  reseed:
+    name: Reseed barberia-demo
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Run seed
+        env:
+          # DEBE ser el SESSION POOLER (mismo secret que usa el backup semanal):
+          # la conexión directa `db.<ref>.supabase.co` es IPv6-only y los runners de
+          # GitHub son IPv4-only → "Network is unreachable". Ver scripts/README.md.
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::Falta el secret SUPABASE_DB_URL (session pooler). El seed NO corrió."
+            exit 1
+          fi
+          # ON_ERROR_STOP: un seed a medias es peor que ninguno — deja la demo en un
+          # estado que nadie sabe leer. Si algo falla, el workflow se pone rojo y se
+          # ve; no se maquilla con `|| true`.
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f scripts/seed-demo-densa.sql

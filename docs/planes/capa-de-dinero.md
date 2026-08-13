@@ -250,9 +250,13 @@ con el **SESSION POOLER** (regla de `scripts/README.md` — runners IPv4-only).
 Por qué no pg_cron: exigiría el seed como función en la BD (dos fuentes de
 verdad, drift contra el archivo versionado) y dejaría un job residente con
 permiso permanente de suspender `trg_appt_audit_immutable`; un runner externo
-con secret es mejor postura. El secret es `SUPABASE_DB_URL` — el MISMO que
-bloquea el backup R2 (S6-OPS-01): una siembra manual de Gabriel destraba dos
-deudas. El seed es destructivo: la corrida de las 05:00 tira lo creado en
+con secret es mejor postura. El secret es `SUPABASE_DB_URL`. **Corrección
+verificada al ejecutar el paso (2026-08-12): ese secret YA EXISTE** (creado
+2026-07-17) y **no bloquea nada** — el backup semanal a R2 lo viene usando con
+4 corridas verdes seguidas, la última el 2026-08-09. La versión anterior de este
+párrafo decía que faltaba y que una siembra manual "destrabaría dos deudas": era
+falso en los dos extremos. D1b **no tiene dependencia manual**: el workflow queda
+operativo con el secret que ya está. El seed es destructivo: la corrida de las 05:00 tira lo creado en
 vivo el día anterior (aceptable en demo — documentarlo en el header del
 workflow). El workflow entra CON este paso; seed fallido = workflow rojo,
 visible. Consecuencia en la red visual (aplicada también en Reglas globales):
