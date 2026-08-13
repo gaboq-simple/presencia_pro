@@ -71,6 +71,57 @@
   --radius-pill:   999px;
   /* Los radios 11px/8px de v5 se agregarán con nombre propio en PR3, al cablear su uso.
      No se usan --radius-md/sm/xs para NO sobreescribir la escala default de Tailwind. */
+
+  /* ⚠️ NO UNIFICAR con el `@theme static` de abajo (paletas de datos): están
+     separados por una razón funcional, no por estilo. La razón, en su comentario. */
+}
+
+/*
+ * ── Datos — paletas de VISUALIZACIÓN (dueño-v3, Paso 1) ───────────────────────
+ * Separadas de los colores de UI a propósito: un color de dato codifica una
+ * magnitud o una identidad, no un estado. Valores decididos y validados en la
+ * maqueta (docs/maquetas/dueno-v3.html, sección Sistema) — no se ajustan a ojo.
+ *
+ * ⚠️ POR QUÉ ESTE BLOQUE ESTÁ SEPARADO DEL `@theme` DE ARRIBA — no unificar:
+ * Tailwind v4 PODA del CSS servido las variables de `@theme` que ninguna utilidad
+ * usa. Estos tokens todavía no tienen consumidor (los monta el kit de gráficas del
+ * Paso 2), así que dentro del `@theme` normal simplemente NO se emiten: existen en
+ * el fuente y no en el CSS. El modificador `static` los emite siempre, sin sacarlos
+ * de `@theme` — Tailwind sigue generando sus utilidades (bg-viz-cat-1,
+ * text-viz-seq-4…) en cuanto el kit las use. Opción verificada contra el parser de
+ * la versión instalada, no asumida (tailwindcss 4.2.2 acepta en `@theme`:
+ * reference | inline | default | static).
+ *
+ * Si algún día TODOS estos tokens tienen consumidor, `static` deja de ser
+ * necesario — pero quitarlo sin comprobar cuáles se usan vuelve a podar los que no.
+ */
+@theme static {
+  /* Categórica B "contenida" — IDENTIDAD (barbero, servicio, tipo de evento).
+     El ORDEN es el mecanismo de seguridad para daltonismo (validado): se asignan
+     en secuencia, NO se reordenan ni se intercalan. */
+  --color-viz-cat-1: #008F76;   /* teal marca */
+  --color-viz-cat-2: #35619F;   /* azul */
+  --color-viz-cat-3: #9C500F;   /* ámbar profundo */
+  --color-viz-cat-4: #4F42B5;   /* violeta */
+  --color-viz-cat-5: #9C3F73;   /* berry */
+  --color-viz-otros: #9CA0A4;   /* pliegue "Otros" — JAMÁS una 6ª serie */
+
+  /* Secuencial teal — MAGNITUD (ocupación, intensidad). Un solo matiz: más
+     oscuro = más. Nunca se usa la categórica para expresar cantidad. */
+  --color-viz-seq-1: #EBFAF8;
+  --color-viz-seq-2: #C7F2EC;
+  --color-viz-seq-3: #8FE3D3;
+  --color-viz-seq-4: #4CC9AF;
+  --color-viz-seq-5: #17A98C;
+  --color-viz-seq-6: #018271;
+  --color-viz-seq-7: #025F53;
+
+  /* Hueco — capacidad SIN USAR. Semántica propia, separada de "atención":
+     ámbar tenue, nunca rojo (un hueco es una oportunidad, no una alarma). */
+  --color-viz-hueco-1: #F6EDE0;
+  --color-viz-hueco-2: #EFDCC0;
+  --color-viz-hueco-3: #E7C99D;
+  --color-viz-hueco-4: #E0A868;
 }
 
 /*
@@ -83,7 +134,41 @@
   /* Sub-rejilla de 15 min del panorama (asistente): estructura temporal silenciosa
      de fondo. No es color plano de UI → var directa (como --grad-teal), no token @theme. */
   --grid-15: rgba(21, 25, 27, 0.035);
+
+  /* ── Movimiento (dueño-v3, Paso 1) ────────────────────────────────────────────
+     Dos duraciones y dos curvas para TODO el sistema. Van en :root y no en @theme
+     porque no son una escala que Tailwind deba volver utilidades: se consumen desde
+     CSS (animation/transition) en los pasos siguientes — la entrada escalonada de
+     barras y heatmap es `animation-delay: calc(var(--i) * 30ms)`, no JS.
+     --dur-1 = microinteracción (tap, hover) · --dur-2 = entrada/transición de vista.
+     La media query de prefers-reduced-motion del final las neutraliza a todas. */
+  --dur-1: 140ms;
+  --dur-2: 260ms;
+  --ease-out:   cubic-bezier(.2, .8, .2, 1);
+  --ease-inout: cubic-bezier(.4, 0, .2, 1);
 }
+
+/*
+ * ── Escala tipográfica y elevación del sistema (dueño-v3, Paso 1) ─────────────
+ * NO son tokens: son las reglas que los pasos 2–6 aplican con utilidades de
+ * Tailwind. Se documentan acá, junto a los colores, para que exista UN solo lugar
+ * donde consultar el sistema. Fuente: la maqueta (docs/maquetas/dueno-v3.html,
+ * sección Sistema) y docs/maquetas/dueno-v3-notas.md.
+ *
+ * Escala (px):   40 · 26 · 20 · 15 · 13 · 11
+ * Pesos:         300 (display) · 400 (cuerpo) · 500 (énfasis) · 600 (kicker/labels)
+ *   · Display 40 w300, tracking −0.02em. UN SOLO 40px por pantalla — el héroe.
+ *     Actividad no tiene héroe, a propósito.
+ *   · Kicker 11 w600 MAYÚSCULAS con tracking +0.10em (el tracking es lo que
+ *     distingue un kicker de un label chico; sin él la jerarquía no se lee).
+ *   · Números SIEMPRE tabular-nums; el número héroe nunca hace count-up.
+ *
+ * Elevación (regla única): el hairline es la norma — las cards se separan con
+ * borde de 1px (--color-line), SIN sombra; quince sombras iguales son niebla, no
+ * jerarquía. La sombra queda reservada para lo que de verdad FLOTA sobre el
+ * contenido (sheets, toasts, el marco/tab-bar). Las --shadow-card/--shadow-hero
+ * de arriba son del sistema de la vista barbero (v5) y no se re-apuntan acá.
+ */
 
 @utility bg-hero-grad {
   background-image: var(--grad-teal);
