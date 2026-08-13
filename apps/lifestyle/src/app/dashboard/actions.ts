@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
+import { resolveCobro, esCobroError, type CobroInput } from '@/lib/cobro';
 
 function getServiceClient() {
   const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
@@ -23,7 +24,8 @@ function getServiceClient() {
 export async function updateAppointmentStatus(
   appointmentId: string,
   status: 'completed' | 'no_show',
-): Promise<void> {
+  cobro?: CobroInput,
+): Promise<void | { error: string }> {
   // 1. Verificar sesión — autoridad admin del negocio (owner o admin), vía
   //    getCurrentSession (token o Supabase Auth). Rechaza barber/assistant, así
   //    esta acción sigue siendo inalcanzable para el barbero (sin abrir agujero).
@@ -33,10 +35,19 @@ export async function updateAppointmentStatus(
   // 2. Actualizar — el helper inyecta .eq('business_id') → aislamiento garantizado.
   //    modified_by_staff_id firma el audit: el trigger toma el actor de esa columna
   //    (queda actor_type='staff' + actor_staff_id real, no 'unknown').
+  //    Cobro (D2): solo al completar — riel siempre, monto solo si lo editaron.
+  const patch: Record<string, unknown> = { status, modified_by_staff_id: auth.staffId };
+  if (status === 'completed') {
+    const resuelto = resolveCobro(cobro);
+    if (esCobroError(resuelto)) return { error: resuelto.error };
+    patch['payment_method'] = resuelto.method;
+    if (resuelto.amount !== undefined) patch['price_charged'] = resuelto.amount;
+  }
+
   const supabase = getServiceClient();
   const { error } = await tenantDb(supabase, auth.businessId)
     .table('appointments')
-    .update({ status, modified_by_staff_id: auth.staffId })
+    .update(patch)
     .eq('id', appointmentId);
 
   if (error) throw new Error(`updateAppointmentStatus failed: ${error.message}`);

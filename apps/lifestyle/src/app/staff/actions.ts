@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { localDayRangeUtc } from '@/lib/dayWindow';
+import { resolveCobro, esCobroError, type CobroInput } from '@/lib/cobro';
 import {
   type DayAppointmentForStaff,
   type ServiceRef,
@@ -57,7 +58,8 @@ export async function refreshStaffDayAppointments(
 export async function updateAppointmentStatusAsBarber(
   appointmentId: string,
   status: 'completed' | 'no_show',
-): Promise<void> {
+  cobro?: CobroInput,
+): Promise<void | { error: string }> {
   // 1. Verificar sesión activa — ls_session (PIN) o Supabase Auth (operador).
   //    Soporta al barbero por PIN, que antes quedaba fuera (auth.getUser() null → 401).
   const session = await getCurrentSession();
@@ -83,11 +85,24 @@ export async function updateAppointmentStatusAsBarber(
   if (apptError || !appt) throw new Error('Appointment not found');
   if (appt.staff_id !== staffId) throw new Error('Forbidden');
 
-  // 4. Actualizar — doble filtro: id + staff_id para integridad (business_id lo inyecta el helper).
+  // 4. Cobro (D2) — SOLO al completar: un no_show no cobra nada, y escribirle riel
+  //    sería inventar un pago que no ocurrió.
+  //    El riel va SIEMPRE (default efectivo, decisión 2 del plan); el monto solo si
+  //    la persona lo editó — si no, el trigger seal_appointment_price sella el
+  //    precio de lista, que es lo honesto: nadie confirmó otro número.
+  const patch: Record<string, unknown> = { status, modified_by_staff_id: staffId };
+  if (status === 'completed') {
+    const resuelto = resolveCobro(cobro);
+    if (esCobroError(resuelto)) return { error: resuelto.error };
+    patch['payment_method'] = resuelto.method;
+    if (resuelto.amount !== undefined) patch['price_charged'] = resuelto.amount;
+  }
+
+  // 5. Actualizar — doble filtro: id + staff_id para integridad (business_id lo inyecta el helper).
   //    modified_by_staff_id firma el audit (actor_type='staff' + actor real, no 'unknown').
   const { error } = await db
     .table('appointments')
-    .update({ status, modified_by_staff_id: staffId })
+    .update(patch)
     .eq('id', appointmentId)
     .eq('staff_id', staffId);
 

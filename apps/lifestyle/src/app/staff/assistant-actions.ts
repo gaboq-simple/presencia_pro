@@ -14,6 +14,7 @@ import { todayStrInTz } from '@/lib/dayWindow';
 import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
+import { resolveCobro, esCobroError, type CobroInput } from '@/lib/cobro';
 import {
   sendCancellationNotice,
   type MetaConfig,
@@ -249,7 +250,10 @@ export async function updateAppointmentNotes(
 
 // ─── Completar cita ───────────────────────────────────────────────────────────
 
-export async function completeAppointment(appointmentId: string): Promise<{ error?: string } | void> {
+export async function completeAppointment(
+  appointmentId: string,
+  cobro?: CobroInput,
+): Promise<{ error?: string } | void> {
   const session = await requireAssistantSession();
   const supabase = getServiceClient();
   const db = tenantDb(supabase, session.business_id);
@@ -265,6 +269,10 @@ export async function completeAppointment(appointmentId: string): Promise<{ erro
   if (fetchErr || !existing) return { error: 'Cita no encontrada' };
   if (existing.status === 'completed') return; // idempotente
 
+  // Cobro (D2): riel SIEMPRE, monto solo si lo editaron — ver lib/cobro.ts.
+  const resuelto = resolveCobro(cobro);
+  if (esCobroError(resuelto)) return { error: resuelto.error };
+
   const { error } = await db
     .table('appointments')
     .update({
@@ -275,6 +283,8 @@ export async function completeAppointment(appointmentId: string): Promise<{ erro
       completed_at:         new Date().toISOString(),
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
+      payment_method:       resuelto.method,
+      ...(resuelto.amount !== undefined ? { price_charged: resuelto.amount } : {}),
     })
     .eq('id', appointmentId);
 
