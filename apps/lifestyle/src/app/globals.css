@@ -122,6 +122,18 @@
   --color-viz-hueco-2: #EFDCC0;
   --color-viz-hueco-3: #E7C99D;
   --color-viz-hueco-4: #E0A868;
+
+  /* Animaciones del kit (dueño-v3, Paso 2) — los @keyframes viz-* están más
+     abajo, en CSS plano. Acá viven sus utilidades (animate-viz-*), en el bloque
+     `static` por el mismo motivo que los colores: hasta que una vista monte el
+     kit (Paso 3) nadie las usa, y sin `static` Tailwind las podaría.
+     `backwards` no es decorativo: un elemento con animation-delay debe nacer en
+     el estado inicial (escala 0 / opacidad 0), o parpadea completo antes de
+     empezar su turno en la secuencia. */
+  --animate-viz-grow-x:  viz-grow-x  var(--dur-2) var(--ease-out) backwards;
+  --animate-viz-grow-y:  viz-grow-y  var(--dur-2) var(--ease-out) backwards;
+  --animate-viz-fade-in: viz-fade-in var(--dur-2) var(--ease-out) backwards;
+  --animate-viz-sk-pulse: viz-sk-pulse 1.2s var(--ease-inout) infinite;
 }
 
 /*
@@ -146,7 +158,29 @@
   --dur-2: 260ms;
   --ease-out:   cubic-bezier(.2, .8, .2, 1);
   --ease-inout: cubic-bezier(.4, 0, .2, 1);
+
+  /* Paso de la entrada escalonada (dueño-v3, Paso 2). La riqueza está en la
+     SECUENCIA, no en la velocidad: cada elemento arranca --stagger después del
+     anterior vía `animation-delay: calc(var(--i) * var(--stagger))`, con --i de
+     prop. Es token y no literal para poder apagarlo por reduced-motion abajo. */
+  --stagger: 30ms;
 }
+
+/*
+ * ── Movimiento del kit de gráficas (dueño-v3, Paso 2) ─────────────────────────
+ * La magnitud se CONSTRUYE desde su eje: las barras crecen desde su base (no
+ * aparecen ya dibujadas), y lo que no es magnitud solo aparece. Cuatro keyframes,
+ * uno por gesto, en CSS plano al nivel del archivo: el nombre lo resuelve el
+ * navegador en runtime, así que la poda de @theme (hallazgo de dv3-1) no los
+ * puede tocar. Sus `--animate-*` viven en el @theme static de arriba.
+ *
+ * La composición 100% (Apilada) NO tiene animación de crecimiento a propósito:
+ * una proporción no se acumula, aparece.
+ */
+@keyframes viz-grow-x  { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+@keyframes viz-grow-y  { from { transform: scaleY(0) } to { transform: scaleY(1) } }
+@keyframes viz-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes viz-sk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
 
 /*
  * ── Escala tipográfica y elevación del sistema (dueño-v3, Paso 1) ─────────────
@@ -287,4 +321,26 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/*
+ * Reduced-motion POR TOKENS (dueño-v3, Paso 2) — complementa al bloque de arriba,
+ * no lo repite. El de arriba colapsa duraciones, pero NO el `animation-delay`: con
+ * la entrada escalonada del kit, un elemento con delay de 300ms y `backwards` se
+ * quedaría 300ms invisible y luego aparecería de golpe — justo el movimiento que
+ * quien pide reduced-motion no quiere. Poner --stagger en 0 apaga la secuencia de
+ * raíz, y hacerlo sobre los tokens cubre además las transiciones que los pasos
+ * 3'–6 escriban con las duraciones y curvas del sistema, sin que haya que
+ * acordarse de guardar cada una (regla 6 del Sistema de la maqueta).
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --stagger: 0ms;
+  }
+  /* El único infinito del kit: sin él seguiría latiendo (una iteración de 0.01ms
+     se repetiría igual, porque iteration-count:1 lo corta pero el pulso no aporta
+     nada en este modo). */
+  .animate-viz-sk-pulse { animation: none; }
 }
