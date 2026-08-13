@@ -24,6 +24,8 @@ import type { BarberDayAppointment } from '@/lib/barberDay';
 import type { DriftProjection } from '@/lib/dayDrift';
 import { isTodayInTz } from '@/lib/dayWindow';
 import { completeAppointment, noShowAppointment } from '@/app/staff/assistant-actions';
+import { cobroResumen } from './CobroFields';
+import { DEFAULT_RAIL, type Rail } from '@/lib/cobro';
 import AppointmentSheet, { type StaffOption } from './AppointmentSheet';
 import { fmtTip } from './TipSheet';
 
@@ -103,7 +105,18 @@ type Props = {
   projections?: Map<string, DriftProjection>;
 };
 
-type PendingAction = { appt: BarberDayAppointment; kind: 'completed' | 'no_show'; label: string; timer: ReturnType<typeof setTimeout> };
+// El cobro VIAJA sobre el delay-commit: se captura mientras el Deshacer sigue
+// vivo y se manda en el mismo update que el status. Por eso vive en el pendiente
+// y no en un estado aparte — si se separaran, un Deshacer podría dejar el cobro
+// escrito sin la cita completada.
+type PendingAction = {
+  appt:   BarberDayAppointment;
+  kind:   'completed' | 'no_show';
+  label:  string;
+  timer:  ReturnType<typeof setTimeout>;
+  amount: string;   // '' = no lo editaron → lo sella el trigger con la lista
+  method: Rail;
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -134,8 +147,11 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
   useEffect(() => { onCompletedRef.current = onCompleted; });
 
   const commit = useCallback((p: PendingAction) => {
-    const action = p.kind === 'completed' ? completeAppointment : noShowAppointment;
-    void action(p.appt.id).then(() => {
+    // Solo el "Terminó" lleva cobro: un No vino no cobra nada.
+    const action = p.kind === 'completed'
+      ? () => completeAppointment(p.appt.id, { amount: p.amount, method: p.method })
+      : () => noShowAppointment(p.appt.id);
+    void action().then(() => {
       onMutatedRef.current();
       // El Terminó ya es real en el server → sube la hoja de propina (Paso 7).
       if (p.kind === 'completed') onCompletedRef.current?.(p.appt);
@@ -148,14 +164,33 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
   // Al desmontar, no perder el pendiente: commitea.
   useEffect(() => () => { const p = pendingRef.current; if (p) { clearTimeout(p.timer); commit(p); } }, [commit]);
 
-  function triggerSwipe(appt: BarberDayAppointment, kind: 'completed' | 'no_show') {
-    flushPending(); // si había otro pendiente, commitealo antes de encolar el nuevo
-    const label = kind === 'completed' ? 'Terminó' : 'No vino';
-    const timer = setTimeout(() => {
+  function armar(): ReturnType<typeof setTimeout> {
+    return setTimeout(() => {
       const p = pendingRef.current;
       if (p) { commit(p); setPending(null); }
     }, UNDO_MS);
-    setPending({ appt, kind, label, timer });
+  }
+
+  function triggerSwipe(appt: BarberDayAppointment, kind: 'completed' | 'no_show') {
+    flushPending(); // si había otro pendiente, commitealo antes de encolar el nuevo
+    const label = kind === 'completed' ? 'Terminó' : 'No vino';
+    setPending({ appt, kind, label, timer: armar(), amount: '', method: DEFAULT_RAIL });
+  }
+
+  // Editar el cobro PAUSA la cuenta regresiva (si no, la ventana se consumiría
+  // mientras se teclea) y al cerrar la RE-ARMA completa: el chip no le cuesta ni
+  // un segundo al Deshacer.
+  const [cobroAppt, setCobroAppt] = useState<BarberDayAppointment | null>(null);
+  function abrirCobro() {
+    const p = pendingRef.current;
+    if (!p) return;
+    clearTimeout(p.timer);
+    setCobroAppt(p.appt);
+  }
+  function cerrarCobro() {
+    setCobroAppt(null);
+    const p = pendingRef.current;
+    if (p) setPending({ ...p, timer: armar() });
   }
   function undo() {
     const p = pendingRef.current;
@@ -262,11 +297,41 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
       {/* Toast con Deshacer (delay-commit) */}
       {pending && (
         <div className="fixed inset-x-0 bottom-16 z-30 mx-auto flex max-w-xl items-center justify-between gap-3 px-4">
-          <div className="flex flex-1 items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3 text-sm text-card shadow-card">
-            <span>{pending.label} — {pending.appt.customer?.name ?? 'cita'}</span>
-            <button onClick={undo} className="shrink-0 font-semibold text-tint-2 underline">Deshacer</button>
+          <div className="flex-1 rounded-xl bg-ink px-4 py-3 text-sm text-card shadow-card">
+            <div className="flex items-center justify-between gap-3">
+              <span>{pending.label} — {pending.appt.customer?.name ?? 'cita'}</span>
+              <button onClick={undo} className="shrink-0 font-semibold text-tint-2 underline">Deshacer</button>
+            </div>
+            {pending.kind === 'completed' && (
+              <button
+                onClick={abrirCobro}
+                className="mt-2 w-full rounded-lg border border-past-ink/40 px-3 py-2 text-left text-xs text-tint-2"
+              >
+                {cobroResumen(pending.amount, pending.appt.price_charged ?? pending.appt.service?.price ?? 0, pending.method)}
+                <span className="text-past-faint"> — toca para cambiar</span>
+              </button>
+            )}
           </div>
         </div>
+      )}
+
+      {/* Cobro del pendiente (D2): la MISMA ficha en modo cobro. */}
+      {cobroAppt && pending && (
+        <AppointmentSheet
+          appt={cobroAppt}
+          date={date}
+          timezone={timezone}
+          staffOptions={staffOptions}
+          onClose={cerrarCobro}
+          onMutated={() => {}}
+          cobroEdit={{
+            amount:   pending.amount,
+            method:   pending.method,
+            onAmount: (v) => { const p = pendingRef.current; if (p) setPending({ ...p, amount: v }); },
+            onMethod: (m) => { const p = pendingRef.current; if (p) setPending({ ...p, method: m }); },
+            onDone:   cerrarCobro,
+          }}
+        />
       )}
 
       {/* Ficha (tap en una card) */}

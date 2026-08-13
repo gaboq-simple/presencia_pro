@@ -21,6 +21,8 @@ import {
   rescheduleAppointment,
 } from '@/app/staff/assistant-actions';
 import { fmtTip } from './TipSheet';
+import CobroFields from './CobroFields';
+import type { Rail } from '@/lib/cobro';
 
 export type StaffOption = { id: string; name: string };
 
@@ -37,11 +39,22 @@ type Props = {
   onCompleted?: (appt: BarberDayAppointment) => void;
   /** Agregar/corregir la propina de una cita terminada → reabrir la hoja. */
   onOpenTip?: (appt: BarberDayAppointment) => void;
+  /** Modo COBRO (D2): la ficha se abre desde el chip de la ventana de Deshacer,
+      solo para editar monto + riel de un "Terminó" que todavía no commitea. En
+      este modo NO se ofrecen Terminó/No vino ni los paneles: la cita ya está
+      resuelta optimistamente y ofrecer resolverla otra vez confunde. */
+  cobroEdit?: {
+    amount:   string;
+    method:   Rail;
+    onAmount: (v: string) => void;
+    onMethod: (m: Rail) => void;
+    onDone:   () => void;
+  };
 };
 
 type Panel = 'none' | 'reschedule' | 'cancel' | 'notes';
 
-export default function AppointmentSheet({ appt, date, timezone, staffOptions, onClose, onMutated, onCompleted, onOpenTip }: Props) {
+export default function AppointmentSheet({ appt, date, timezone, staffOptions, onClose, onMutated, onCompleted, onOpenTip, cobroEdit }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>('none');
@@ -53,6 +66,9 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
   const [reschedStaffId, setReschedStaffId] = useState(appt.staff?.id ?? staffOptions[0]?.id ?? '');
 
   const isActive = ACTIVE.has(appt.status);
+  // Precio de lista de la cita — placeholder del monto en modo cobro (D2). Si ya
+  // hay un sello previo se muestra ese, que es lo que el barbero vería cobrado.
+  const listPrice = appt.price_charged ?? appt.service?.price ?? 0;
   const phoneRaw = appt.customer?.phone ?? '';
   const telHref = phoneRaw ? `tel:${phoneRaw}` : undefined;
   const waHref  = phoneRaw ? `https://wa.me/${phoneRaw.replace(/\D/g, '')}` : undefined;
@@ -94,8 +110,28 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
           <button onClick={onClose} aria-label="Cerrar" className="shrink-0 rounded-lg px-2 py-1 text-ink-2 hover:bg-past-bg">✕</button>
         </div>
 
+        {/* Cobro (D2) — solo en modo cobroEdit: monto editable + los 3 rieles.
+            Es lo único accionable de la ficha en ese modo. */}
+        {cobroEdit && (
+          <div className="mt-4 space-y-3 rounded-xl border border-line bg-past-bg/40 p-3">
+            <CobroFields
+              amount={cobroEdit.amount}
+              method={cobroEdit.method}
+              listPrice={listPrice}
+              onAmount={cobroEdit.onAmount}
+              onMethod={cobroEdit.onMethod}
+            />
+            <button
+              onClick={cobroEdit.onDone}
+              className="min-h-[44px] w-full rounded-xl bg-teal-ink text-sm font-semibold text-card"
+            >
+              Listo
+            </button>
+          </div>
+        )}
+
         {/* Contacto — tel: / wa.me (reemplaza la bandeja business-wide del Paso 1) */}
-        {phoneRaw && (
+        {!cobroEdit && phoneRaw && (
           <div className="mt-3 flex gap-2">
             <a href={telHref} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-line bg-card py-2.5 text-sm font-semibold text-ink-2 hover:bg-tint-1">
               Llamar
@@ -107,7 +143,7 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
         )}
 
         {/* Acciones secundarias */}
-        {isActive && (
+        {!cobroEdit && isActive && (
           <div className="mt-3 grid grid-cols-3 gap-2">
             <button onClick={() => setPanel(panel === 'reschedule' ? 'none' : 'reschedule')} className="rounded-xl border border-line bg-card py-2.5 text-sm font-semibold text-ink-2 hover:bg-tint-1">Reagendar</button>
             <button onClick={() => setPanel(panel === 'notes' ? 'none' : 'notes')} className="rounded-xl border border-line bg-card py-2.5 text-sm font-semibold text-ink-2 hover:bg-tint-1">Notas</button>
@@ -160,7 +196,7 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
 
         {/* Fallback accesible al swipe: Terminó / No vino. El Terminó exitoso
             encadena la hoja de propina (Paso 7) vía onCompleted. */}
-        {isActive && (
+        {!cobroEdit && isActive && (
           <div className="mt-4 flex gap-2 border-t border-line pt-4">
             <button disabled={isPending} onClick={() => run(() => completeAppointment(appt.id), 'No se pudo completar.', () => onCompleted?.(appt))} className="min-h-[44px] flex-1 rounded-xl bg-teal-ink text-sm font-semibold text-card disabled:opacity-50">Terminó</button>
             <button disabled={isPending} onClick={() => run(() => noShowAppointment(appt.id), 'No se pudo marcar No vino.')} className="min-h-[44px] flex-1 rounded-xl border border-line bg-card text-sm font-semibold text-ink-2 disabled:opacity-50">No vino</button>
@@ -169,7 +205,7 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
 
         {/* Propina (Paso 7) — solo en citas terminadas y solo para el barbero
             (esta ficha vive en su vista). Cambiar/agregar reabre la hoja. */}
-        {appt.status === 'completed' && onOpenTip && (
+        {!cobroEdit && appt.status === 'completed' && onOpenTip && (
           <div className="mt-4 flex items-center justify-between gap-2 border-t border-line pt-4">
             <span className="text-sm text-ink-2">
               Propina{' '}

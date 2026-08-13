@@ -43,6 +43,8 @@ import PanoramaTimeline, {
 } from './PanoramaTimeline';
 import AssistantVerticalCalendar from './AssistantVerticalCalendar';
 import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
+import CobroFields from './CobroFields';
+import { DEFAULT_RAIL, type Rail } from '@/lib/cobro';
 import {
   type EngineLane,
   type Interval,
@@ -790,9 +792,31 @@ export default function AssistantControlDesk({
     }
   }
 
-  const handleComplete = (id: string) =>
-    mutateAppt(id, (a) => ({ ...a, status: 'completed' }), completeAppointment,
+  // Completar en la mesa NO es el swipe de 2 segundos del barbero: acá se cobra
+  // de frente, así que el gesto abre el par monto+riel y confirma. El riel viaja
+  // siempre (default efectivo); el monto solo si lo teclean.
+  const [cobroFor, setCobroFor]       = useState<DashboardAppointment | null>(null);
+  const [cobroAmount, setCobroAmount] = useState('');
+  const [cobroMethod, setCobroMethod] = useState<Rail>(DEFAULT_RAIL);
+
+  const handleComplete = (id: string) => {
+    const appt = appointments.find((a) => a.id === id);
+    if (!appt) return;
+    setCobroAmount('');
+    setCobroMethod(DEFAULT_RAIL);
+    setCobroFor(appt);
+  };
+
+  const confirmarCobro = () => {
+    const appt = cobroFor;
+    if (!appt) return;
+    const amount = cobroAmount;
+    const method = cobroMethod;
+    setCobroFor(null);
+    void mutateAppt(appt.id, (a) => ({ ...a, status: 'completed' }),
+      (id) => completeAppointment(id, { amount, method }),
       (a) => `${a.customer?.name ?? 'Cliente'} — cita completada`);
+  };
 
   const handleConfirm = (id: string) =>
     mutateAppt(id, (a) => ({ ...a, status: 'confirmed' }), confirmAppointment,
@@ -1113,6 +1137,43 @@ export default function AssistantControlDesk({
       {showConversations && (
         <div className="relative z-[60]">
           <ConversationList onClose={() => setShowConversations(false)} />
+        </div>
+      )}
+
+      {/* Cobro al completar (D2) — monto + riel antes de cerrar la cita. */}
+      {cobroFor && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30" onClick={() => setCobroFor(null)}>
+          <div
+            className="animate-card-in w-full max-w-xl rounded-t-card border border-line bg-card px-4 pb-8 pt-3 shadow-hero"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+            <p className="truncate text-lg font-semibold text-ink">
+              {cobroFor.customer?.name ?? 'Cliente'}
+            </p>
+            <p className="mb-4 text-sm text-ink-2">{cobroFor.service?.name ?? ''}</p>
+            <CobroFields
+              amount={cobroAmount}
+              method={cobroMethod}
+              listPrice={cobroFor.price_charged ?? cobroFor.service?.price ?? 0}
+              onAmount={setCobroAmount}
+              onMethod={setCobroMethod}
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setCobroFor(null)}
+                className="min-h-[44px] flex-1 rounded-xl border border-line bg-card text-sm font-semibold text-ink-2"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarCobro}
+                className="min-h-[44px] flex-1 rounded-xl bg-teal-ink text-sm font-semibold text-card"
+              >
+                Terminó
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
