@@ -24,6 +24,7 @@ import DashboardRealtimeProvider from './DashboardRealtimeProvider';
 import MetricsSummary from './MetricsSummary';
 import StaffMetricsPanel from './StaffMetricsPanel';
 import BlockRequestsInbox from './BlockRequestsInbox';
+import CorteResumen, { type CorteParaDueno } from './CorteResumen';
 import StaffPhotoManager from './StaffPhotoManager';
 import StaffManagementPanel from './StaffManagementPanel';
 import ServicesManagementPanel from './ServicesManagementPanel';
@@ -51,6 +52,11 @@ type Props = {
   /** Cabos sueltos (D3): citas pasadas que nadie resolvió, ventana 14 días. Lo
       calcula page.tsx — este componente no fetcha datos propios (ver encabezado). */
   cabosCount: number;
+  /** Cortes de los últimos días (D5), sin resolver: puede haber varios por día y
+      manda el último. Los resuelve CorteResumen. Mismo contrato que cabosCount. */
+  cortes: CorteParaDueno[];
+  /** Hoy en la tz del NEGOCIO — para saber si el corte de hoy ya se hizo. */
+  hoyLocal: string;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,6 +100,8 @@ export default function DashboardLayout({
   staffForManagement,
   servicesForManagement,
   cabosCount,
+  cortes,
+  hoyLocal,
 }: Props) {
   const prevDate = offsetDay(date, -1);
   const nextDate = offsetDay(date, +1);
@@ -211,6 +219,10 @@ export default function DashboardLayout({
             <p className="mt-0.5 text-xs text-gray-500">Últimos 14 días</p>
           </div>
         )}
+
+        {/* El cuadre (D5) — el corte del día con su descuadre CON SIGNO y la
+            serie de la semana. Solo lectura: el dueño no cuenta el cajón. */}
+        <CorteResumen cortes={cortes} hoy={hoyLocal} />
 
         {/* Bandeja de solicitudes de bloqueo */}
         <BlockRequestsInbox initialRequests={pendingBlockRequests} />

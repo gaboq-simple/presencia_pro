@@ -26,8 +26,11 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const RAICES = ['apps/lifestyle/src', 'packages/engine/src'];
-const EXT = ['.ts', '.tsx'];
+// `onboarding/` entra porque el guion del corte (D5) es copy de producto: se lee
+// EN VOZ ALTA al cliente el primer día y comparte vocabulario con la UI. Se
+// escribió con voseo en el primer intento — justo el doc del español neutro.
+const RAICES = ['apps/lifestyle/src', 'packages/engine/src', 'onboarding'];
+const EXT = ['.ts', '.tsx', '.md'];
 const IGNORAR = new Set(['node_modules', '.next', 'dist', 'build']);
 
 /** Formas de voseo que no se confunden con nada del español neutro. */
@@ -102,4 +105,5 @@ test('control negativo: el patrón SÍ detecta voseo y respeta las excepciones',
   assert.ok(exenta('- Español mexicano neutro SIEMPRE: nunca voseo ("podés", "tenés")'), 'la regla se exime');
   assert.ok(exenta('Disculpa, no te seguí bien.'), 'el pretérito legítimo se exime');
   assert.ok(!exenta('Probá con otro filtro'), 'una línea cualquiera NO se exime');
+  assert.ok(PATRON.test('Al cerrar, contá dos cosas'), 'debe detectar voseo en el guion (.md)');
 });

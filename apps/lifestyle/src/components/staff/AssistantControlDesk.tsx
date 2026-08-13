@@ -45,6 +45,7 @@ import AssistantVerticalCalendar from './AssistantVerticalCalendar';
 import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
 import CobroFields from './CobroFields';
 import CajaMovimientos from './CajaMovimientos';
+import CorteCard from './CorteCard';
 import { listarCabos, type CaboSuelto } from '@/app/staff/cabos-actions';
 import { DEFAULT_RAIL, type Rail } from '@/lib/cobro';
 import {
@@ -892,6 +893,11 @@ export default function AssistantControlDesk({
         {/* Caja del día (D4) — arriba de la mesa, junto a los cabos: los dos son
             bloques de dinero que NO son la agenda del día. */}
         <CajaMovimientos date={date} timezone={timezone} />
+
+        {/* El corte (D5) — el cierre del día, debajo de los movimientos porque
+            eso es lo que pasa: primero se registra lo del día, al final se
+            cuenta. Se auto-oculta si el día que se mira no es hoy. */}
+        <CorteCard date={date} timezone={timezone} />
 
         {/* ── Tarjeta de la mesa de control ── */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-card shadow-card">

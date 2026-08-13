@@ -29,6 +29,7 @@ import {
 import { todayStrInTz } from '@/lib/dayWindow';
 import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
 import { getCabos } from '@/lib/cabosData';
+import { getCortesDesde } from '@/lib/corteData';
 import DashboardLayout from '@/components/admin/DashboardLayout';
 import AssistantControlDesk from '@/components/staff/AssistantControlDesk';
 import OwnerTabs from '@/components/admin/OwnerTabs';
@@ -183,6 +184,14 @@ export default async function DashboardPage({
   //    en DashboardLayout porque ese componente declara no fetchar datos propios.
   const cabos = await getCabos(businessId);
 
+  // 8. Cortes de los últimos 7 días locales (D5), por la misma razón que arriba.
+  //    Se pasan SIN resolver: la regla "la última fila por día manda" vive en
+  //    lib/corte.ts (una sola definición, la misma que usará el digest de D7).
+  const hoyLocal = todayStrInTz(timezone);
+  const desde = new Date(`${hoyLocal}T12:00:00Z`);
+  desde.setUTCDate(desde.getUTCDate() - 6);
+  const cortes = await getCortesDesde(businessId, desde.toISOString().slice(0, 10));
+
   const dashboardPanel = (
     <DashboardLayout
       businessId={businessId}
@@ -197,6 +206,8 @@ export default async function DashboardPage({
       staffForManagement={staffForManagement}
       servicesForManagement={servicesForManagement}
       cabosCount={cabos.total}
+      cortes={cortes}
+      hoyLocal={hoyLocal}
     />
   );
 
