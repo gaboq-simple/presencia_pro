@@ -109,7 +109,12 @@ produce alturas distintas entre corridas — un diff que no corresponde a ningú
 cambio, y peor, una zona sin renderizar donde podría esconderse uno real. Si una
 captura acusa diff: localizar la banda, recortarla y mirarla, y correr **dos
 capturas consecutivas** del mismo estado; solo si esas dan 0 píxeles se puede
-concluir que era artefacto. **Excepción en Actividad:** su log rinde tiempos
+concluir que era artefacto. **UI interactiva (D2 en adelante):** cuando lo que
+el paso entrega solo existe durante un gesto (el chip de la ventana de Deshacer,
+una hoja abierta), el estático prueba la AUSENCIA de cambios no pedidos y la
+evidencia del cambio pedido son **capturas del gesto + aserciones en la BD** —
+cero bandas estructurales es entonces el resultado correcto, no uno pobre.
+**Excepción en Actividad:** su log rinde tiempos
 relativos ("hace 3 min"), así que el 0 es inalcanzable por construcción — ahí el
 criterio es que las bandas sean **solo etiquetas de tiempo**, verificado con
 recorte; cualquier otra banda es un cambio real. Para las vistas de staff (pasos D2/D4/D5): mismo
@@ -298,7 +303,12 @@ riel, sin romper la ergonomía del swipe de 2 segundos.
   real — mejora gratis, ya lee `price_charged`).
 - UI asistente: `components/staff/AssistantControlDesk.tsx` — el control de
   completar gana monto + chips riel, default efectivo.
-- `lib/dashboard.types.ts`: `payment_method` en los tipos donde se escriba.
+- ~~`lib/dashboard.types.ts`: `payment_method` en los tipos~~ — **movido a D5**
+  (cierre de D2, 2026-08-13). Las tres actions escriben por objeto de patch sin
+  tipar y ninguna superficie lee el riel de vuelta en D2, así que el tipo no
+  tenía consumidor: agregarlo obligaba a tocar el `select` y a actualizar el
+  repo-check `tests/appointmentSelect.test.ts` a cambio de nada. **El tipo entra
+  con su consumidor.**
 
 **Regla de cálculo:** ninguna nueva — cambia solo la FUENTE del dato (humano
 en vez de catálogo, riel explícito). `no_show`/`cancelled` no llevan cobro.
@@ -470,6 +480,13 @@ ausente se entera el mismo día.
 - UI captura: card "El corte" en `AssistantControlDesk.tsx` — dos inputs
   (efectivo contado, voucher terminal) + guardar; el resultado (esperado,
   diferencia con signo) se revela DESPUÉS.
+- `lib/dashboard.types.ts`: `payment_method` en el tipo y en el `select`
+  (movido desde D2 al cerrarlo — el tipo entra con su CONSUMIDOR, y el primero
+  es este paso: la card del corte y su lectura por riel). Al agregarlo al
+  `select` hay que actualizar el repo-check `tests/appointmentSelect.test.ts`,
+  que fija conjunto y orden de columnas a propósito. Si al llegar acá el riel
+  sigue sin lector en una superficie, se difiere otra vez a D6 — no se agrega
+  una columna que nadie lee.
 - UI dueño: card de solo lectura en `components/admin/DashboardLayout.tsx`:
   sin corte aún / resultado del día con firma y hora + serie de 7 días con
   signo (negativo `--color-red-ink`, positivo ámbar — atención, no alarma;

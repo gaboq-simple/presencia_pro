@@ -114,6 +114,20 @@ capturas consecutivas del mismo estado — si esas dos dan 0 píxeles, el estado
 estable y la diferencia estaba en la captura, no en el código. Nunca se firma "es
 artefacto" sin esas dos corridas.
 
+**Tercera categoría: UI INTERACTIVA (verificada 2026-08-13, D2).** Hay pasos
+cuyo entregable no existe en una captura estática: vive durante un gesto — un
+chip que solo aparece en la ventana de Deshacer, una hoja que solo está abierta
+mientras se captura. Ahí la red se parte en dos y cada mitad prueba una cosa
+distinta:
+- **la captura estática prueba la AUSENCIA** de cambios no pedidos (y sigue
+  valiendo el criterio de siempre: bandas explicadas una por una);
+- **la evidencia del cambio PEDIDO son capturas del gesto** (disparar la
+  interacción y fotografiarla) **más aserciones en la BD** de lo que ese gesto
+  escribió.
+Con esto, "cero bandas estructurales" en el estático no es un resultado pobre:
+es exactamente lo que debe pasar, y firmarlo sin las capturas del gesto sería
+firmar que no se probó nada.
+
 **Excepción de Actividad (verificada 2026-08-12, D1b): ahí "0 píxeles" es
 inalcanzable por construcción.** El log rinde tiempos RELATIVOS ("hace 3 min"),
 así que dos capturas separadas por minutos siempre difieren, y la regla de las
