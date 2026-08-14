@@ -322,12 +322,17 @@ riel, sin romper la ergonomía del swipe de 2 segundos.
   real — mejora gratis, ya lee `price_charged`).
 - UI asistente: `components/staff/AssistantControlDesk.tsx` — el control de
   completar gana monto + chips riel, default efectivo.
-- ~~`lib/dashboard.types.ts`: `payment_method` en los tipos~~ — **movido a D5**
-  (cierre de D2, 2026-08-13). Las tres actions escriben por objeto de patch sin
-  tipar y ninguna superficie lee el riel de vuelta en D2, así que el tipo no
-  tenía consumidor: agregarlo obligaba a tocar el `select` y a actualizar el
-  repo-check `tests/appointmentSelect.test.ts` a cambio de nada. **El tipo entra
-  con su consumidor.**
+- ~~`lib/dashboard.types.ts`: `payment_method` en los tipos~~ — **RETIRADO del
+  plan (cierre de D7, 2026-08-13), después de tres diferimientos y cero
+  lectores.** D2 lo difirió (las actions escriben por objeto de patch sin
+  tipar), D5 lo volvió a diferir (la card del corte lee el riel por una query
+  propia y estrecha) y D6 lo enterró (el cobrado suma los tres rieles, no
+  necesita distinguirlos). La columna EXISTE y se escribe desde D2 — lo que
+  nunca apareció es un consumidor que la lea **por el tipo compartido**, y
+  agregarla al `select` obligaría a tocar el repo-check
+  `tests/appointmentSelect.test.ts` a cambio de nada. Si algún día una
+  superficie necesita el riel por cita (el drawer de D2b es el candidato), el
+  tipo entra ahí, con su consumidor.
 
 **Regla de cálculo:** ninguna nueva — cambia solo la FUENTE del dato (humano
 en vez de catálogo, riel explícito). `no_show`/`cancelled` no llevan cobro.
@@ -527,13 +532,6 @@ ausente se entera el mismo día.
 - UI captura: card "El corte" en `AssistantControlDesk.tsx` — dos inputs
   (efectivo contado, voucher terminal) + guardar; el resultado (esperado,
   diferencia con signo) se revela DESPUÉS.
-- `lib/dashboard.types.ts`: `payment_method` en el tipo y en el `select`
-  (movido desde D2 al cerrarlo — el tipo entra con su CONSUMIDOR, y el primero
-  es este paso: la card del corte y su lectura por riel). Al agregarlo al
-  `select` hay que actualizar el repo-check `tests/appointmentSelect.test.ts`,
-  que fija conjunto y orden de columnas a propósito. Si al llegar acá el riel
-  sigue sin lector en una superficie, se difiere otra vez a D6 — no se agrega
-  una columna que nadie lee.
 - UI dueño: card de solo lectura en `components/admin/DashboardLayout.tsx`:
   sin corte aún / resultado del día con firma y hora + serie de 7 días con
   signo (negativo `--color-red-ink`, positivo ámbar — atención, no alarma;
