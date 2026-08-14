@@ -320,8 +320,6 @@ export default function NegocioView({ revenue, occupancy, barberos, pulso, seman
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-5">
-      <p className="px-1 text-xs text-faint">Cómo va tu negocio — hoy, lo que viene y la historia.</p>
-
       {/* ── EL HÉROE: la semana cobrada (dv3-3'). Único 44px de la pestaña y
            único con el gesto de marca. El titular es Cobrado —eventos firmados,
            no agenda × lista— y el chip del corte lo pone en contraste. ── */}

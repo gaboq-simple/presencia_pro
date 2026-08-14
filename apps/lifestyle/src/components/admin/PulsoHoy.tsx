@@ -11,6 +11,7 @@
 // Server Component. Tokens Zentriq-claro, Inter tabular-nums. Español mexicano neutro.
 
 import type { PulsoHoy as PulsoHoyData, DayMetric, PulsoBarbero } from '@/lib/pulsoHoy';
+import { StatFila } from '@/components/admin/viz/StatFila';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 const money = (n: number): string => MXN.format(Math.round(n));
@@ -22,54 +23,13 @@ function weekdayOf(dateStr: string): number {
   return new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
 }
 
-// Delta neutro (dato, no juicio). Flat (igual) en gris; el color solo dirige la mirada.
-function deltaLabel(m: DayMetric, dowName: string): React.ReactElement {
-  if (m.lastWeek === null) {
-    return <span className="text-faint">sin dato del {dowName} pasado</span>;
-  }
+/** Misma regla que `deltaLabel`, en texto plano: `StatFila` recibe contexto como
+ *  string. Flat es "igual", no un +0 — un cero con signo parece un cambio. */
+function deltaTexto(m: DayMetric, dowName: string): string {
+  if (m.lastWeek === null) return `sin dato del ${dowName} pasado`;
   const d = m.today - m.lastWeek;
-  if (d === 0) {
-    // Regla 4: flat NO alarma ni felicita — gris neutro.
-    return <span className="text-faint">igual que el {dowName} pasado</span>;
-  }
-  const sign = d > 0 ? '+' : '−';
-  return (
-    <span className="text-ink-2">
-      <span className="tabular-nums">{sign}{Math.abs(d)}</span> vs el {dowName} pasado
-    </span>
-  );
-}
-
-// ── Gauge circular (SVG) — donut de progreso. Teal = lleno, track neutro = hueco. ──
-function Gauge({ pct }: { pct: number | null }): React.ReactElement {
-  const R = 54;
-  const C = 2 * Math.PI * R;
-  const p = pct ?? 0;
-  const offset = C * (1 - p);
-  return (
-    <div className="relative h-40 w-40 shrink-0">
-      <svg viewBox="0 0 140 140" className="h-full w-full -rotate-90">
-        <circle cx="70" cy="70" r={R} fill="none" stroke="var(--color-past-bg)" strokeWidth="13" />
-        {pct !== null && (
-          <circle
-            cx="70" cy="70" r={R} fill="none"
-            stroke="var(--color-teal)" strokeWidth="13" strokeLinecap="round"
-            strokeDasharray={C} strokeDashoffset={offset}
-          />
-        )}
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        {pct === null ? (
-          <span className="px-4 text-center text-xs text-faint">nadie<br />agenda hoy</span>
-        ) : (
-          <>
-            <span className="text-4xl font-bold tabular-nums text-ink">{pctInt(pct)}%</span>
-            <span className="text-[11px] text-faint">ocupación</span>
-          </>
-        )}
-      </div>
-    </div>
-  );
+  if (d === 0) return `igual que el ${dowName} pasado`;
+  return `${d > 0 ? '+' : '−'}${Math.abs(d)} vs el ${dowName} pasado`;
 }
 
 // ── Barra de ocupación de un barbero ──
@@ -115,95 +75,51 @@ export default function PulsoHoy({ data }: { data: PulsoHoyData }): React.ReactE
     <section className="mt-2 rounded-xl bg-card p-4 shadow-card">
       <p className="text-xs font-medium uppercase tracking-wide text-faint">Hoy · ocupación</p>
 
-      {/* ── Héroe: gauge + proyección ── */}
-      <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center">
-        <Gauge pct={data.occupancyPct} />
-
-        <div className="min-w-0 flex-1">
-          {/* Comparación de ocupación (dato, no juicio). Regla 2: sin semana pasada → orienta. */}
-          {data.occupancyPct !== null && (
-            !comparable ? (
-              <p className="text-sm text-faint">
-                Sin semana pasada todavía — cuando tengas una semana de historia vas a ver cómo cambian tus números.
-              </p>
-            ) : dp === null ? (
-              <p className="text-sm text-faint">sin comparación con el {dowName} pasado</p>
-            ) : dp === 0 ? (
-              <p className="text-sm text-faint">igual que el {dowName} pasado</p>
-            ) : (
-              <p className="text-sm text-ink-2">
-                <span className={`font-medium tabular-nums ${dp > 0 ? 'text-teal-ink' : 'text-ink'}`}>{dp > 0 ? '+' : '−'}{Math.abs(dp)} pts</span> vs el {dowName} pasado
-              </p>
-            )
-          )}
-          <p className="mt-0.5 text-[11px] text-faint">
-            <span className="tabular-nums">{data.booked}</span> de <span className="tabular-nums">{data.capacity}</span> lugares agendables
-          </p>
-
-          {/* Proyección — tres capas de certeza decreciente */}
-          <div className="mt-3 rounded-xl border border-line bg-canvas px-3 py-2.5">
-            {/* D6 — el titular dejó de derivarse de la agenda: ahora es lo COBRADO
-                (eventos que alguien firmó, atribuidos por completed_at local, más
-                el dinero de fuera de agenda). Por eso la etiqueta dice "Cobrado" y
-                no "Ingreso": es la palabra del estado CONFIRMADO del plan, y lo
-                único que puede ser héroe. */}
-            <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Cobrado hoy</p>
-            <p className="mt-1 text-sm text-ink">
-              <span className="text-xl font-bold tabular-nums">{money(cobrado.total)}</span> ya cobrado
-            </p>
-            <p className="mt-0.5 text-sm text-ink-2">
-              <span className="tabular-nums">+{money(projection.agendado)}</span> agendado
-              {' · '}
-              <span className="tabular-nums">+{money(projection.huecos)}</span> si llenas los huecos
-            </p>
-
-            {/* Las dos líneas nuevas. La de salidas dice explícitamente que NO se
-                resta: netearla dejaría un número que no es ni lo vendido ni lo
-                gastado, y el plan lo prohíbe por nombre. */}
-            {cobrado.entradas > 0 && (
-              <p className="mt-1 text-[11px] text-ink-2">
-                Incluye <span className="tabular-nums">{money(cobrado.entradas)}</span> de fuera de agenda
-              </p>
-            )}
-            {cobrado.salidas > 0 && (
-              <p className="mt-0.5 text-[11px] text-ink-2">
-                Salidas <span className="tabular-nums">{money(cobrado.salidas)}</span> · aparte, no se restan de arriba
-              </p>
-            )}
-
-            <p className="mt-1 text-[11px] text-faint">
-              Cobrado es lo que alguien cobró y firmó. Lo demás es potencial de la agenda y los huecos, no un resultado garantizado.
-            </p>
-          </div>
-        </div>
+      {/* ── Hoy compacto (dv3-3'): el gauge DESAPARECE ──────────────────────
+           El donut de 140px era la pieza más grande de la página para el dato
+           menos accionable a las 8pm. Degrada a número dentro de la fila de
+           stats: la misma información, sin quedarse con el peso visual que
+           ahora es del héroe de la semana. ── */}
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+        <StatFila
+          kicker="Cobrado"
+          valor={money(cobrado.total)}
+          contexto={cobrado.entradas > 0 ? `incluye ${money(cobrado.entradas)} fuera de agenda` : undefined}
+          i={0}
+        />
+        <StatFila
+          kicker="Ocupación"
+          valor={data.occupancyPct === null ? '—' : `${Math.round(data.occupancyPct * 100)}%`}
+          contexto={`${data.booked} de ${data.capacity} lugares`}
+          i={1}
+        />
+        <StatFila kicker="Citas"    valor={String(data.citas.today)}   contexto={comparable ? deltaTexto(data.citas, dowName) : undefined} i={2} />
+        <StatFila kicker="No-shows" valor={String(data.noShows.today)} contexto={data.noShowRate30d === null ? undefined : `promedio 30d ${Math.round(data.noShowRate30d * 100)}%`} i={3} />
       </div>
 
-      {/* ── Métricas del día con comparación ── */}
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <div className="rounded-xl border border-line bg-canvas px-3 py-2">
-          <p className="text-2xl font-bold tabular-nums text-ink">{data.citas.today}</p>
-          <p className="text-[11px] text-faint">citas</p>
-          <p className="mt-0.5 text-[11px]">
-            {comparable ? deltaLabel(data.citas, dowName) : <span className="text-faint">—</span>}
-          </p>
-        </div>
-        <div className="rounded-xl border border-line bg-canvas px-3 py-2">
-          <p className="text-2xl font-bold tabular-nums text-ink">{data.noShows.today}</p>
-          <p className="text-[11px] text-faint">no-shows</p>
-          <p className="mt-0.5 text-[11px] text-ink-2">
-            {data.noShowRate30d === null
-              ? <span className="text-faint">sin promedio aún</span>
-              : <>promedio 30d <span className="tabular-nums">{Math.round(data.noShowRate30d * 100)}%</span></>}
-          </p>
-        </div>
-        <div className="rounded-xl border border-line bg-canvas px-3 py-2">
-          <p className="text-2xl font-bold tabular-nums text-ink">{data.walkIns.today}</p>
-          <p className="text-[11px] text-faint">walk-ins</p>
-          <p className="mt-0.5 text-[11px]">
-            {comparable ? deltaLabel(data.walkIns, dowName) : <span className="text-faint">—</span>}
-          </p>
-        </div>
-      </div>
+      {/* La proyección y las salidas quedan como UNA línea de contexto: son
+          potencial y contrapeso, no titulares. El titular del día ya está
+          arriba, y el de la semana es el héroe. */}
+      <p className="mt-3 text-[13px] text-ink-2">
+        <span className="tabular-nums">+{money(projection.agendado)}</span> agendado
+        {' · '}
+        <span className="tabular-nums">+{money(projection.huecos)}</span> si llenas los huecos
+        {cobrado.salidas > 0 && (
+          <>
+            {' · '}
+            <span className="tabular-nums">{money(cobrado.salidas)}</span> de salidas (aparte, no se restan)
+          </>
+        )}
+      </p>
+      <p className="mt-0.5 text-[13px] text-faint">
+        {data.occupancyPct !== null && !comparable && 'Sin semana pasada todavía con qué comparar · '}
+        {data.occupancyPct !== null && comparable && dp !== null && dp !== 0 && (
+          <>
+            <span className="tabular-nums">{dp > 0 ? '+' : '−'}{Math.abs(dp)} pts</span> de ocupación vs el {dowName} pasado{' · '}
+          </>
+        )}
+        <span className="tabular-nums">{data.walkIns.today}</span> walk-ins
+      </p>
 
       {/* ── Barberos de hoy — Regla 1: solo con 2+ barberos ── */}
       {data.barberos.length > 1 && (
@@ -224,9 +140,6 @@ export default function PulsoHoy({ data }: { data: PulsoHoyData }): React.ReactE
               </ul>
             </details>
           )}
-          <p className="mt-1 px-1 text-[11px] text-faint">
-            Ocupación de hoy y lo que lleva cobrado cada uno. Sin propinas.
-          </p>
         </div>
       )}
     </section>

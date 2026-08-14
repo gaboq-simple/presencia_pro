@@ -28,6 +28,14 @@ export type CapacidadSinUsar = {
   pesoRef: number;
   /** Frase "dónde se concentran" (día×franja), o null si no hay huecos. */
   concentration: string | null;
+  /**
+   * Las celdas día×franja tal como entraron. PASSTHROUGH: no se recalcula nada
+   * acá — se expone lo que ya se computó para que la vista pueda pintar el
+   * heatmap 7×2 (dv3-3'). Antes la frase de concentración era la única salida y
+   * el detalle se perdía: "el martes por la tarde" no dice si el resto de la
+   * semana está igual de vacío o lleno.
+   */
+  cells: readonly FreeCell[];
 };
 
 const DOW_ES = ['el domingo', 'el lunes', 'el martes', 'el miércoles', 'el jueves', 'el viernes', 'el sábado'];
@@ -74,6 +82,7 @@ export function computeCapacidadSinUsar(
     totalFreeHours,
     pesoRef,
     concentration: describeConcentration(cells),
+    cells,
   };
 }
 

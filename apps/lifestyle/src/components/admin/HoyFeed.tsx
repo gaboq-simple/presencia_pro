@@ -39,13 +39,18 @@ function Row({ r }: { r: CadenceResult }): React.ReactElement {
     <li className={`rounded-xl bg-card shadow-card ${u.card}`}>
       <div className="flex items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="truncate font-semibold text-ink">{r.name}</p>
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${u.pill}`}>
+          {/* El NOMBRE manda: con `truncate` + un pill `shrink-0` al lado, un
+              nombre normal se cortaba a "A…" y la fila dejaba de decir a quién
+              hay que recuperar, que es su único trabajo. Sin truncate y con
+              wrap, nombre y pill comparten línea cuando caben y el pill baja
+              solo cuando no — sin costarle una línea a cada fila. */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="font-semibold text-ink">{r.name}</p>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${u.pill}`}>
               {u.label}
             </span>
             {r.confidence === 'tentative' && (
-              <span className="shrink-0 rounded-full border border-line-2 px-2 py-0.5 text-[11px] text-faint">
+              <span className="rounded-full border border-line-2 px-2 py-0.5 text-[11px] text-faint">
                 cadencia tentativa
               </span>
             )}
@@ -56,13 +61,17 @@ function Row({ r }: { r: CadenceResult }): React.ReactElement {
             {since && ` · cliente desde ${since}`}
           </p>
         </div>
-        {/* PLACEHOLDER no-funcional — el envío (bottom-sheet) es PR2 */}
+        {/* Variante `gated` (regla de producción de dv3-3', no negociable): la
+            WABA del negocio NO está verificada, así que el control se rinde en
+            GRIS y deshabilitado. En teal parecía disponible — y un botón que
+            promete enviar y no envía es peor que uno que dice que todavía no.
+            PROHIBIDO rendir "✓ Enviado": el endpoint devuelve {sent:false} en
+            silencio y cablearlo es otro trabajo. */}
         <button
           type="button"
           disabled
           aria-disabled="true"
-          title="Próximamente"
-          className="shrink-0 cursor-not-allowed rounded-lg border border-teal-border bg-tint-1 px-3 py-1.5 text-sm font-medium text-teal-ink opacity-70"
+          className="shrink-0 cursor-default rounded-lg border border-past-line bg-past-bg px-3 py-1.5 text-sm font-medium text-past-ink"
         >
           Enviar mensaje
         </button>
@@ -71,14 +80,16 @@ function Row({ r }: { r: CadenceResult }): React.ReactElement {
   );
 }
 
-function PulseStat({ n, label, muted }: { n: number | string; label: string; muted?: boolean }): React.ReactElement {
-  return (
-    <div className="flex flex-col">
-      <span className={`text-2xl font-bold tabular-nums ${muted ? 'text-faint' : 'text-ink'}`}>{n}</span>
-      <span className="text-xs text-faint">{label}</span>
-    </div>
-  );
-}
+/** Cuántos se ven sin plegar. Tres: la cantidad que se decide de un vistazo. */
+const VISIBLES = 3;
+
+/** El resumen cuenta gente, así que concuerda. "39 campeón enfriándose" es el
+ *  detalle que hace que nadie confíe en el resto del número. */
+const PLURAL: Record<'critical' | 'leaving' | 'lost', (n: number) => string> = {
+  critical: (n) => (n === 1 ? 'campeón enfriándose' : 'campeones enfriándose'),
+  leaving:  (n) => (n === 1 ? 'se está yendo' : 'se están yendo'),
+  lost:     (n) => (n === 1 ? 'perdido' : 'perdidos'),
+};
 
 export default function HoyFeed({
   feed,
@@ -91,33 +102,63 @@ export default function HoyFeed({
   embedded?: boolean;
 }): React.ReactElement {
   const hasRows = feed.rows.length > 0;
+  const visibles = feed.rows.slice(0, VISIBLES);
+  const resto = feed.rows.slice(VISIBLES);
+
+  // Conteo por urgencia sobre TODAS las filas (no solo las visibles): el resumen
+  // tiene que describir el total, o plegar el resto lo escondería.
+  const porUrgencia = feed.rows.reduce<Record<string, number>>((acc, r) => {
+    const k = r.urgency === 'none' ? 'leaving' : r.urgency;
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {});
+  const resumen = (['critical', 'leaving', 'lost'] as const)
+    .filter((k) => (porUrgencia[k] ?? 0) > 0)
+    .map((k) => `${porUrgencia[k]} ${PLURAL[k](porUrgencia[k]!)}`);
 
   return (
     <div className={embedded ? '' : 'mx-auto w-full max-w-2xl px-4 py-5'}>
-      {/* ── Pulso ── */}
-      <section className="rounded-xl bg-card p-4 shadow-card">
-        <p className="text-xs font-medium uppercase tracking-wide text-faint">La semana</p>
-        <div className="mt-2 flex items-center gap-6">
-          <PulseStat n={feed.porRecuperar} label="por recuperar" />
-          <span className="text-line-2">·</span>
-          <PulseStat n={contactados} label="contactados" />
-          <span className="text-line-2">·</span>
-          <PulseStat n="—" label="volvieron (pronto)" muted />
-        </div>
-      </section>
-
-      {/* ── Feed "Para recuperar" ── */}
-      <h2 className="mt-6 mb-2 px-1 text-sm font-semibold text-ink">Para recuperar</h2>
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-1">
+        <h2 className="text-sm font-semibold text-ink">Para recuperar</h2>
+        {/* Resumen por urgencia: el TAMAÑO del problema en una línea, para que
+            plegar el resto no esconda cuánto hay. */}
+        <p className="text-[13px] text-ink-2 tabular-nums">
+          {resumen.length > 0 ? resumen.join(' · ') : 'nadie por ahora'}
+          {contactados > 0 && <span className="text-faint"> · {contactados} contactados</span>}
+        </p>
+      </div>
 
       {hasRows ? (
-        <ul className="space-y-2">
-          {feed.rows.map((r) => (
-            <Row key={r.customerId} r={r} />
-          ))}
-        </ul>
+        <>
+          <ul className="mt-2 space-y-2">
+            {visibles.map((r) => (
+              <Row key={r.customerId} r={r} />
+            ))}
+          </ul>
+
+          {/* El resto NO desaparece: se pliega. Una lista de 20 clientes es un
+              muro; una de 3 con "ver todos" es una decisión. */}
+          {resto.length > 0 && (
+            <details className="group mt-2">
+              <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl bg-card px-4 py-2.5 text-sm text-ink-2 shadow-card marker:content-none">
+                <span>Ver todos ({feed.rows.length})</span>
+                <span className="text-faint transition-transform group-open:rotate-90" aria-hidden="true">›</span>
+              </summary>
+              <ul className="mt-2 space-y-2">
+                {resto.map((r) => (
+                  <Row key={r.customerId} r={r} />
+                ))}
+              </ul>
+            </details>
+          )}
+
+          <p className="mt-2 px-1 text-[11px] text-faint">
+            El envío se activa cuando WhatsApp esté conectado.
+          </p>
+        </>
       ) : (
         // Degradado con gracia: sin historial suficiente, no un feed roto.
-        <div className="rounded-xl border border-dashed border-line-2 bg-card px-4 py-8 text-center">
+        <div className="mt-2 rounded-xl border border-dashed border-line-2 bg-card px-4 py-8 text-center">
           <p className="text-sm font-medium text-ink">Aún no hay patrones que detectar</p>
           <p className="mt-1 text-sm text-ink-2">
             Cuando tus clientes acumulen algunas visitas, aquí verás a quién se está enfriando
