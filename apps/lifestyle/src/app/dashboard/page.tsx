@@ -30,6 +30,7 @@ import { todayStrInTz } from '@/lib/dayWindow';
 import { getCurrentSession, getBusinessName, getBusinessTimezone } from '@/lib/auth';
 import { getCabos } from '@/lib/cabosData';
 import { getCortesDesde } from '@/lib/corteData';
+import { getSemanaHero } from '@/lib/semanaHero';
 import { after } from 'next/server';
 import { touchOwnerLastSeen } from '@/lib/ownerPresence';
 import DashboardLayout from '@/components/admin/DashboardLayout';
@@ -218,6 +219,9 @@ export default async function DashboardPage({
   desde.setUTCDate(desde.getUTCDate() - 6);
   const cortes = await getCortesDesde(businessId, desde.toISOString().slice(0, 10));
 
+  // 9. El héroe de la semana (dv3-3') — mismo contrato: lo fetcha la página.
+  const semanaHero = await getSemanaHero(businessId, timezone);
+
   const dashboardPanel = (
     <DashboardLayout
       businessId={businessId}
@@ -249,6 +253,7 @@ export default async function DashboardPage({
           feed={retentionFeed}
           contactados={contactados}
           fuga={fuga}
+          semanaHero={semanaHero}
         />
       }
       clientela={<ClientelaView stats={clientelaStats} />}

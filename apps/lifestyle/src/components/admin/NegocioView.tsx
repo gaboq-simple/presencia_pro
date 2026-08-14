@@ -19,6 +19,8 @@ import PulsoHoy from '@/components/admin/PulsoHoy';
 import SemanaProxima from '@/components/admin/SemanaProxima';
 import HoyFeed from '@/components/admin/HoyFeed';
 import Fuga from '@/components/admin/Fuga';
+import SemanaHeroCard from '@/components/admin/SemanaHeroCard';
+import type { SemanaHeroData } from '@/lib/semanaHero';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 function money(n: number): string {
@@ -313,14 +315,20 @@ function BarberosBlock({ data }: { data: StaffRecompraResult }): React.ReactElem
   );
 }
 
-export default function NegocioView({ revenue, occupancy, barberos, pulso, semana, feed, contactados, fuga }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData; feed: RetentionFeed; contactados: number; fuga: FugaData }): React.ReactElement {
+export default function NegocioView({ revenue, occupancy, barberos, pulso, semana, feed, contactados, fuga, semanaHero }: { revenue: NegocioRevenue; occupancy: OccupancyResult; barberos: StaffRecompraResult; pulso: PulsoHoyData; semana: SemanaData; feed: RetentionFeed; contactados: number; fuga: FugaData; semanaHero: SemanaHeroData }): React.ReactElement {
   const { thisMonth, comparison, months, hasAnyRevenue } = revenue;
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-5">
       <p className="px-1 text-xs text-faint">Cómo va tu negocio — hoy, lo que viene y la historia.</p>
 
-      {/* ── Pulso de hoy (Paso 1) — arriba de todo ── */}
+      {/* ── EL HÉROE: la semana cobrada (dv3-3'). Único 44px de la pestaña y
+           único con el gesto de marca. El titular es Cobrado —eventos firmados,
+           no agenda × lista— y el chip del corte lo pone en contraste. ── */}
+      <SemanaHeroCard hero={semanaHero.hero} corteHoy={semanaHero.corteHoy} />
+
+      {/* ── Pulso de hoy (Paso 1) — debajo del héroe: hoy es un detalle de la
+           semana, no la pregunta principal. ── */}
       <PulsoHoy data={pulso} />
 
       {/* ── La semana que viene (Paso 2) — la pieza accionable ── */}
