@@ -126,8 +126,9 @@ Clientes registrados por negocio.
 | noshow_count | int | default 0. Incrementado por `trg_update_visit_stats` en cada no-show |
 | is_flagged | bool | default false. Se activa cuando noshow_count >= businesses.max_noshows_before_flag |
 | created_at | timestamptz | |
-
-> **PENDIENTE (S2-LEG-02):** agregar `consent_at` y `consented_via` para cumplir LFPDPPP Art. 8.
+| consent_at | timestamptz nullable | Migración 037 (S2-LEG-02, 2026-05-20). NULL = cliente anterior a la feature — **no hubo backfill**, por instrucción explícita |
+| consented_via | text nullable | CHECK: whatsapp_first_message / manual_registration / import |
+| consent_message_id | text nullable | ID del mensaje de WhatsApp donde el titular recibió el aviso. Evidencia LFPDPPP; solo con consented_via='whatsapp_first_message' |
 
 ### Tabla: `appointments`
 Citas agendadas (bot, manual, walk-in).
@@ -378,7 +379,7 @@ Desplegadas en Supabase. Ambas tienen `verify_jwt: false` (autenticadas por secr
 - **Trigger**: cron cada minuto (configurar en Supabase Dashboard → Edge Functions → Schedules)
 - **Lógica**: busca citas con status `confirmed` cuyo `starts_at + businesses.auto_cancel_after_minutes <= NOW()` y `late_arrival_acknowledged = false`; las marca como `no_show`; el trigger `trg_update_visit_stats` se encarga de incrementar `noshow_count` y evaluar `is_flagged`
 
-> **⚠️ Los crons deben configurarse manualmente en Supabase Dashboard.** No están en código — se pierden si se recrea el proyecto.
+> **⚠️ Estado real de los crons (verificado 2026-08-18).** Desde D3 los schedules son **código versionado** (`supabase/migrations/20260813000000_crons_versionados.sql`, pg_cron + pg_net + Vault), no configuración del Dashboard. Pero solo `dispatch-auto-cancel` está **desplegada y agendada**: `dispatch-lifestyle-notifications` **nunca se desplegó** —el proyecto tiene una sola edge function— y su `cron.schedule` está comentado a propósito en esa migración para no dejar un job dando 404 cada minuto. Con ella sin desplegar, **toda la cola de `scheduled_notifications` se encola y nadie la despacha** (hoy sin daño: la tabla está vacía). Ver SPRINT.md → **S7-NOTIF-01**, con disparador antes del primer cliente real que agende por el bot.
 
 ---
 
@@ -455,7 +456,7 @@ Componentes principales del panel. Todos en `apps/lifestyle/src/components/`.
 |---|---|
 | `waitlist.status = 'confirmed'` | Nunca se escribe en el código actual. El flow termina en 'notified'. Backlog pendiente |
 | Rate limiting de PIN | El límite de intentos de PIN es in-memory (Map en proceso Node.js). Se pierde en cada cold start. Sin persistencia en DB |
-| Crons de edge functions | `dispatch-lifestyle-notifications` y `dispatch-auto-cancel` requieren configuración manual de schedules en Supabase Dashboard. **Verificar que estén activos antes del go-live.** No están en código — riesgo de pérdida si se recrea el proyecto |
+| Despachador de notificaciones sin desplegar | `dispatch-lifestyle-notifications` no está desplegada (el proyecto tiene una sola edge function: `dispatch-auto-cancel`) y su schedule queda comentado hasta que lo esté. Los schedules SÍ están versionados desde D3. Tarea **S7-NOTIF-01**, disparador: antes del primer cliente real que agende por el bot |
 | `organizations` RLS | Mencionado en SPRINT.md S1-SEC-04. La tabla no existe en este proyecto; puede vivir en sellers-portal |
-| Consent LFPDPPP | `customers` no tiene `consent_at` / `consented_via` (SPRINT.md S2-LEG-02) |
+| Consent LFPDPPP sin backfill | Las columnas existen (migración 037), pero los clientes anteriores a 2026-05-20 quedaron con `consent_at` NULL — sin backfill, por decisión explícita. Sigue sin publicarse el aviso de privacidad (SPRINT.md S2-LEG-01 ⚪ todo) al que apunta el bot |
 | Sin tests automatizados | No existen tests unitarios ni e2e para ninguna feature implementada |
