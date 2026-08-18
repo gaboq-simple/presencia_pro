@@ -164,6 +164,14 @@
      anterior vía `animation-delay: calc(var(--i) * var(--stagger))`, con --i de
      prop. Es token y no literal para poder apagarlo por reduced-motion abajo. */
   --stagger: 30ms;
+
+  /* Las dos duraciones PROPIAS del movimiento anterior a dv3 (dv3-5'): la entrada
+     del Home es más larga que la de una vista porque entra una pantalla entera, y
+     el pulso es un latido, no una entrada. Se les da nombre —no se las alinea a
+     --dur-2— porque miden gestos distintos; lo que sí se unificó es su CURVA, que
+     era una cubic-bezier a mano casi idéntica a --ease-out. */
+  --dur-3:    500ms;    /* entrada de página (Home) */
+  --dur-beat: 1800ms;   /* pulso "en curso" */
 }
 
 /*
@@ -232,8 +240,12 @@
   to   { opacity: 1; transform: translateY(0)   scale(1); }
 }
 @theme {
-  --animate-data-beat: data-beat 1.8s ease-in-out infinite;
-  --animate-card-in: card-in 0.22s cubic-bezier(0.2, 0.8, 0.25, 1);
+  /* dv3-5': duración y curva por token. Los 0.22s de `card-in` eran 40ms menos que
+     --dur-2 y su curva era `cubic-bezier(0.2, 0.8, 0.25, 1)` — la misma que
+     --ease-out salvo un tercer decimal escrito a mano. Dos valores casi iguales
+     que nadie puede mantener sincronizados a ojo son peores que uno solo. */
+  --animate-data-beat: data-beat var(--dur-beat) var(--ease-inout) infinite;
+  --animate-card-in:   card-in   var(--dur-2)    var(--ease-out);
 }
 
 /* Botón circular de acción de la card (Paso 3.5, mock .circ): sombra sutil en reposo;
@@ -303,7 +315,9 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 @theme {
-  --animate-rise-in: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) both;
+  /* dv3-5': la duración se conserva (0.5s es propia de la entrada de una pantalla
+     entera, ver --dur-3) y la curva pasa al token. */
+  --animate-rise-in: rise-in var(--dur-3) var(--ease-out) both;
 }
 
 /*
@@ -337,10 +351,17 @@
   :root {
     --dur-1: 0ms;
     --dur-2: 0ms;
+    --dur-3: 0ms;
     --stagger: 0ms;
   }
   /* El único infinito del kit: sin él seguiría latiendo (una iteración de 0.01ms
      se repetiría igual, porque iteration-count:1 lo corta pero el pulso no aporta
      nada en este modo). */
   .animate-viz-sk-pulse { animation: none; }
+  /* Mismo caso que el de arriba, y por eso se apaga acá y no con --dur-beat: 0ms
+     (una duración cero en un `infinite` no es "quieto", es indefinido). Vivía
+     guardado con `motion-reduce:animate-none` en CADA consumidor, y ya había uno
+     sin guardar (`AppointmentThread`): apagarlo de raíz cierra el hueco y hace
+     que el próximo consumidor no tenga que acordarse. */
+  .animate-data-beat { animation: none; }
 }

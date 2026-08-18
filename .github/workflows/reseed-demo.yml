@@ -15,6 +15,15 @@ name: Reseed demo barbershop
 # horario de trabajo. Nunca apuntar este workflow a un negocio con datos reales:
 # el objetivo está fijado por el slug en `seed_cfg`, primera línea del script.
 #
+# ⚠️ LA CORRIDA DE LAS 05:00 NO ALCANZA PARA UNA DEMO (dv3-5'). El seed marca
+# `completed` (con monto y riel) las citas de HOY cuya hora de fin ya pasó — y a
+# las 05:00 no pasó ninguna, así que el día entero nace `confirmed`. Para la
+# tarde, el cron de auto-cancel ya convirtió lo vencido en no-shows y el dueño
+# abre la app y ve $0 con faltas. **Antes de una demo, disparar este workflow a
+# mano** (`gh workflow run reseed-demo.yml` o Run workflow acá arriba): el día se
+# refresca con dinero real. Medido el 2026-08-18: 05:20 → 0 completadas / $0;
+# 16:19 → 3 completadas / $460, las tres con riel de cobro.
+#
 # POR QUÉ NO pg_cron: exigiría meter el seed como función dentro de la BD (dos
 # fuentes de verdad que se desincronizan contra el archivo versionado) y dejaría un
 # job residente con permiso permanente de suspender el trigger de inmutabilidad del

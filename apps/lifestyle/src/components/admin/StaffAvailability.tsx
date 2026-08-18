@@ -67,11 +67,11 @@ function computeStatus(
 function chipClasses(kind: StaffStatus['kind']): string {
   switch (kind) {
     case 'in_appointment':
-      return 'border-gray-300 bg-gray-100 text-gray-700';
+      return 'border-line-2 bg-past-bg text-ink-2';
     case 'available':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+      return 'border-teal-border bg-tint-1 text-teal-ink';
     case 'no_schedule':
-      return 'border-gray-200 bg-white text-gray-400';
+      return 'border-line bg-white text-faint';
   }
 }
 
@@ -125,16 +125,16 @@ export default function StaffAvailability({ staffList, appointments }: Props) {
   );
 
   return (
-    <div className="rounded-lg border border-gray-200 px-4 py-3">
-      <p className="text-xs font-medium text-gray-500">
+    <div className="rounded-lg border border-line px-4 py-3">
+      <p className="text-xs font-medium text-faint">
         Barberos
-        <span className="ml-1 font-normal text-gray-400">
+        <span className="ml-1 font-normal text-faint">
           · {staffList.length} activo{staffList.length !== 1 ? 's' : ''}
         </span>
       </p>
 
       {staffList.length === 0 ? (
-        <p className="mt-2 text-xs text-gray-400">Sin barberos registrados.</p>
+        <p className="mt-2 text-xs text-faint">Sin barberos registrados.</p>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
           {sorted.map(({ staff, status }) => (

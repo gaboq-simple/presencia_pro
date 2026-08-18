@@ -25,6 +25,11 @@ Este protocolo **debe** seguirse al pie de la letra. Si Claude Code se desvía, 
 2. Marca la tarea como `🔵 in-progress` en `SPRINT.md`.
 3. Ejecuta con los criterios de aceptación a la vista.
 4. **NO** mezcla tareas. Una tarea = un PR mental = un commit lógico.
+5. **Español mexicano neutro también en la prosa** — no solo en el copy del
+   producto: los reportes a Gabriel, los mensajes de commit, las notas de
+   ejecución y las líneas de bitácora. Sin voseo ("tenés", "podés", "vos") y sin
+   calcos del inglés. La regla existe porque la voz del repo se lee tanto como la
+   del producto, y una sola voz es más fácil de sostener que dos.
 
 ### Al cerrar una tarea:
 

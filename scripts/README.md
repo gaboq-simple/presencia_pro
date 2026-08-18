@@ -116,6 +116,13 @@ reales y para diseñar vistas con densidad real.
 - **Idempotente y determinista**: purga las citas del negocio y re-siembra con
   pseudo-aleatorio por hash (sin `random()`). Fechas relativas a HOY en la
   timezone del negocio — corre fresco cualquier día.
+- **El día de HOY depende de la HORA de corrida** (dv3-5'). Las citas de hoy cuya
+  hora de fin ya pasó nacen `completed` con cobro (monto + riel); las demás,
+  `confirmed`. Dos corridas a la misma hora dan el mismo estado; a horas
+  distintas del mismo día, no — y eso es a propósito. Medido: corridas de 16:20 y
+  16:22 dieron huellas de contenido idénticas en pasado/hoy/futuro; entre 16:19 y
+  16:20 cambió solo la de hoy, por el fin de una cita. Al comparar corridas, la
+  huella va sobre el CONTENIDO, nunca sobre los `id` (se regeneran por diseño).
 - **⚠️ Destructivo** para el negocio objetivo (borra citas, waitlist,
   notificaciones y su audit — suspende momentáneamente el trigger append-only
   de `appointment_audit`). **Solo BD demo, nunca producción con datos reales.**
@@ -145,6 +152,21 @@ Lo mismo vale para enseñar el producto: un demo vencido se ve muerto.
 
 **Regla:** correr el seed al inicio de CUALQUIER paso, antes de la captura
 "antes", y **no volver a correrlo** entre el antes y el después del mismo paso.
+
+**Antes de una demo en vivo, dispararlo a mano** — no basta con la corrida
+automática de las 05:00 CDMX. A esa hora no terminó ninguna cita del día, así
+que el día entero nace `confirmed`, y para la tarde el cron de auto-cancel ya
+convirtió lo vencido en no-shows: el dueño abre y ve **$0 y faltas**, que es
+justo lo contrario de lo que hay que enseñar. Una corrida a mano media hora
+antes deja el día con sus citas cobradas:
+
+```bash
+gh workflow run reseed-demo.yml
+```
+
+(o Actions → *Reseed demo barbershop* → **Run workflow**). Verificado el
+2026-08-18: a las 05:20 el día daba 0 completadas y $0; re-sembrado a las 16:19,
+**3 completadas y $460**, las tres con monto y riel.
 
 **Señal de vencimiento** (chequear sin adivinar; `<business_id>` = el de la demo):
 

@@ -126,14 +126,14 @@ export default function ServicesManagementPanel({ initialServices }: Props) {
         <button
           type="button"
           onClick={() => setModal({ type: 'create' })}
-          className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+          className="rounded-lg bg-ink px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
         >
           + Nuevo servicio
         </button>
       </div>
 
       {services.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gray-200 px-3 py-6 text-center text-xs text-gray-400">
+        <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-xs text-faint">
           Aún no hay servicios. Crea el primero con “+ Nuevo servicio”.
         </p>
       ) : (
@@ -144,28 +144,28 @@ export default function ServicesManagementPanel({ initialServices }: Props) {
               <div
                 key={svc.id}
                 className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
-                  svc.active ? 'border-gray-100 bg-white' : 'border-gray-100 bg-gray-50'
+                  svc.active ? 'border-line bg-white' : 'border-line bg-canvas'
                 }`}
               >
                 {/* Info */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <p className={`truncate text-sm font-medium ${svc.active ? 'text-gray-900' : 'text-gray-400'}`}>
+                    <p className={`truncate text-sm font-medium ${svc.active ? 'text-ink' : 'text-faint'}`}>
                       {svc.name}
                     </p>
                     {!svc.active && (
-                      <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-400">
+                      <span className="shrink-0 rounded-full bg-past-bg px-1.5 py-0.5 text-[10px] text-faint">
                         Inactivo
                       </span>
                     )}
                   </div>
-                  <p className={`mt-0.5 text-xs ${svc.active ? 'text-gray-500' : 'text-gray-400'}`}>
+                  <p className={`mt-0.5 text-xs ${svc.active ? 'text-faint' : 'text-faint'}`}>
                     <span className="tabular-nums">{priceLabel(svc)}</span>
-                    <span className="mx-1.5 text-gray-300">·</span>
+                    <span className="mx-1.5 text-past-line">·</span>
                     <span className="tabular-nums">{svc.duration_minutes} min</span>
                     {svc.upcomingCount > 0 && (
                       <>
-                        <span className="mx-1.5 text-gray-300">·</span>
+                        <span className="mx-1.5 text-past-line">·</span>
                         <span>{svc.upcomingCount} cita{svc.upcomingCount === 1 ? '' : 's'} próxima{svc.upcomingCount === 1 ? '' : 's'}</span>
                       </>
                     )}
@@ -177,7 +177,7 @@ export default function ServicesManagementPanel({ initialServices }: Props) {
                       type="button"
                       onClick={() => setModal({ type: 'edit', service: svc })}
                       disabled={!!modal}
-                      className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 disabled:opacity-40"
+                      className="flex items-center gap-1 text-[11px] text-faint hover:text-ink disabled:opacity-40"
                     >
                       <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
                         <path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81 3.25 11.31a.25.25 0 00-.064.108l-.65 2.278 2.278-.65a.25.25 0 00.108-.064L11.19 6.25z" />
@@ -195,7 +195,7 @@ export default function ServicesManagementPanel({ initialServices }: Props) {
                   title={svc.active ? 'Desactivar' : 'Reactivar'}
                   aria-label={`${svc.active ? 'Desactivar' : 'Reactivar'} ${svc.name}`}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none disabled:opacity-50 ${
-                    svc.active ? 'bg-gray-800' : 'bg-gray-200'
+                    svc.active ? 'bg-ink' : 'bg-line-2'
                   }`}
                 >
                   <span
@@ -221,13 +221,13 @@ export default function ServicesManagementPanel({ initialServices }: Props) {
             style={{ maxHeight: '90vh' }}
           >
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">
+              <h2 className="text-sm font-semibold text-ink">
                 {modal.type === 'create' ? 'Nuevo servicio' : 'Editar servicio'}
               </h2>
               <button
                 type="button"
                 onClick={() => setModal(null)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-faint hover:text-ink-2"
                 aria-label="Cerrar"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
@@ -252,10 +252,10 @@ export default function ServicesManagementPanel({ initialServices }: Props) {
           onClick={(e) => { if (e.target === e.currentTarget) setPendingOff(null); }}
         >
           <div className="w-full max-w-sm rounded-t-2xl bg-white px-5 pb-6 pt-5 shadow-xl sm:rounded-2xl">
-            <h2 className="text-sm font-semibold text-gray-900">Desactivar “{pendingOff.name}”</h2>
-            <p className="mt-2 text-xs leading-relaxed text-gray-600">
+            <h2 className="text-sm font-semibold text-ink">Desactivar “{pendingOff.name}”</h2>
+            <p className="mt-2 text-xs leading-relaxed text-ink-2">
               Este servicio tiene{' '}
-              <span className="font-semibold text-gray-800">
+              <span className="font-semibold text-ink">
                 {pendingOff.upcomingCount} cita{pendingOff.upcomingCount === 1 ? '' : 's'} próxima{pendingOff.upcomingCount === 1 ? '' : 's'}
               </span>. Desactivarlo <span className="font-medium">no</span> las cancela, pero el bot dejará de
               ofrecerlo y no se podrá agendar de nuevo. ¿Continuar?
@@ -264,14 +264,14 @@ export default function ServicesManagementPanel({ initialServices }: Props) {
               <button
                 type="button"
                 onClick={() => { const s = pendingOff; setPendingOff(null); void performToggle(s); }}
-                className="flex-1 rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white"
+                className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-medium text-white"
               >
                 Sí, desactivar
               </button>
               <button
                 type="button"
                 onClick={() => setPendingOff(null)}
-                className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50"
+                className="rounded-lg border border-line px-4 py-2.5 text-sm text-ink-2 hover:bg-canvas"
               >
                 Cancelar
               </button>

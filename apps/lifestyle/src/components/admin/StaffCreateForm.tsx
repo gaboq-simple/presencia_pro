@@ -111,13 +111,13 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
   }
 
   const inputCls =
-    'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-gray-500 focus:outline-none disabled:opacity-50';
+    'w-full rounded-lg border border-line-2 px-3 py-2 text-sm text-ink focus:border-teal-border focus:outline-none disabled:opacity-50';
 
   return (
     <div className="space-y-3">
       {/* Nombre */}
       <div>
-        <label htmlFor="staff-name" className="block text-xs font-medium text-gray-700">Nombre</label>
+        <label htmlFor="staff-name" className="block text-xs font-medium text-ink-2">Nombre</label>
         <input
           id="staff-name"
           type="text"
@@ -132,8 +132,8 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
 
       {/* Teléfono */}
       <div>
-        <label htmlFor="staff-phone" className="block text-xs font-medium text-gray-700">
-          Teléfono <span className="text-gray-400">(opcional)</span>
+        <label htmlFor="staff-phone" className="block text-xs font-medium text-ink-2">
+          Teléfono <span className="text-faint">(opcional)</span>
         </label>
         <input
           id="staff-phone"
@@ -145,14 +145,14 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
           placeholder="5215512345678"
           className={`mt-1 ${inputCls} tabular-nums`}
         />
-        <p className="mt-1 text-[11px] text-gray-400">
+        <p className="mt-1 text-[11px] text-faint">
           Si tiene WhatsApp propio, úsalo aquí — recibirá avisos de sus citas.
         </p>
       </div>
 
       {/* Rol */}
       <div>
-        <label htmlFor="staff-role" className="block text-xs font-medium text-gray-700">Rol</label>
+        <label htmlFor="staff-role" className="block text-xs font-medium text-ink-2">Rol</label>
         <select
           id="staff-role"
           value={role}
@@ -164,26 +164,26 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
-        <p className="mt-1 text-[11px] text-gray-400">
+        <p className="mt-1 text-[11px] text-faint">
           Los barberos entran con su PIN. El asistente/admin entra con su enlace de acceso.
         </p>
       </div>
 
       {/* Servicios que hace — obligatorio ≥1 para barbero, opcional para el resto */}
       <div>
-        <label className="block text-xs font-medium text-gray-700">
+        <label className="block text-xs font-medium text-ink-2">
           Servicios que hace{' '}
           {role === 'barber'
-            ? <span className="text-gray-400">(obligatorio)</span>
-            : <span className="text-gray-400">(opcional)</span>}
+            ? <span className="text-faint">(obligatorio)</span>
+            : <span className="text-faint">(opcional)</span>}
         </label>
 
         {noServicesForBarber ? (
-          <p className="mt-1 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-4 text-center text-xs text-amber-700">
+          <p className="mt-1 rounded-lg border border-dashed border-amber-border bg-amber-tint px-3 py-4 text-center text-xs text-amber">
             Crea al menos un servicio en “Catálogo de servicios” antes de dar de alta un barbero.
           </p>
         ) : services.length === 0 ? (
-          <p className="mt-1 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-xs text-gray-400">
+          <p className="mt-1 rounded-lg border border-dashed border-line px-3 py-4 text-center text-xs text-faint">
             No hay servicios activos todavía.
           </p>
         ) : (
@@ -194,14 +194,14 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
                 <div
                   key={svc.id}
                   className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
-                    on ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'
+                    on ? 'border-line bg-white' : 'border-line bg-canvas'
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className={`truncate text-sm ${on ? 'font-medium text-gray-900' : 'text-gray-500'}`}>
+                    <p className={`truncate text-sm ${on ? 'font-medium text-ink' : 'text-faint'}`}>
                       {svc.name}
                     </p>
-                    <p className="mt-0.5 text-[11px] text-gray-400 tabular-nums">
+                    <p className="mt-0.5 text-[11px] text-faint tabular-nums">
                       {formatMoney(svc.price, svc.currency)}
                     </p>
                   </div>
@@ -212,7 +212,7 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
                     aria-label={`${on ? 'Quitar' : 'Asignar'} ${svc.name}`}
                     aria-pressed={on}
                     className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
-                      on ? 'bg-gray-800' : 'bg-gray-200'
+                      on ? 'bg-ink' : 'bg-line-2'
                     }`}
                   >
                     <span
@@ -229,7 +229,7 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
       </div>
 
       {/* Error */}
-      {error && <p className="text-xs text-red-600" role="alert">{error}</p>}
+      {error && <p className="text-xs text-red-ink" role="alert">{error}</p>}
 
       {/* Acciones */}
       <div className="flex gap-2 pt-1">
@@ -237,7 +237,7 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
           type="button"
           onClick={() => void handleSave()}
           disabled={saving || noServicesForBarber}
-          className="flex-1 rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-medium text-white disabled:opacity-50"
         >
           {saving ? 'Creando...' : 'Crear'}
         </button>
@@ -245,7 +245,7 @@ export default function StaffCreateForm({ onCreated, onCancel, services }: Props
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-lg border border-line px-4 py-2.5 text-sm text-ink-2 hover:bg-canvas disabled:opacity-50"
         >
           Cancelar
         </button>

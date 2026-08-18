@@ -68,12 +68,12 @@ export default function StaffServicesEditor({
 
   return (
     <div>
-      <p className="mb-3 text-xs text-gray-500">
-        Servicios que hace <span className="font-medium text-gray-700">{staffName}</span>
+      <p className="mb-3 text-xs text-faint">
+        Servicios que hace <span className="font-medium text-ink-2">{staffName}</span>
       </p>
 
       {services.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gray-200 px-3 py-6 text-center text-xs text-gray-400">
+        <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-xs text-faint">
           No hay servicios activos. Crea servicios en “Catálogo de servicios” primero.
         </p>
       ) : (
@@ -84,14 +84,14 @@ export default function StaffServicesEditor({
               <div
                 key={svc.id}
                 className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
-                  on ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'
+                  on ? 'border-line bg-white' : 'border-line bg-canvas'
                 }`}
               >
                 <div className="min-w-0 flex-1">
-                  <p className={`truncate text-sm font-medium ${on ? 'text-gray-900' : 'text-gray-500'}`}>
+                  <p className={`truncate text-sm font-medium ${on ? 'text-ink' : 'text-faint'}`}>
                     {svc.name}
                   </p>
-                  <p className="mt-0.5 text-xs text-gray-400 tabular-nums">
+                  <p className="mt-0.5 text-xs text-faint tabular-nums">
                     {formatMoney(svc.price, svc.currency)}
                   </p>
                 </div>
@@ -101,7 +101,7 @@ export default function StaffServicesEditor({
                   aria-label={`${on ? 'Quitar' : 'Asignar'} ${svc.name}`}
                   aria-pressed={on}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
-                    on ? 'bg-gray-800' : 'bg-gray-200'
+                    on ? 'bg-ink' : 'bg-line-2'
                   }`}
                 >
                   <span
@@ -116,14 +116,14 @@ export default function StaffServicesEditor({
         </div>
       )}
 
-      {error && <p className="mt-2 text-xs text-red-600" role="alert">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-ink" role="alert">{error}</p>}
 
       <div className="mt-4 flex gap-2">
         <button
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="flex-1 rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-medium text-white disabled:opacity-50"
         >
           {saving ? 'Guardando...' : 'Guardar cambios'}
         </button>
@@ -131,7 +131,7 @@ export default function StaffServicesEditor({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-lg border border-line px-4 py-2.5 text-sm text-ink-2 hover:bg-canvas disabled:opacity-50"
         >
           Cancelar
         </button>

@@ -105,9 +105,9 @@ export default function ReportsConfigPanel() {
 
   if (loading) {
     return (
-      <div className="rounded-lg border border-gray-200 px-4 py-3">
-        <p className="text-xs font-medium text-gray-500">Reportes</p>
-        <p className="mt-2 text-xs text-gray-400">Cargando...</p>
+      <div className="rounded-lg border border-line px-4 py-3">
+        <p className="text-xs font-medium text-faint">Reportes</p>
+        <p className="mt-2 text-xs text-faint">Cargando...</p>
       </div>
     );
   }
@@ -115,18 +115,18 @@ export default function ReportsConfigPanel() {
   if (!config) return null;
 
   return (
-    <div className="rounded-lg border border-gray-200 px-4 py-3">
-      <p className="text-xs font-medium text-gray-500">Reportes</p>
+    <div className="rounded-lg border border-line px-4 py-3">
+      <p className="text-xs font-medium text-faint">Reportes</p>
 
       <div className="mt-3 space-y-4">
 
         {/* Toggle reporte semanal */}
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-gray-900">
+            <p className="text-sm font-medium text-ink">
               Reporte semanal por WhatsApp
             </p>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-faint">
               El reporte llega cada lunes a las 10am
             </p>
           </div>
@@ -138,7 +138,7 @@ export default function ReportsConfigPanel() {
             disabled={saving}
             onClick={() => void toggleEnabled(!config.report_enabled)}
             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none disabled:opacity-50 ${
-              config.report_enabled ? 'bg-gray-900' : 'bg-gray-200'
+              config.report_enabled ? 'bg-ink' : 'bg-line-2'
             }`}
           >
             <span
@@ -151,10 +151,10 @@ export default function ReportsConfigPanel() {
 
         {/* Campo número para reportes */}
         <div>
-          <label className="block text-sm font-medium text-gray-900" htmlFor="report-phone">
+          <label className="block text-sm font-medium text-ink" htmlFor="report-phone">
             Número para reportes
           </label>
-          <p className="text-xs text-gray-400">Formato: +52 55 XXXX XXXX (sin espacios ni +)</p>
+          <p className="text-xs text-faint">Formato: +52 55 XXXX XXXX (sin espacios ni +)</p>
 
           <div className="mt-1.5 flex gap-2">
             <input
@@ -168,22 +168,22 @@ export default function ReportsConfigPanel() {
                 setPhoneError(null);
               }}
               disabled={saving}
-              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-gray-500 focus:outline-none disabled:opacity-50"
+              className="flex-1 rounded-lg border border-line-2 px-3 py-2 text-sm text-ink focus:border-teal-border focus:outline-none disabled:opacity-50"
             />
             <button
               onClick={() => void savePhone()}
               disabled={saving || phoneInput === (config.report_whatsapp ?? '')}
-              className="shrink-0 rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-40"
+              className="shrink-0 rounded-lg bg-ink px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
             >
               {saving ? '…' : 'Guardar'}
             </button>
           </div>
 
           {phoneError && (
-            <p className="mt-1 text-xs text-red-500">{phoneError}</p>
+            <p className="mt-1 text-xs text-red-ink">{phoneError}</p>
           )}
           {saveMsg && !phoneError && (
-            <p className={`mt-1 text-xs ${saveMsg === 'Guardado' ? 'text-green-600' : 'text-red-500'}`}>
+            <p className={`mt-1 text-xs ${saveMsg === 'Guardado' ? 'text-teal-ink' : 'text-red-ink'}`}>
               {saveMsg}
             </p>
           )}

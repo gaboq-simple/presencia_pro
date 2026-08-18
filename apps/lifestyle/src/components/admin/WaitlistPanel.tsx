@@ -75,21 +75,21 @@ export default function WaitlistPanel() {
   const activeCount = entries.length;
 
   return (
-    <details className="rounded-lg border border-gray-200" open={activeCount > 0}>
-      <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 hover:bg-gray-50">
-        <span className="text-sm font-semibold text-gray-900">Lista de espera</span>
+    <details className="rounded-lg border border-line" open={activeCount > 0}>
+      <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 hover:bg-canvas">
+        <span className="text-sm font-semibold text-ink">Lista de espera</span>
         {activeCount > 0 && (
-          <span className="rounded-full bg-gray-900 px-2 py-0.5 text-[11px] font-semibold text-white">
+          <span className="rounded-full bg-ink px-2 py-0.5 text-[11px] font-semibold text-white">
             {activeCount}
           </span>
         )}
       </summary>
 
-      <div className="border-t border-gray-200 px-4 py-3">
+      <div className="border-t border-line px-4 py-3">
         {loading ? (
-          <p className="text-xs text-gray-400">Cargando...</p>
+          <p className="text-xs text-faint">Cargando...</p>
         ) : activeCount === 0 ? (
-          <p className="text-xs text-gray-400">No hay clientes en lista de espera.</p>
+          <p className="text-xs text-faint">No hay clientes en lista de espera.</p>
         ) : (
           <ul className="space-y-3">
             {entries.map((entry) => (
@@ -120,25 +120,25 @@ function WaitlistEntryRow({ entry, now: _now, onRefresh }: RowProps) {
   const minsLeft   = isNotified && entry.expires_at ? minutesUntil(entry.expires_at) : null;
 
   return (
-    <li className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+    <li className="rounded-lg border border-line bg-canvas px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           {/* Nombre + servicio */}
-          <p className="truncate text-sm font-medium text-gray-900">
+          <p className="truncate text-sm font-medium text-ink">
             {entry.customer_name}
           </p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-faint">
             {entry.service_name}
             {entry.staff_name ? ` · con ${entry.staff_name}` : ''}
           </p>
 
           {/* Fecha + turno */}
-          <p className="mt-0.5 text-xs text-gray-500">
+          <p className="mt-0.5 text-xs text-faint">
             {formatDate(entry.requested_date)} · {preferenceLabel(entry.requested_time_preference ?? '')}
           </p>
 
           {/* Tiempo en espera */}
-          <p className="mt-0.5 text-[11px] text-gray-400">
+          <p className="mt-0.5 text-[11px] text-faint">
             En espera desde hace {timeAgo(entry.created_at)}
           </p>
         </div>
@@ -146,11 +146,11 @@ function WaitlistEntryRow({ entry, now: _now, onRefresh }: RowProps) {
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {/* Badge de estado */}
           {isNotified && minsLeft !== null ? (
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+            <span className="rounded-full bg-amber-tint px-2 py-0.5 text-[11px] font-medium text-amber">
               Notificado · expira en {minsLeft}m
             </span>
           ) : (
-            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+            <span className="rounded-full bg-past-bg px-2 py-0.5 text-[11px] font-medium text-ink-2">
               En espera
             </span>
           )}
@@ -208,11 +208,11 @@ function NotifyButton({ entry, onSuccess }: { entry: WaitlistEntry; onSuccess: (
       <button
         onClick={() => void handleNotify()}
         disabled={busy}
-        className="text-xs font-medium text-gray-700 underline underline-offset-2 hover:text-gray-900 disabled:opacity-50"
+        className="text-xs font-medium text-ink-2 underline underline-offset-2 hover:text-ink disabled:opacity-50"
       >
         {busy ? 'Notificando...' : 'Notificar ahora'}
       </button>
-      {error && <p className="mt-0.5 text-xs text-red-500">{error}</p>}
+      {error && <p className="mt-0.5 text-xs text-red-ink">{error}</p>}
     </div>
   );
 }

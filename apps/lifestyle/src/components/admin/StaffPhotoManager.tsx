@@ -219,7 +219,7 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
 
   if (staffList.length === 0) {
     return (
-      <p className="text-sm text-gray-500">No hay staff activo registrado.</p>
+      <p className="text-sm text-faint">No hay staff activo registrado.</p>
     );
   }
 
@@ -233,12 +233,12 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
         return (
           <li
             key={member.id}
-            className="flex flex-col gap-3 rounded-lg border border-gray-200 p-4"
+            className="flex flex-col gap-3 rounded-lg border border-line p-4"
           >
             {/* ── Fila superior: avatar + nombre ── */}
             <div className="flex items-center gap-3">
               {/* Avatar: foto actual o preview o iniciales */}
-              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-gray-200">
+              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-past-bg">
                 {hasPending && state.preview ? (
                   <Image
                     src={state.preview}
@@ -256,24 +256,24 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
                     sizes="56px"
                   />
                 ) : (
-                  <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-gray-500">
+                  <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-faint">
                     {getInitials(member.name)}
                   </span>
                 )}
               </div>
 
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-gray-900">
+                <p className="truncate text-sm font-semibold text-ink">
                   {member.name}
                 </p>
                 {hasPhoto && !hasPending && (
-                  <p className="text-xs text-gray-400">Foto actual</p>
+                  <p className="text-xs text-faint">Foto actual</p>
                 )}
                 {hasPending && (
-                  <p className="text-xs text-gray-400">Preview — pendiente de subir</p>
+                  <p className="text-xs text-faint">Preview — pendiente de subir</p>
                 )}
                 {!hasPhoto && !hasPending && (
-                  <p className="text-xs text-gray-400">Sin foto</p>
+                  <p className="text-xs text-faint">Sin foto</p>
                 )}
               </div>
 
@@ -282,14 +282,14 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
                 <div className="flex shrink-0 gap-2">
                   <label
                     htmlFor={`photo-input-${member.id}`}
-                    className="cursor-pointer rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                    className="cursor-pointer rounded border border-line-2 px-2 py-1 text-xs text-ink-2 hover:bg-canvas"
                   >
                     Cambiar
                   </label>
                   <button
                     type="button"
                     onClick={() => void handleDelete(member.id)}
-                    className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                    className="rounded border border-red-border px-2 py-1 text-xs text-red-ink hover:bg-red-tint"
                   >
                     Eliminar
                   </button>
@@ -314,20 +314,20 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
                 onDrop={(e) => handleDrop(e, member.id)}
                 className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors ${
                   state.dragOver
-                    ? 'border-gray-400 bg-gray-50'
-                    : 'border-gray-200 hover:border-gray-300'
+                    ? 'border-line-2 bg-canvas'
+                    : 'border-line hover:border-line-2'
                 }`}
               >
                 <label
                   htmlFor={`photo-input-${member.id}`}
-                  className="cursor-pointer text-sm text-gray-500 hover:text-gray-700"
+                  className="cursor-pointer text-sm text-faint hover:text-ink"
                 >
                   Arrastra una imagen aquí o{' '}
-                  <span className="font-medium text-gray-700 underline underline-offset-2">
+                  <span className="font-medium text-ink-2 underline underline-offset-2">
                     selecciona un archivo
                   </span>
                 </label>
-                <p className="text-xs text-gray-400">JPEG, PNG o WebP · máx 2MB</p>
+                <p className="text-xs text-faint">JPEG, PNG o WebP · máx 2MB</p>
               </div>
             )}
 
@@ -337,14 +337,14 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
                 <button
                   type="button"
                   onClick={() => void handleUpload(member.id)}
-                  className="flex-1 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+                  className="flex-1 rounded bg-ink px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
                 >
                   Subir foto
                 </button>
                 <button
                   type="button"
                   onClick={() => clearUploadState(member.id)}
-                  className="rounded border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                  className="rounded border border-line px-3 py-1.5 text-xs text-ink-2 hover:bg-canvas"
                 >
                   Cancelar
                 </button>
@@ -353,9 +353,9 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
 
             {/* ── Indicador de progreso ── */}
             {state.uploading && (
-              <div className="flex items-center gap-2 text-xs text-gray-500">
+              <div className="flex items-center gap-2 text-xs text-faint">
                 <svg
-                  className="h-4 w-4 animate-spin text-gray-400"
+                  className="h-4 w-4 animate-spin text-faint"
                   fill="none"
                   viewBox="0 0 24 24"
                   aria-hidden
@@ -380,7 +380,7 @@ export default function StaffPhotoManager({ initialStaff }: Props) {
 
             {/* ── Error ── */}
             {state.error && (
-              <p className="rounded bg-red-50 px-3 py-2 text-xs text-red-600">
+              <p className="rounded bg-red-tint px-3 py-2 text-xs text-red-ink">
                 {state.error}
               </p>
             )}

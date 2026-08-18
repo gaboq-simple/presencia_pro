@@ -178,8 +178,8 @@ export default function StaffScheduleEditor({
 
   return (
     <div>
-      <p className="mb-3 text-xs text-gray-500">
-        Horario semanal de <span className="font-medium text-gray-700">{staffName}</span>
+      <p className="mb-3 text-xs text-faint">
+        Horario semanal de <span className="font-medium text-ink-2">{staffName}</span>
       </p>
 
       <div className="space-y-2">
@@ -190,7 +190,7 @@ export default function StaffScheduleEditor({
             <div
               key={index}
               className={`rounded-lg border px-3 py-2.5 transition-colors ${
-                day.active ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'
+                day.active ? 'border-line bg-white' : 'border-line bg-canvas'
               }`}
             >
               {/* Fila principal: toggle + nombre + horas */}
@@ -201,7 +201,7 @@ export default function StaffScheduleEditor({
                   onClick={() => toggleDay(index)}
                   aria-label={`${day.active ? 'Desactivar' : 'Activar'} ${label}`}
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
-                    day.active ? 'bg-gray-800' : 'bg-gray-200'
+                    day.active ? 'bg-ink' : 'bg-line-2'
                   }`}
                 >
                   <span
@@ -212,7 +212,7 @@ export default function StaffScheduleEditor({
                 </button>
 
                 {/* Nombre del dia */}
-                <span className={`w-20 shrink-0 text-xs font-medium ${day.active ? 'text-gray-800' : 'text-gray-400'}`}>
+                <span className={`w-20 shrink-0 text-xs font-medium ${day.active ? 'text-ink' : 'text-faint'}`}>
                   {label}
                 </span>
 
@@ -223,18 +223,18 @@ export default function StaffScheduleEditor({
                       type="time"
                       value={day.start_time}
                       onChange={(e) => setTime(index, 'start_time', e.target.value)}
-                      className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-800 focus:border-gray-500 focus:outline-none"
+                      className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink focus:border-teal-border focus:outline-none"
                     />
-                    <span className="shrink-0 text-xs text-gray-400">–</span>
+                    <span className="shrink-0 text-xs text-faint">–</span>
                     <input
                       type="time"
                       value={day.end_time}
                       onChange={(e) => setTime(index, 'end_time', e.target.value)}
-                      className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-800 focus:border-gray-500 focus:outline-none"
+                      className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink focus:border-teal-border focus:outline-none"
                     />
                   </div>
                 ) : (
-                  <span className="text-xs text-gray-300">Descanso</span>
+                  <span className="text-xs text-faint">Descanso</span>
                 )}
               </div>
 
@@ -247,9 +247,9 @@ export default function StaffScheduleEditor({
                       type="checkbox"
                       checked={day.has_break}
                       onChange={() => toggleBreak(index)}
-                      className="h-3.5 w-3.5 rounded border-gray-300 accent-gray-800"
+                      className="h-3.5 w-3.5 rounded border-line-2 accent-gray-800"
                     />
-                    <span className="text-[11px] text-gray-500">Descanso</span>
+                    <span className="text-[11px] text-faint">Descanso</span>
                   </label>
 
                   {/* Inputs de break — visibles solo si has_break */}
@@ -259,14 +259,14 @@ export default function StaffScheduleEditor({
                         type="time"
                         value={day.break_start}
                         onChange={(e) => setTime(index, 'break_start', e.target.value)}
-                        className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-700 focus:border-gray-500 focus:outline-none"
+                        className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink-2 focus:border-teal-border focus:outline-none"
                       />
-                      <span className="shrink-0 text-xs text-gray-400">–</span>
+                      <span className="shrink-0 text-xs text-faint">–</span>
                       <input
                         type="time"
                         value={day.break_end}
                         onChange={(e) => setTime(index, 'break_end', e.target.value)}
-                        className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-700 focus:border-gray-500 focus:outline-none"
+                        className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink-2 focus:border-teal-border focus:outline-none"
                       />
                     </div>
                   )}
@@ -279,7 +279,7 @@ export default function StaffScheduleEditor({
 
       {/* Error */}
       {error && (
-        <p className="mt-2 text-xs text-red-600" role="alert">{error}</p>
+        <p className="mt-2 text-xs text-red-ink" role="alert">{error}</p>
       )}
 
       {/* Acciones */}
@@ -288,7 +288,7 @@ export default function StaffScheduleEditor({
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="flex-1 rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-medium text-white disabled:opacity-50"
         >
           {saving ? 'Guardando...' : 'Guardar cambios'}
         </button>
@@ -296,15 +296,15 @@ export default function StaffScheduleEditor({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-lg border border-line px-4 py-2.5 text-sm text-ink-2 hover:bg-canvas disabled:opacity-50"
         >
           Cancelar
         </button>
       </div>
 
       {/* ── Excepciones de horario ────────────────────────────────────────── */}
-      <div className="mt-6 border-t border-gray-100 pt-5">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+      <div className="mt-6 border-t border-line pt-5">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-faint">
           Excepciones de horario
         </p>
         <ScheduleExceptionsPanel staffId={staffId} timezone={timezone} />

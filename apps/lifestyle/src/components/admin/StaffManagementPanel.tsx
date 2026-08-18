@@ -249,7 +249,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+          className="rounded-lg bg-ink px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
         >
           + Nuevo barbero
         </button>
@@ -269,7 +269,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
             <div
               key={member.id}
               className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
-                member.active ? 'border-gray-100 bg-white' : 'border-gray-100 bg-gray-50'
+                member.active ? 'border-line bg-white' : 'border-line bg-canvas'
               }`}
             >
               {/* Avatar */}
@@ -283,7 +283,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                 ) : (
                   <div
                     className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold ${
-                      member.active ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-400'
+                      member.active ? 'bg-line-2 text-ink-2' : 'bg-past-bg text-faint'
                     }`}
                   >
                     {initials(member.name)}
@@ -294,10 +294,10 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
               {/* Info + controles */}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <p className={`truncate text-sm font-medium ${member.active ? 'text-gray-900' : 'text-gray-400'}`}>
+                  <p className={`truncate text-sm font-medium ${member.active ? 'text-ink' : 'text-faint'}`}>
                     {member.name}
                   </p>
-                  <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+                  <span className="shrink-0 rounded-full bg-past-bg px-1.5 py-0.5 text-[10px] text-faint">
                     {ROLE_LABELS[member.role] ?? member.role}
                   </span>
                 </div>
@@ -319,19 +319,19 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                             setPinError(null);
                           }}
                           placeholder="1234"
-                          className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-center font-mono text-sm focus:border-gray-500 focus:outline-none"
+                          className="w-16 rounded border border-line-2 px-1.5 py-0.5 text-center font-mono text-sm focus:border-teal-border focus:outline-none"
                         />
                         <button
                           onClick={() => void savePin(member)}
                           disabled={isLoading}
-                          className="rounded bg-gray-900 px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-50"
+                          className="rounded bg-ink px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-50"
                         >
                           {isLoading ? '...' : 'Guardar'}
                         </button>
                         <button
                           onClick={cancelPinEdit}
                           disabled={isLoading}
-                          className="text-[11px] text-gray-400 hover:text-gray-600"
+                          className="text-[11px] text-faint hover:text-ink-2"
                         >
                           Cancelar
                         </button>
@@ -339,7 +339,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                     ) : (
                       <button
                         onClick={() => startPinEdit(member)}
-                        className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700"
+                        className="flex items-center gap-1 text-[11px] text-faint hover:text-ink"
                       >
                         <span className="font-mono">
                           PIN: {member.pin ? '••••' : '—'}
@@ -350,7 +350,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                       </button>
                     )}
                     {pinError && (
-                      <p className="mt-0.5 text-[10px] text-red-500">{pinError}</p>
+                      <p className="mt-0.5 text-[10px] text-red-ink">{pinError}</p>
                     )}
                   </div>
                 )}
@@ -360,10 +360,10 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                   <button
                     onClick={() => void openScheduleEditor(member)}
                     disabled={isLoadingSched || !!modal}
-                    className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 disabled:opacity-40"
+                    className="flex items-center gap-1 text-[11px] text-faint hover:text-ink disabled:opacity-40"
                   >
                     {isLoadingSched ? (
-                      <span className="text-[11px] text-gray-400">Cargando...</span>
+                      <span className="text-[11px] text-faint">Cargando...</span>
                     ) : (
                       <>
                         <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
@@ -373,11 +373,11 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                       </>
                     )}
                   </button>
-                  <span className="text-gray-200" aria-hidden>|</span>
+                  <span className="text-past-line" aria-hidden>|</span>
                   <button
                     onClick={() => setModal({ type: 'dayoff', staffId: member.id, staffName: member.name })}
                     disabled={!!modal}
-                    className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 disabled:opacity-40"
+                    className="flex items-center gap-1 text-[11px] text-faint hover:text-ink disabled:opacity-40"
                   >
                     <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
                       <path fillRule="evenodd" d="M4.75 0a.75.75 0 01.75.75V2h5V.75a.75.75 0 011.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0113.25 16H2.75A1.75 1.75 0 011 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 014.75 0zm0 3.5h-2a.25.25 0 00-.25.25V6h10.5V3.75a.25.25 0 00-.25-.25h-2V4.25a.75.75 0 01-1.5 0V3.5h-5v.75a.75.75 0 01-1.5 0V3.5zM2.5 7.5v6.75c0 .138.112.25.25.25h10.5a.25.25 0 00.25-.25V7.5H2.5zm5.75 2.25a.75.75 0 00-1.5 0v1.5h-1.5a.75.75 0 000 1.5h1.5v1.5a.75.75 0 001.5 0v-1.5h1.5a.75.75 0 000-1.5h-1.5v-1.5z" />
@@ -386,14 +386,14 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                   </button>
                   {showPin && (
                     <>
-                      <span className="text-gray-200" aria-hidden>|</span>
+                      <span className="text-past-line" aria-hidden>|</span>
                       <button
                         onClick={() => void openServicesEditor(member)}
                         disabled={isLoadingSvc || !!modal}
-                        className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 disabled:opacity-40"
+                        className="flex items-center gap-1 text-[11px] text-faint hover:text-ink disabled:opacity-40"
                       >
                         {isLoadingSvc ? (
-                          <span className="text-[11px] text-gray-400">Cargando...</span>
+                          <span className="text-[11px] text-faint">Cargando...</span>
                         ) : (
                           <>
                             <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
@@ -407,10 +407,10 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                   )}
                 </div>
                 {schedErr && (
-                  <p className="mt-0.5 text-[10px] text-red-500">{schedErr}</p>
+                  <p className="mt-0.5 text-[10px] text-red-ink">{schedErr}</p>
                 )}
                 {svcErr && (
-                  <p className="mt-0.5 text-[10px] text-red-500">{svcErr}</p>
+                  <p className="mt-0.5 text-[10px] text-red-ink">{svcErr}</p>
                 )}
               </div>
 
@@ -421,7 +421,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
                 title={member.active ? 'Desactivar' : 'Activar'}
                 aria-label={`${member.active ? 'Desactivar' : 'Activar'} a ${member.name}`}
                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none disabled:opacity-50 ${
-                  member.active ? 'bg-gray-800' : 'bg-gray-200'
+                  member.active ? 'bg-ink' : 'bg-line-2'
                 }`}
               >
                 <span
@@ -444,7 +444,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
           <div className="w-full max-w-md overflow-y-auto rounded-t-2xl bg-white px-5 pb-8 pt-5 shadow-xl sm:rounded-2xl" style={{ maxHeight: '90vh' }}>
             {/* Header */}
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">
+              <h2 className="text-sm font-semibold text-ink">
                 {modal.type === 'schedule' ? 'Editar horario'
                   : modal.type === 'services' ? 'Servicios que hace'
                   : 'Marcar dia libre'}
@@ -452,7 +452,7 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
               <button
                 type="button"
                 onClick={closeModal}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-faint hover:text-ink-2"
                 aria-label="Cerrar"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
@@ -506,11 +506,11 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
             style={{ maxHeight: '90vh' }}
           >
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">Nuevo barbero</h2>
+              <h2 className="text-sm font-semibold text-ink">Nuevo barbero</h2>
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-faint hover:text-ink-2"
                 aria-label="Cerrar"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
@@ -531,41 +531,41 @@ export default function StaffManagementPanel({ initialStaff, activeServices, tim
           onClick={(e) => { if (e.target === e.currentTarget) setCreatedInfo(null); }}
         >
           <div className="w-full max-w-sm rounded-t-2xl bg-white px-5 pb-6 pt-5 text-center shadow-xl sm:rounded-2xl">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="mx-auto h-8 w-8 text-gray-800" aria-hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="mx-auto h-8 w-8 text-ink" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
             </svg>
-            <h2 className="mt-2 text-sm font-semibold text-gray-900">
+            <h2 className="mt-2 text-sm font-semibold text-ink">
               {createdInfo.name} quedó dado de alta
             </h2>
 
             {createdInfo.pin ? (
               <>
-                <p className="mt-2 text-xs text-gray-600">
+                <p className="mt-2 text-xs text-ink-2">
                   {createdInfo.role === 'barber'
                     ? 'Este es su PIN para entrar al panel. Dáselo — lo necesita para iniciar sesión.'
                     : 'Se le generó un PIN (los barberos entran con PIN; asistente/admin usan su enlace de acceso).'}
                 </p>
                 <div className="mt-3 flex items-center justify-center gap-2">
-                  <span className="rounded-lg bg-gray-100 px-4 py-2 font-mono text-2xl font-bold tracking-widest text-gray-900 tabular-nums">
+                  <span className="rounded-lg bg-past-bg px-4 py-2 font-mono text-2xl font-bold tracking-widest text-ink tabular-nums">
                     {createdInfo.pin}
                   </span>
                   <button
                     type="button"
                     onClick={() => { if (createdInfo.pin) void navigator.clipboard?.writeText(createdInfo.pin); }}
-                    className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+                    className="rounded-lg border border-line px-3 py-2 text-xs text-ink-2 hover:bg-canvas"
                   >
                     Copiar
                   </button>
                 </div>
               </>
             ) : (
-              <p className="mt-2 text-xs text-gray-600">Ya aparece en la lista de staff.</p>
+              <p className="mt-2 text-xs text-ink-2">Ya aparece en la lista de staff.</p>
             )}
 
             <button
               type="button"
               onClick={() => setCreatedInfo(null)}
-              className="mt-5 w-full rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white"
+              className="mt-5 w-full rounded-lg bg-ink py-2.5 text-sm font-medium text-white"
             >
               Entendido
             </button>

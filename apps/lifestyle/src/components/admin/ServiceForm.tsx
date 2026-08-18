@@ -120,13 +120,13 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const inputCls =
-    'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-gray-500 focus:outline-none disabled:opacity-50';
+    'w-full rounded-lg border border-line-2 px-3 py-2 text-sm text-ink focus:border-teal-border focus:outline-none disabled:opacity-50';
 
   return (
     <div className="space-y-3">
       {/* Nombre */}
       <div>
-        <label htmlFor="svc-name" className="block text-xs font-medium text-gray-700">Nombre</label>
+        <label htmlFor="svc-name" className="block text-xs font-medium text-ink-2">Nombre</label>
         <input
           id="svc-name"
           type="text"
@@ -142,8 +142,8 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
       {/* Precio + Duración */}
       <div className="flex gap-2">
         <div className="flex-1">
-          <label htmlFor="svc-price" className="block text-xs font-medium text-gray-700">
-            Precio {useRange && <span className="text-gray-400">(base)</span>}
+          <label htmlFor="svc-price" className="block text-xs font-medium text-ink-2">
+            Precio {useRange && <span className="text-faint">(base)</span>}
           </label>
           <input
             id="svc-price"
@@ -158,7 +158,7 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
           />
         </div>
         <div className="flex-1">
-          <label htmlFor="svc-duration" className="block text-xs font-medium text-gray-700">Duración (min)</label>
+          <label htmlFor="svc-duration" className="block text-xs font-medium text-ink-2">Duración (min)</label>
           <input
             id="svc-duration"
             type="number"
@@ -176,8 +176,8 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
 
       {/* Descripción */}
       <div>
-        <label htmlFor="svc-desc" className="block text-xs font-medium text-gray-700">
-          Descripción <span className="text-gray-400">(opcional)</span>
+        <label htmlFor="svc-desc" className="block text-xs font-medium text-ink-2">
+          Descripción <span className="text-faint">(opcional)</span>
         </label>
         <textarea
           id="svc-desc"
@@ -191,16 +191,16 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
       </div>
 
       {/* Rango de precio (opcional) */}
-      <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+      <div className="rounded-lg border border-line bg-canvas px-3 py-2.5">
         <label className="flex cursor-pointer items-center gap-2">
           <input
             type="checkbox"
             checked={useRange}
             onChange={() => { setUseRange((v) => !v); setError(null); }}
             disabled={saving}
-            className="h-3.5 w-3.5 rounded border-gray-300 accent-gray-800"
+            className="h-3.5 w-3.5 rounded border-line-2 accent-gray-800"
           />
-          <span className="text-xs font-medium text-gray-700">Usar rango de precio (“desde/hasta”)</span>
+          <span className="text-xs font-medium text-ink-2">Usar rango de precio (“desde/hasta”)</span>
         </label>
 
         {useRange && (
@@ -214,7 +214,7 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
                 placeholder="Mín"
                 className={`${inputCls} tabular-nums`}
               />
-              <span className="shrink-0 text-xs text-gray-400">–</span>
+              <span className="shrink-0 text-xs text-faint">–</span>
               <input
                 type="number" inputMode="decimal" min={0}
                 value={priceMax}
@@ -238,7 +238,7 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
       </div>
 
       {/* Error */}
-      {error && <p className="text-xs text-red-600" role="alert">{error}</p>}
+      {error && <p className="text-xs text-red-ink" role="alert">{error}</p>}
 
       {/* Acciones */}
       <div className="flex gap-2 pt-1">
@@ -246,7 +246,7 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="flex-1 rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-medium text-white disabled:opacity-50"
         >
           {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear servicio'}
         </button>
@@ -254,7 +254,7 @@ export default function ServiceForm({ initial, onSaved, onCancel }: Props) {
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-lg border border-line px-4 py-2.5 text-sm text-ink-2 hover:bg-canvas disabled:opacity-50"
         >
           Cancelar
         </button>

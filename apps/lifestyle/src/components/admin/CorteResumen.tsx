@@ -56,28 +56,28 @@ export default function CorteResumen({
   const serie = resueltos.slice(0, 7);
 
   return (
-    <div className="rounded-lg border border-gray-200 px-4 py-3">
-      <p className="text-xs text-gray-500">El cuadre</p>
+    <div className="rounded-lg border border-line px-4 py-3">
+      <p className="text-xs text-faint">El cuadre</p>
 
       {deHoy === null ? (
-        <p className="mt-0.5 text-sm text-gray-900">Hoy todavía no hubo corte</p>
+        <p className="mt-0.5 text-sm text-ink">Hoy todavía no hubo corte</p>
       ) : (
         <>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm tabular-nums">
-            <span className="text-gray-900">
+            <span className="text-ink">
               Efectivo {fmtMonto(deHoy.corte.cashCounted)}{' '}
               <span className={`font-semibold ${tono(deHoy.corte.cashDiff)}`}>
                 {fmtSigned(deHoy.corte.cashDiff)}
               </span>
             </span>
-            <span className="text-gray-900">
+            <span className="text-ink">
               Terminal {fmtMonto(deHoy.corte.cardCounted)}{' '}
               <span className={`font-semibold ${tono(deHoy.corte.cardDiff)}`}>
                 {fmtSigned(deHoy.corte.cardDiff)}
               </span>
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-gray-500">
+          <p className="mt-0.5 text-xs text-faint">
             Firmado por {deHoy.corte.firmadoPor}
             {deHoy.correcciones > 0 &&
               ` · corregido ${deHoy.correcciones === 1 ? '1 vez' : `${deHoy.correcciones} veces`}`}
@@ -89,10 +89,10 @@ export default function CorteResumen({
           sin corte no se rellenan con ceros — un día sin contar no es un día
           cuadrado, y confundirlos sería el peor error posible acá. */}
       {serie.length > 0 && (
-        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-gray-200 pt-2 text-xs tabular-nums">
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2 text-xs tabular-nums">
           {serie.map(({ corte }) => (
             <li key={corte.id} className="flex items-baseline gap-1.5">
-              <span className="text-gray-500">{diaCorto(corte.corteDate)}</span>
+              <span className="text-faint">{diaCorto(corte.corteDate)}</span>
               <span className={`font-semibold ${tono(corte.cashDiff)}`}>{fmtSigned(corte.cashDiff)}</span>
               <span className={tono(corte.cardDiff)}>{fmtSigned(corte.cardDiff)}</span>
             </li>
@@ -100,7 +100,7 @@ export default function CorteResumen({
         </ul>
       )}
       {serie.length > 0 && (
-        <p className="mt-1 text-xs text-gray-400">Efectivo · terminal, con signo</p>
+        <p className="mt-1 text-xs text-faint">Efectivo · terminal, con signo</p>
       )}
     </div>
   );

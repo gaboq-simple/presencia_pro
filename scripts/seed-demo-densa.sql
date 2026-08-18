@@ -16,11 +16,34 @@
 -- aprobaría como correctos.
 --
 -- Propiedades:
---   · IDEMPOTENTE: purga las citas del negocio y re-siembra. Correrlo dos veces
---     el mismo día produce el mismo estado (pseudo-aleatorio por hash md5, sin
---     random()). Staff/servicios/clientes se crean solo si faltan.
+--   · IDEMPOTENTE: purga las citas del negocio y re-siembra. Pseudo-aleatorio por
+--     hash md5, sin random(); staff/servicios/clientes se crean solo si faltan.
 --   · RELATIVO A HOY: las fechas se calculan contra la fecha actual en la
 --     timezone del negocio — corre igual de fresco cualquier día.
+--   · DETERMINISTA, PERO EL DÍA DE HOY DEPENDE DE LA HORA DE CORRIDA (dv3-5').
+--     Las citas de HOY nacen `completed` (con `price_charged`, `payment_method`,
+--     `arrived_at` y `completed_at`) si su hora de FIN ya pasó al momento de
+--     correr, y `confirmed` si no — ver la regla `sl.d = b.hoy` más abajo. O sea:
+--     dos corridas a la misma hora dan el mismo estado, y dos corridas a horas
+--     distintas del mismo día NO, a propósito.
+--
+--     Medido el 2026-08-18: corridas de 16:20 y 16:22 → huellas md5 de contenido
+--     IDÉNTICAS en los tres tramos (pasado `d91d8036…`, hoy `33759af0…`, futuro
+--     `cf6d68db…`); entre 16:19 y 16:20 cambió SOLO la de hoy, porque se cruzó el
+--     fin de una cita. El pasado y el futuro no dependen de la hora.
+--
+--     Consecuencia práctica: la corrida automática de las 05:00 CDMX deja el día
+--     ENTERO en `confirmed` —a esa hora no terminó nada— y para media tarde el
+--     dueño ve $0 y un puñado de no-shows, porque el cron de auto-cancel fue
+--     marcando lo vencido. **Antes de una demo, disparar el workflow a mano**
+--     (`gh workflow run reseed-demo.yml`, o Actions → Reseed demo barbershop →
+--     Run workflow): el día se refresca con dinero de verdad. Verificado: a las
+--     05:20 el día daba 0 completadas / $0; re-sembrado 16:19, 3 completadas /
+--     $460, las tres con riel de cobro.
+--
+--     Al comparar dos corridas, la huella va sobre el CONTENIDO (starts_at,
+--     status, price_charged, payment_method, source, booking_name), nunca sobre
+--     los `id`: los ids se regeneran en cada corrida por diseño.
 --   · SIN RUIDO DE AUDIT: todo entra por INSERT con valores finales (cero
 --     UPDATEs sobre appointments) y al final limpia las filas viejas de
 --     appointment_audit con actor desconocido ("Acción sin identificar").

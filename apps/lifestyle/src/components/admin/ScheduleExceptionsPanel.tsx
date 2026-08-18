@@ -139,21 +139,21 @@ export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
     <div>
       {/* Lista de excepciones existentes */}
       {loading ? (
-        <p className="text-xs text-gray-400">Cargando excepciones…</p>
+        <p className="text-xs text-faint">Cargando excepciones…</p>
       ) : loadError ? (
-        <p className="text-xs text-red-500">{loadError}</p>
+        <p className="text-xs text-red-ink">{loadError}</p>
       ) : exceptions.length === 0 ? (
-        <p className="mb-3 text-xs text-gray-400">Sin excepciones programadas.</p>
+        <p className="mb-3 text-xs text-faint">Sin excepciones programadas.</p>
       ) : (
         <ul className="mb-4 space-y-1.5">
           {exceptions.map((exc) => (
             <li
               key={exc.id}
-              className="flex items-start justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2"
+              className="flex items-start justify-between gap-2 rounded-lg border border-line bg-canvas px-3 py-2"
             >
               <div className="min-w-0">
-                <p className="text-xs font-medium text-gray-800">{formatDate(exc.exception_date)}</p>
-                <p className="mt-0.5 text-[11px] text-gray-500">
+                <p className="text-xs font-medium text-ink">{formatDate(exc.exception_date)}</p>
+                <p className="mt-0.5 text-[11px] text-faint">
                   {exc.available
                     ? `Horario especial: ${trimTime(exc.start_time)} – ${trimTime(exc.end_time)}`
                     : 'Día libre'}
@@ -165,7 +165,7 @@ export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
                 onClick={() => handleDelete(exc.id)}
                 disabled={isPending}
                 aria-label="Eliminar excepción"
-                className="shrink-0 rounded p-1 text-gray-300 hover:text-red-500 disabled:opacity-40"
+                className="shrink-0 rounded p-1 text-past-line hover:text-red-ink disabled:opacity-40"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
                   <path d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zm4.5 0V3h2.25a.75.75 0 010 1.5H2.75a.75.75 0 010-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675l.66 6.6a.25.25 0 00.249.225h5.19a.25.25 0 00.249-.225l.66-6.6a.75.75 0 011.492.149l-.66 6.6A1.748 1.748 0 0111.595 15h-5.19a1.75 1.75 0 01-1.741-1.575l-.66-6.6a.75.75 0 011.492-.15zM6.5 8a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 016.5 8zm3 0a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 019.5 8z" />
@@ -177,8 +177,8 @@ export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
       )}
 
       {/* Formulario para agregar */}
-      <div className="space-y-2 rounded-lg border border-dashed border-gray-200 p-3">
-        <p className="text-[11px] font-medium text-gray-500">Agregar excepción</p>
+      <div className="space-y-2 rounded-lg border border-dashed border-line p-3">
+        <p className="text-[11px] font-medium text-faint">Agregar excepción</p>
 
         {/* Fecha */}
         <input
@@ -186,7 +186,7 @@ export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
           value={formDate}
           min={todayStrInTz(timezone)}
           onChange={(e) => { setFormDate(e.target.value); setFormError(null); }}
-          className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs text-gray-800 focus:border-gray-400 focus:outline-none"
+          className="w-full rounded border border-line px-2 py-1.5 text-xs text-ink focus:border-teal-border focus:outline-none"
         />
 
         {/* Toggle tipo */}
@@ -198,8 +198,8 @@ export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
               onClick={() => { setFormType(t); setFormError(null); }}
               className={`flex-1 rounded py-1.5 text-[11px] font-medium transition-colors ${
                 formType === t
-                  ? 'bg-gray-800 text-white'
-                  : 'border border-gray-200 text-gray-500 hover:bg-gray-50'
+                  ? 'bg-ink text-white'
+                  : 'border border-line text-faint hover:bg-canvas'
               }`}
             >
               {t === 'free' ? 'Día libre' : 'Horario especial'}
@@ -214,14 +214,14 @@ export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
               type="time"
               value={formStart}
               onChange={(e) => { setFormStart(e.target.value); setFormError(null); }}
-              className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
+              className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink focus:border-teal-border focus:outline-none"
             />
-            <span className="text-xs text-gray-400">–</span>
+            <span className="text-xs text-faint">–</span>
             <input
               type="time"
               value={formEnd}
               onChange={(e) => { setFormEnd(e.target.value); setFormError(null); }}
-              className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
+              className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink focus:border-teal-border focus:outline-none"
             />
           </div>
         )}
@@ -233,18 +233,18 @@ export default function ScheduleExceptionsPanel({ staffId, timezone }: Props) {
           onChange={(e) => setFormReason(e.target.value)}
           placeholder="Razón (opcional)"
           maxLength={120}
-          className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs text-gray-800 placeholder-gray-300 focus:border-gray-400 focus:outline-none"
+          className="w-full rounded border border-line px-2 py-1.5 text-xs text-ink placeholder-faint focus:border-teal-border focus:outline-none"
         />
 
         {formError && (
-          <p className="text-[11px] text-red-600">{formError}</p>
+          <p className="text-[11px] text-red-ink">{formError}</p>
         )}
 
         <button
           type="button"
           onClick={handleAdd}
           disabled={isPending || !formDate}
-          className="w-full rounded-lg border border-gray-200 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          className="w-full rounded-lg border border-line py-2 text-xs font-medium text-ink-2 hover:bg-canvas disabled:opacity-40"
         >
           {isPending ? 'Guardando…' : 'Agregar excepción'}
         </button>

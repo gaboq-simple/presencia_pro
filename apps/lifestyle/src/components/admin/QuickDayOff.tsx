@@ -108,14 +108,14 @@ export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onC
 
   return (
     <div>
-      <p className="mb-3 text-xs text-gray-500">
-        Dia libre para <span className="font-medium text-gray-700">{staffName}</span>
+      <p className="mb-3 text-xs text-faint">
+        Dia libre para <span className="font-medium text-ink-2">{staffName}</span>
       </p>
 
       {/* Selector de fecha */}
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">
+          <label className="mb-1 block text-xs font-medium text-ink-2">
             Fecha
           </label>
           <input
@@ -127,14 +127,14 @@ export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onC
               setError(null);
               setWarning(null);
             }}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:border-gray-500 focus:outline-none"
+            className="w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:border-teal-border focus:outline-none"
           />
         </div>
 
         {/* Motivo opcional */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">
-            Motivo <span className="font-normal text-gray-400">(opcional)</span>
+          <label className="mb-1 block text-xs font-medium text-ink-2">
+            Motivo <span className="font-normal text-faint">(opcional)</span>
           </label>
           <input
             type="text"
@@ -142,20 +142,20 @@ export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onC
             onChange={(e) => setReason(e.target.value)}
             placeholder="Vacaciones, cita medica..."
             maxLength={200}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 placeholder-gray-300 focus:border-gray-500 focus:outline-none"
+            className="w-full rounded-lg border border-line px-3 py-2 text-sm text-ink placeholder-faint focus:border-teal-border focus:outline-none"
           />
         </div>
       </div>
 
       {/* Aviso de citas existentes */}
       {warning && (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
-          <p className="text-xs text-amber-800">{warning.message}</p>
+        <div className="mt-3 rounded-lg border border-amber-border bg-amber-tint px-3 py-2.5">
+          <p className="text-xs text-amber">{warning.message}</p>
           <button
             type="button"
             onClick={() => void submit(true)}
             disabled={saving}
-            className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            className="mt-2 rounded-lg bg-amber px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {saving ? 'Confirmando...' : 'Confirmar de todas formas'}
           </button>
@@ -164,7 +164,7 @@ export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onC
 
       {/* Error */}
       {error && (
-        <p className="mt-2 text-xs text-red-600" role="alert">{error}</p>
+        <p className="mt-2 text-xs text-red-ink" role="alert">{error}</p>
       )}
 
       {/* Acciones — ocultar si hay aviso pendiente */}
@@ -174,7 +174,7 @@ export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onC
             type="button"
             onClick={() => void submit(false)}
             disabled={saving || !date}
-            className="flex-1 rounded-lg bg-gray-900 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            className="flex-1 rounded-lg bg-ink py-2.5 text-sm font-medium text-white disabled:opacity-50"
           >
             {saving ? 'Guardando...' : 'Confirmar'}
           </button>
@@ -182,7 +182,7 @@ export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onC
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="rounded-lg border border-gray-200 px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-lg border border-line px-4 py-2.5 text-sm text-ink-2 hover:bg-canvas disabled:opacity-50"
           >
             Cancelar
           </button>
@@ -194,7 +194,7 @@ export default function QuickDayOff({ staffId, staffName, timezone, onSaved, onC
         <button
           type="button"
           onClick={onCancel}
-          className="mt-2 w-full rounded-lg border border-gray-200 py-2 text-sm text-gray-500 hover:bg-gray-50"
+          className="mt-2 w-full rounded-lg border border-line py-2 text-sm text-faint hover:bg-canvas"
         >
           Cancelar
         </button>

@@ -121,9 +121,9 @@ export default function BusinessHoursPanel() {
 
   if (loading) {
     return (
-      <div className="rounded-lg border border-gray-200 px-4 py-3">
-        <p className="text-xs font-medium text-gray-500">Horario del negocio</p>
-        <p className="mt-2 text-xs text-gray-400">Cargando...</p>
+      <div className="rounded-lg border border-line px-4 py-3">
+        <p className="text-xs font-medium text-faint">Horario del negocio</p>
+        <p className="mt-2 text-xs text-faint">Cargando...</p>
       </div>
     );
   }
@@ -131,11 +131,11 @@ export default function BusinessHoursPanel() {
   if (!days) return null;
 
   return (
-    <div className="rounded-lg border border-gray-200 px-4 py-3">
-      <p className="text-xs font-medium text-gray-500">Horario del negocio</p>
+    <div className="rounded-lg border border-line px-4 py-3">
+      <p className="text-xs font-medium text-faint">Horario del negocio</p>
 
       {/* Texto que comunica la semántica: esto es "de cara al público" */}
-      <p className="mt-1 text-xs leading-relaxed text-gray-400">
+      <p className="mt-1 text-xs leading-relaxed text-faint">
         Este es el horario que ven tus clientes en tu página y el que usa el asistente para
         saber cuándo estás abierto. Para controlar en qué horarios se pueden agendar citas,
         ajusta la disponibilidad de cada barbero.
@@ -148,7 +148,7 @@ export default function BusinessHoursPanel() {
             <div
               key={key}
               className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
-                d.open ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'
+                d.open ? 'border-line bg-white' : 'border-line bg-canvas'
               }`}
             >
               {/* Toggle abierto/cerrado */}
@@ -160,7 +160,7 @@ export default function BusinessHoursPanel() {
                 aria-checked={d.open}
                 aria-label={`${label}: ${d.open ? 'abierto' : 'cerrado'}`}
                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
-                  d.open ? 'bg-gray-800' : 'bg-gray-200'
+                  d.open ? 'bg-ink' : 'bg-line-2'
                 }`}
               >
                 <span
@@ -171,7 +171,7 @@ export default function BusinessHoursPanel() {
               </button>
 
               {/* Nombre del día */}
-              <span className={`w-20 shrink-0 text-xs font-medium ${d.open ? 'text-gray-800' : 'text-gray-400'}`}>
+              <span className={`w-20 shrink-0 text-xs font-medium ${d.open ? 'text-ink' : 'text-faint'}`}>
                 {label}
               </span>
 
@@ -183,38 +183,38 @@ export default function BusinessHoursPanel() {
                     value={d.start}
                     onChange={(e) => setTime(key, 'start', e.target.value)}
                     disabled={saving}
-                    className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-800 focus:border-gray-500 focus:outline-none disabled:opacity-50"
+                    className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink focus:border-teal-border focus:outline-none disabled:opacity-50"
                   />
-                  <span className="shrink-0 text-xs text-gray-400">–</span>
+                  <span className="shrink-0 text-xs text-faint">–</span>
                   <input
                     type="time"
                     value={d.end}
                     onChange={(e) => setTime(key, 'end', e.target.value)}
                     disabled={saving}
-                    className="min-w-0 flex-1 rounded border border-gray-200 px-1.5 py-1 text-xs tabular-nums text-gray-800 focus:border-gray-500 focus:outline-none disabled:opacity-50"
+                    className="min-w-0 flex-1 rounded border border-line px-1.5 py-1 text-xs tabular-nums text-ink focus:border-teal-border focus:outline-none disabled:opacity-50"
                   />
                 </div>
               ) : (
-                <span className="flex-1 text-xs text-gray-300">Cerrado</span>
+                <span className="flex-1 text-xs text-faint">Cerrado</span>
               )}
             </div>
           );
         })}
       </div>
 
-      {error && <p className="mt-2 text-xs text-red-600" role="alert">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-ink" role="alert">{error}</p>}
 
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-40"
+          className="rounded-lg bg-ink px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-40"
         >
           {saving ? '…' : 'Guardar horario'}
         </button>
         {saveMsg && (
-          <span className={`text-xs ${saveMsg === 'Guardado' ? 'text-green-600' : 'text-red-500'}`}>
+          <span className={`text-xs ${saveMsg === 'Guardado' ? 'text-teal-ink' : 'text-red-ink'}`}>
             {saveMsg}
           </span>
         )}

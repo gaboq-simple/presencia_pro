@@ -22,26 +22,33 @@ type TierConfig = {
   bg: string;
   border: string;
   badge: string;
+  /** Punto del sistema: reemplaza al emoji (⚠️ 🔴 🚨) del label. Un emoji se rinde
+   *  distinto en cada plataforma y grita más fuerte que el dato que acompaña; el
+   *  punto usa el MISMO token que el resto de la vista y jerarquiza igual. */
+  dot: string;
 };
 
 const TIER_CONFIG: Record<InactiveClientTier, TierConfig> = {
   por_vencer: {
-    label:  '⚠️ Por vencer',
-    bg:     'bg-yellow-50',
-    border: 'border-yellow-200',
-    badge:  'bg-yellow-100 text-yellow-800',
+    label:  'Por vencer',
+    bg:     'bg-amber-tint',
+    border: 'border-amber-border',
+    badge:  'bg-amber-tint text-amber',
+    dot:    'bg-amber-border',
   },
   inactivo: {
-    label:  '🔴 Inactivos',
-    bg:     'bg-orange-50',
-    border: 'border-orange-200',
-    badge:  'bg-orange-100 text-orange-800',
+    label:  'Inactivos',
+    bg:     'bg-amber-tint',
+    border: 'border-amber-border',
+    badge:  'bg-amber-tint text-amber',
+    dot:    'bg-amber',
   },
   en_riesgo: {
-    label:  '🚨 En riesgo',
-    bg:     'bg-red-50',
-    border: 'border-red-200',
-    badge:  'bg-red-100 text-red-800',
+    label:  'En riesgo',
+    bg:     'bg-red-tint',
+    border: 'border-red-border',
+    badge:  'bg-red-tint text-red-ink',
+    dot:    'bg-red-ink',
   },
 };
 
@@ -96,29 +103,29 @@ function ReactivationModal({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="w-full max-w-md rounded-xl bg-white px-5 py-5 shadow-xl">
-        <h3 className="text-sm font-semibold text-gray-900">
+        <h3 className="text-sm font-semibold text-ink">
           Recordatorio para {modal.client.name}
         </h3>
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-1 text-xs text-faint">
           El mensaje se enviará por WhatsApp. Puedes editarlo antes de enviar.
         </p>
 
         <textarea
-          className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-gray-500 focus:outline-none"
+          className="mt-3 w-full rounded-lg border border-line-2 px-3 py-2 text-sm text-ink focus:border-teal-border focus:outline-none"
           rows={4}
           maxLength={300}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           disabled={sending || sent}
         />
-        <p className="mt-1 text-right text-xs text-gray-400">
+        <p className="mt-1 text-right text-xs text-faint">
           {message.length}/300
         </p>
 
         <div className="mt-4 flex gap-2">
           <button
             onClick={onClose}
-            className="flex-1 rounded-lg border border-gray-200 py-2 text-sm text-gray-600 hover:bg-gray-50"
+            className="flex-1 rounded-lg border border-line py-2 text-sm text-ink-2 hover:bg-canvas"
           >
             Cancelar
           </button>
@@ -127,11 +134,11 @@ function ReactivationModal({
             disabled={sending || sent || message.trim().length === 0}
             className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
               sent
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50'
+                ? 'bg-teal-border text-white'
+                : 'bg-ink text-white hover:opacity-90 disabled:opacity-50'
             }`}
           >
-            {sent ? '✓ Enviado' : sending ? 'Enviando…' : 'Enviar'}
+            {sent ? 'Enviado' : sending ? 'Enviando…' : 'Enviar'}
           </button>
         </div>
       </div>
@@ -158,7 +165,7 @@ function ClientCard({
         <div className="min-w-0 flex-1">
           {/* Nombre + días */}
           <div className="flex items-center gap-2">
-            <p className="truncate text-sm font-semibold text-gray-900">
+            <p className="truncate text-sm font-semibold text-ink">
               {client.name}
             </p>
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${tier.badge}`}>
@@ -168,7 +175,7 @@ function ClientCard({
 
           {/* Último servicio */}
           {(client.last_service || client.last_staff) && (
-            <p className="mt-0.5 text-xs text-gray-500">
+            <p className="mt-0.5 text-xs text-faint">
               {[client.last_service, client.last_staff && `con ${client.last_staff}`]
                 .filter(Boolean)
                 .join(' ')}
@@ -176,7 +183,7 @@ function ClientCard({
           )}
 
           {/* Visitas totales */}
-          <p className="mt-0.5 text-xs text-gray-400">
+          <p className="mt-0.5 text-xs text-faint">
             {client.visit_count}{' '}
             {client.visit_count === 1 ? 'visita total' : 'visitas totales'}
           </p>
@@ -185,7 +192,7 @@ function ClientCard({
         {/* Botón recordatorio */}
         <button
           onClick={() => onReminder(client)}
-          className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          className="shrink-0 rounded-lg border border-line-2 bg-white px-3 py-1.5 text-xs font-medium text-ink-2 hover:bg-canvas"
         >
           Recordatorio
         </button>
@@ -211,16 +218,17 @@ function TierSection({
   if (clients.length === 0) return null;
 
   return (
-    <details open={tier === 'por_vencer'} className="rounded-lg border border-gray-200">
-      <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 hover:bg-gray-50">
-        <span className="text-sm font-medium text-gray-800">
+    <details open={tier === 'por_vencer'} className="rounded-lg border border-line">
+      <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 hover:bg-canvas">
+        <span className="flex items-center gap-2 text-sm font-medium text-ink">
+          <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${config.dot}`} aria-hidden />
           {config.label}
         </span>
         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${config.badge}`}>
           {clients.length}
         </span>
       </summary>
-      <div className="space-y-2 border-t border-gray-200 px-4 py-3">
+      <div className="space-y-2 border-t border-line px-4 py-3">
         {clients.map((c) => (
           <ClientCard
             key={c.customer_id}
@@ -296,20 +304,20 @@ export default function InactiveClientsPanel({ businessName }: Props) {
 
   return (
     <>
-      <div className="rounded-lg border border-gray-200 px-4 py-3">
-        <p className="text-xs font-medium text-gray-500">Clientes inactivos</p>
+      <div className="rounded-lg border border-line px-4 py-3">
+        <p className="text-xs font-medium text-faint">Clientes inactivos</p>
 
         <div className="mt-3">
           {loading && (
-            <p className="text-xs text-gray-400">Cargando...</p>
+            <p className="text-xs text-faint">Cargando...</p>
           )}
 
           {error && (
-            <p className="text-xs text-red-500">{error}</p>
+            <p className="text-xs text-red-ink">{error}</p>
           )}
 
           {!loading && !error && clients?.length === 0 && (
-            <p className="text-xs text-gray-400">✓ Sin clientes inactivos por ahora</p>
+            <p className="text-xs text-faint">Sin clientes inactivos por ahora</p>
           )}
 
           {!loading && !error && clients && clients.length > 0 && (
