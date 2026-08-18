@@ -34,9 +34,11 @@ Si Gabriel pide algo claramente fuera del sprint (ej: "ayúdame a entender X con
 
 ---
 
-## Database Schema (as of 2026-05-20)
+## Database Schema (verificado contra la BD 2026-08-18)
 
 Schema del proyecto **presenciapro / apps/lifestyle**. Todas las tablas están en `public`, todas tienen RLS habilitado.
+
+**21 tablas.** Las que este documento detalla abajo son las del flujo principal; las de dinero, auditoría y compliance se resumen en «Tablas que este documento no detalla» al final de la sección. Si una columna no aparece acá, la fuente es la BD (o `apps/lifestyle/supabase/migrations/` + `supabase/migrations/`), no este archivo.
 
 ### Tabla: `businesses`
 Negocio raíz del tenant. Un registro = una barbería/salón.
@@ -66,13 +68,20 @@ Negocio raíz del tenant. Un registro = una barbería/salón.
 | review_url | text nullable | Google Reviews u otra plataforma |
 | review_requests_enabled | bool | default false |
 | whatsapp_message | text nullable | |
-| access_token | text nullable UNIQUE | token del dueño → /dashboard?token=XXX (32 chars hex) |
-| assistant_token | text nullable UNIQUE | token del asistente (32 chars hex) |
+| access_token | text nullable UNIQUE | **COLUMNA MUERTA.** Era el token del dueño (`/dashboard?token=…`); retirado en PR #122 — el dueño entra por email (Supabase Auth). Ninguna ruta la lee |
+| assistant_token | text nullable UNIQUE | **COLUMNA MUERTA.** Era el token del asistente; retirado en PR #116 — el asistente entra por PIN. Ninguna ruta la lee |
 | onboarding_data | jsonb nullable | datos de onboarding fase 2 |
 | instagram_url, tiktok_url | text nullable | |
 | max_late_minutes | int | default 15; CHECK 0-30. Máx tolerancia de retraso que acepta el negocio. 0 = sin tolerancia |
 | auto_cancel_after_minutes | int | default 20; CHECK > 0. Minutos desde starts_at para auto-cancelar si no llega el cliente |
 | max_noshows_before_flag | int | default 3. Umbral de no-shows para marcar al cliente como `is_flagged` |
+| attributes | jsonb | default `{}` |
+| map_url | text nullable | |
+| max_appointments_per_staff_per_day | int | default 20. Tope suave del alta manual por barbero (migración 044) |
+| require_customer_phone | bool | default false. Si TRUE, toda alta manual exige teléfono del cliente |
+| caja_fondo | numeric | default 0. Fondo de cambio — sin él el descuadre de efectivo carga un offset sistemático (D1) |
+| owner_last_seen_at | timestamptz nullable | Último ingreso del dueño. Instrumenta el riesgo terminal ("dejó de abrir la app"), señal 4 del digest (D7) |
+| organization_id | uuid nullable | Residuo del flujo de organización retirado (PR #152). Sin uso |
 
 ### Tabla: `staff`
 Empleados del negocio (admin, barber, assistant).
@@ -87,6 +96,7 @@ Empleados del negocio (admin, barber, assistant).
 | active | bool | default true |
 | photo_url | text nullable | |
 | pin | char(4) nullable | dígitos, UNIQUE por negocio (convención) |
+| compensation_model | text nullable | CHECK: comision / renta / sueldo. **Sin UI y NULL en todos los registros** — es la base que "la raya" (liquidación por barbero) va a necesitar, sembrada desde D1 para no pagar una migración después |
 
 ### Tabla: `services`
 Catálogo de servicios ofrecidos por el negocio.
@@ -150,6 +160,11 @@ Citas agendadas (bot, manual, walk-in).
 | adjusted_starts_at | timestamptz nullable | Nueva hora acordada si el cliente reportó retraso. NULL si llegó a tiempo |
 | delay_reported_minutes | int nullable | Minutos de retraso reportados por el cliente vía bot |
 | late_arrival_acknowledged | bool | default false. TRUE cuando el bot procesó el retraso para esta cita |
+| allow_overlap | bool | default false. TRUE = solape que la recepción forzó a conciencia; exenta del constraint anti-solape |
+| price_charged | numeric nullable | Precio SELLADO al completar. Lo rellena el trigger `seal_appointment_price` SOLO si está NULL; si una persona tecleó un monto, ese manda (migración 049 + D2) |
+| payment_method | text nullable | Riel del cobro. CHECK: efectivo / tarjeta / transferencia. Default de la app `'efectivo'` — nunca NULL en filas nuevas, por construcción (D2) |
+| arrived_at | timestamptz nullable | Llegada del cliente ("ya está acá"). Atributo, no status |
+| completed_at | timestamptz nullable | Instante REAL del cierre. Es la ATRIBUCIÓN del dinero: una cita de ayer cobrada hoy es de hoy (D6) |
 
 ### Tabla: `staff_availability`
 Horario semanal recurrente de cada barbero.
@@ -272,8 +287,23 @@ Trazabilidad de transiciones del FSM: estado, evento, modelo, tokens, errores.
 
 > Escrita por el handler (best-effort, try/catch). La tabla **ya existe** en la BD.
 
+### Tablas que este documento no detalla
+
+Existen, tienen RLS y son parte del sistema; su forma vive en sus migraciones y su
+razón en los planes. Se listan acá para que nadie concluya que no existen.
+
+| Tabla | Qué es | Dónde está su razón |
+|---|---|---|
+| `caja_movimientos` | Dinero fuera de la agenda (walk-in sin cita, producto, salidas). **Append-only por trigger**: sin UPDATE ni DELETE; anular es una contraentrada (`reverses_id`, UNIQUE). Riel NOT NULL. RLS deny-all | `docs/planes/capa-de-dinero.md` (D4) |
+| `caja_cortes` | El corte del día a ciegas: dos números contados a mano contra lo esperado. `cash_diff`/`card_diff` son **GENERATED** → es imposible guardar un descuadre que no derive de sus dos números. Append-only, RLS deny-all | idem (D5) |
+| `appointment_tips` | Propinas del barbero. **Tabla aparte y no una columna de `appointments`** a propósito: el Realtime del dueño emite la fila completa de `appointments`, así que una columna ahí le viajaría al browser. RLS deny-all; lint + repo-check rompen el build ante cualquier referencia fuera del módulo barbero | rediseño barbero, Paso 7 |
+| `appointment_audit` | Historial de cada cita (fila entera en JSONB), append-only por trigger, lectura solo admin/owner. **Deuda registrada:** guarda PII sin política de retención, y el trigger de inmutabilidad bloquea el DELETE incluso para `service_role` → la purga necesita un bypass controlado | SPRINT.md S6-SEC-01 |
+| `management_audit` | Quién cambió qué en la configuración (precios, horarios, staff). Alimenta la pestaña Actividad | SPRINT.md S6-SEC-01 |
+| `arco_requests` | Solicitudes ARCO del formulario público `/arco` (LFPDPPP Art. 22-25). Sin autenticación por diseño; rate limit 3/hora por teléfono | SPRINT.md S2-LEG-03 |
+| `organizations` | Residuo del flujo multi-sucursal retirado (PR #152). 0 filas, sin código que la lea | — |
+
 ### Nota
-- **`organizations`**: mencionada en SPRINT.md S1-SEC-04 (RLS pendiente) pero **no existe en el schema actual**. Puede vivir en el proyecto Supabase de sellers-portal (compartido).
+- **`organizations`**: **la tabla SÍ existe** (8 columnas) y `businesses.organization_id` también. Lo que se retiró (PR #152) es el *flujo*: el token compartido de organización, la vista consolidada y las 14 ramas de organización en las rutas. Con 0 filas, no rompió nada. El borrado de la tabla y de la columna quedó para una migración aparte, todavía pendiente.
 
 ---
 
@@ -383,9 +413,20 @@ Desplegadas en Supabase. Ambas tienen `verify_jwt: false` (autenticadas por secr
 
 ---
 
-## Server Actions (`assistant-actions.ts`)
+## Server Actions
 
-Todas en `apps/lifestyle/src/app/staff/assistant-actions.ts`. Requieren sesión válida vía `requireAssistantSession()` (acepta roles: assistant, owner, admin, barber). Usan service_role_key — nunca exponer al cliente.
+Viven en **cinco** módulos, no en uno. La tabla de abajo detalla el más grande;
+los otros cuatro se listan acá para que no se los busque en el lugar equivocado:
+
+| Módulo | Qué contiene |
+|---|---|
+| `app/staff/assistant-actions.ts` | Las citas (20 actions) — la tabla de abajo |
+| `app/staff/actions.ts` | Vista del BARBERO (5): estado de su cita con cobro, propinas (`setAppointmentTip`, `refreshBarberWeekTipTotal`, gate barbero-only), llegada |
+| `app/staff/caja-actions.ts` | La caja (5): registrar movimiento, anular con contraentrada, leer el día, firmar el corte. Módulo propio porque la caja no es una cita |
+| `app/staff/cabos-actions.ts` | Cabos sueltos (1): resolver una cita pasada que nadie cerró, reusando los gates de las actions de citas |
+| `app/dashboard/actions.ts` | Vista del dueño (1) |
+
+Las de `assistant-actions.ts`. Requieren sesión válida vía `requireAssistantSession()` (acepta roles: assistant, owner, admin, barber). Usan service_role_key — nunca exponer al cliente.
 
 | Acción | Firma resumida | Descripción |
 |---|---|---|
@@ -430,7 +471,7 @@ Componentes principales del panel. Todos en `apps/lifestyle/src/components/`.
 ### Vista del asistente (`staff/`)
 | Componente | Descripción |
 |---|---|
-| `AssistantLayout.tsx` | Orquestador de la vista del asistente. Contiene: buscador de clientes, botón "+ Nueva cita", AvailabilityTimeline, AssistantUpcoming, AssistantDayTimeline. Polling cada 30s. Header con botón de chat (badge amarillo si hay convs. humanas). |
+| `AssistantLayout.tsx` | **Ya NO es la vista del asistente** (el asistente monta `AssistantControlDesk`, diseño congelado). Sobrevive como la vista del barbero en `/staff/gestion`. Contiene: buscador de clientes, botón "+ Nueva cita", AvailabilityTimeline, AssistantUpcoming, AssistantDayTimeline. Polling cada 30s. Header con botón de chat (badge amarillo si hay convs. humanas). |
 | `ConversationList.tsx` | Bottom sheet con lista de bot_conversations activas. Orden: human→paused→bot. Polling cada 10s. Click → abre ChatPanel en overlay. |
 | `ChatPanel.tsx` | Panel de chat 85vh. Header con modo + "Tomar control"/"Devolver al bot". Burbujas: cliente=izquierda/gris, bot=derecha/oscuro, staff=derecha/azul. Polling cada 5s. Input deshabilitado si modo≠human. |
 | `AvailabilityTimeline.tsx` | Grid horizontal staff×hora. Línea "ahora" en rojo. Slots clickables. |
@@ -441,7 +482,10 @@ Componentes principales del panel. Todos en `apps/lifestyle/src/components/`.
 ### Vista del admin (`admin/`)
 | Componente | Descripción |
 |---|---|
-| `DashboardLayout.tsx` | Vista lineal del admin: ingresos, BlockRequestsInbox, DashboardRealtimeProvider, MetricsSummary, StaffMetricsPanel, InactiveClientsPanel, WaitlistPanel, ReportsConfigPanel, ReviewConfigPanel, StaffManagementPanel, StaffPhotoManager. |
+| `OwnerTabs.tsx` | Shell de 4 pestañas del dueño: **Panorama · Clientela · Administrar · Actividad**. Es el nivel 1 de la vista; `DashboardLayout` ya no lo es. |
+| `NegocioView.tsx` | Pestaña **Panorama**: héroe de la semana cobrada, pulso de hoy, próximos 7 días, feed de rescate, fuga, y el BI histórico plegado. |
+| `AdministrarView.tsx` | Pestaña **Administrar** (dv3-4'): encabezado con la fecha → `DiaRail` (el día como riel de tiempo) → `EquipoSemana` → el bloque de configuración. |
+| `DashboardLayout.tsx` | **Ya NO es el shell del dashboard.** Desde dv3-4' es el bloque de CONFIGURACIÓN de la pestaña Administrar: cabos sueltos (D3), el cuadre (D5), la bandeja de solicitudes, y los paneles legacy detrás de 5 filas de `<details>`. |
 | `StaffManagementPanel.tsx` | Lista de staff con toggle activo/inactivo, editor de PIN, botón "Horario" → StaffScheduleEditor, "Día libre" → QuickDayOff. Modal con `overflow-y-auto max-h-[90vh]`. |
 | `StaffScheduleEditor.tsx` | Edita horario semanal recurrente. Toggle por día + inputs start/end + checkbox "Descanso" con break_start/break_end. Payload incluye breaks e is_active. Monta ScheduleExceptionsPanel debajo. |
 | `ScheduleExceptionsPanel.tsx` | Gestiona excepciones por fecha (días libres u horario especial). Lista futuras + formulario agregar (date + tipo + horas + razón) + botón eliminar. Usa server actions directamente. |
@@ -455,8 +499,8 @@ Componentes principales del panel. Todos en `apps/lifestyle/src/components/`.
 | Gap | Detalle |
 |---|---|
 | `waitlist.status = 'confirmed'` | Nunca se escribe en el código actual. El flow termina en 'notified'. Backlog pendiente |
-| Rate limiting de PIN | El límite de intentos de PIN es in-memory (Map en proceso Node.js). Se pierde en cada cold start. Sin persistencia en DB |
 | Despachador de notificaciones sin desplegar | `dispatch-lifestyle-notifications` no está desplegada (el proyecto tiene una sola edge function: `dispatch-auto-cancel`) y su schedule queda comentado hasta que lo esté. Los schedules SÍ están versionados desde D3. Tarea **S7-NOTIF-01**, disparador: antes del primer cliente real que agende por el bot |
 | `organizations` RLS | Mencionado en SPRINT.md S1-SEC-04. La tabla no existe en este proyecto; puede vivir en sellers-portal |
 | Consent LFPDPPP sin backfill | Las columnas existen (migración 037), pero los clientes anteriores a 2026-05-20 quedaron con `consent_at` NULL — sin backfill, por decisión explícita. Sigue sin publicarse el aviso de privacidad (SPRINT.md S2-LEG-01 ⚪ todo) al que apunta el bot |
-| Sin tests automatizados | No existen tests unitarios ni e2e para ninguna feature implementada |
+| Rate limiting sin cobertura de salida | Los límites que existen (`lib/rate-limit.ts`, Upstash Redis distribuido con fallback in-memory y política fail-open) son todos de ENTRADA: PIN 5/60s por IP, ARCO 3/hora por teléfono, bot 15/60s por cliente. **No hay ningún tope de frecuencia de ENVÍO por cliente** — nada impide mandarle a la misma persona varias reactivaciones el mismo día |
+| Sin cobertura de UI | La suite (`npm test`, 810 tests en 74 archivos) cubre los módulos PUROS: FSM del bot, cadencia, ocupación, corte, caja, riel del día, equipo de la semana. Lo que NO tiene test automatizado son los componentes y las rutas: se verifican por ruta real (dev server con `TZ=UTC`) y por la red de seguridad visual de cada paso |
