@@ -1,6 +1,8 @@
-// ─── Shell del dashboard del dueño — mapa A (4 pestañas) ───────────────────────
-// Client Component: barra inferior Panorama / Clientela / Administrar, con Actividad
+// ─── Shell del dashboard del dueño — 5 pestañas (dv3-6) ───────────────────────
+// Client Component: Panorama / Análisis / Clientela / Administrar, con Actividad
 // (el forense/audit) relegada a la derecha en gris — presente pero sin competir.
+// Análisis va en SEGUNDA posición: es la historia del negocio, y se lee después
+// del pulso, no antes. Los labels bajan a 10px para que las cinco quepan a 375px.
 // Las 5 pestañas planas viejas (Hoy/Negocio/Clientela/Gestión/Actividad) colapsan por
 // intención: Negocio+Hoy → Panorama (cómo va + rescate), Gestión → Administrar (+ panel
 // inline). Deep-link por hash (#panorama, #administrar…). Composición server→client.
@@ -10,9 +12,9 @@
 
 import { useEffect, useState } from 'react';
 
-type TabKey = 'panorama' | 'clientela' | 'administrar' | 'actividad';
+type TabKey = 'panorama' | 'analisis' | 'clientela' | 'administrar' | 'actividad';
 
-const TAB_KEYS: readonly TabKey[] = ['panorama', 'clientela', 'administrar', 'actividad'];
+const TAB_KEYS: readonly TabKey[] = ['panorama', 'analisis', 'clientela', 'administrar', 'actividad'];
 function tabFromHash(): TabKey | null {
   if (typeof window === 'undefined') return null;
   const h = window.location.hash.replace('#', '') as TabKey;
@@ -25,6 +27,13 @@ const TABS: Array<{ key: TabKey; label: string; icon: React.ReactElement }> = [
     label: 'Panorama',
     icon: (
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
+    ),
+  },
+  {
+    key: 'analisis',
+    label: 'Análisis',
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0 0 20.25 18V6A2.25 2.25 0 0 0 18 3.75H6A2.25 2.25 0 0 0 3.75 6v12A2.25 2.25 0 0 0 6 20.25Z" />
     ),
   },
   {
@@ -52,11 +61,13 @@ const TABS: Array<{ key: TabKey; label: string; icon: React.ReactElement }> = [
 
 export default function OwnerTabs({
   panorama,
+  analisis,
   clientela,
   administrar,
   actividad,
 }: {
   panorama: React.ReactNode;
+  analisis: React.ReactNode;
   clientela: React.ReactNode;
   administrar: React.ReactNode;
   actividad: React.ReactNode;
@@ -88,7 +99,8 @@ export default function OwnerTabs({
     <div className="min-h-screen bg-canvas pb-20">
       {/* Contenido de la pestaña activa (mapa A). */}
       <div>
-        {active === 'clientela' ? clientela
+        {active === 'analisis' ? analisis
+          : active === 'clientela' ? clientela
           : active === 'administrar' ? administrar
           : active === 'actividad' ? actividad
           : panorama}
@@ -114,10 +126,10 @@ export default function OwnerTabs({
                   type="button"
                   onClick={() => selectTab(t.key)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`flex w-full flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${color}`}
+                  className={`flex w-full flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors ${color}`}
                 >
                   <svg
-                    className="h-6 w-6"
+                    className="h-[22px] w-[22px]"
                     fill="none"
                     viewBox="0 0 24 24"
                     strokeWidth={isActive && !relegated ? 2 : 1.5}

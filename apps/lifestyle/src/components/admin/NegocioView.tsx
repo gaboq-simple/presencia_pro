@@ -341,49 +341,9 @@ export default function NegocioView({ revenue, occupancy, barberos, pulso, seman
            no reproche. Ámbar tenue, nunca rojo. ── */}
       <Fuga data={fuga} />
 
-      {/* ── BI histórico — plegado abajo: el "cómo viene el mes" no compite con el hoy. ── */}
-      <details className="group mt-6">
-        <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl bg-card px-4 py-3 shadow-card marker:content-none">
-          <span className="text-xs font-medium uppercase tracking-wide text-faint">La historia · ingresos, ocupación y barberos</span>
-          <span className="text-faint transition-transform group-open:rotate-90" aria-hidden="true">›</span>
-        </summary>
-
-      {/* ── Ingresos (héroe) ── */}
-      <section className="mt-2 rounded-xl bg-card p-4 shadow-card">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wide text-faint">Ingresos de agenda · este mes</p>
-          <span className="rounded-full border border-line-2 px-2 py-0.5 text-[11px] text-faint">estimado</span>
-        </div>
-
-        {hasAnyRevenue ? (
-          <>
-            <p className="mt-2 text-4xl font-bold tabular-nums text-ink">{money(thisMonth)}</p>
-            {comparison
-              ? <Comparison c={comparison} />
-              : <p className="mt-2 text-sm text-faint">Aún no hay un mes anterior con ingresos para comparar.</p>}
-            <MonthlyBars months={months} />
-            <p className="mt-2 px-1 text-[11px] text-faint">
-              Estimado sobre el precio de cada servicio al completarse. No incluye propinas ni productos.
-            </p>
-          </>
-        ) : (
-          // Degradado: negocio nuevo sin ingresos aún — digno, no seis ceros.
-          <div className="mt-3 rounded-xl border border-dashed border-line-2 bg-card px-4 py-8 text-center">
-            <p className="text-sm font-medium text-ink">Aún juntando historia de ingresos</p>
-            <p className="mt-1 text-sm text-ink-2">
-              Cuando completes tus primeras citas, aquí verás cuánto llevas este mes y cómo se
-              compara con el anterior.
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* ── Ocupación (PR-Neg-2) ── */}
-      <OcupacionBlock occ={occupancy} />
-
-      {/* ── Barberos · recompra de héroe (PR-Neg-3) ── */}
-      <BarberosBlock data={barberos} />
-      </details>
+      {/* El BI histórico se mudó a la pestaña "Análisis" (dv3-6): meses, semana
+           típica y recompra son la HISTORIA del negocio, y competían con el pulso
+           aunque estuvieran plegados. Sus tres módulos de datos siguen intactos. */}
     </div>
   );
 }

@@ -52,6 +52,8 @@ import { getFuga } from '@/lib/fugaData';
 import { getEquipoSemana } from '@/lib/equipoSemanaData';
 import { getDiaRail } from '@/lib/diaRailData';
 import { getAtencionCount } from '@/lib/atencionCount';
+import { getAnalisis } from '@/lib/analisisData';
+import AnalisisView from '@/components/admin/AnalisisView';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -240,6 +242,10 @@ export default async function DashboardPage({
   //     distintos para el mismo árbol.
   const diaRail = await getDiaRail(appointments, staffList, date, timezone);
 
+  // 12. Análisis (dv3-6): las dos lecturas nuevas de la pestaña. Los otros tres
+  //     bloques reusan negocioRevenue / negocioOccupancy / negocioStaff, ya cargados.
+  const analisis = await getAnalisis(businessId, timezone);
+
   const dashboardPanel = (
     <DashboardLayout
       businessName={businessName}
@@ -268,6 +274,14 @@ export default async function DashboardPage({
           contactados={contactados}
           fuga={fuga}
           semanaHero={semanaHero}
+        />
+      }
+      analisis={
+        <AnalisisView
+          revenue={negocioRevenue}
+          occupancy={negocioOccupancy}
+          barberos={negocioStaff}
+          analisis={analisis}
         />
       }
       clientela={<ClientelaView stats={clientelaStats} />}
