@@ -1,8 +1,13 @@
-// ─── Panel de administración inline (Negocio · Paso 3) ────────────────────────
-// El atajo a lo más tocado, SIN salir del dashboard. Tabs Servicios / Equipo /
-// Horarios que cambian el contenido inline. NO reemplaza la pestaña "Gestión" (el
-// lugar completo): cada tab enlaza a Gestión para lo que no es "cambio rápido"
-// (crear servicio, alta de barbero + PIN, config fina).
+// ─── Cambios rápidos de administración (Negocio · Paso 3 · dv3-4') ────────────
+// El atajo a lo más tocado, SIN salir del dashboard: precio de un servicio,
+// activar/desactivar, día libre, horario del negocio.
+//
+// dv3-4': el shell de TABS se retiró. Los tres cuerpos (Servicios / Equipo /
+// Horarios) se exportan sueltos y viven ahora como el arranque de las tres
+// primeras filas de disclosure de "Administrar", con el panel completo debajo de
+// cada uno. Es lo que el paso pide con "AdminInlinePanel se integra a los
+// disclosures": el cambio rápido y su versión completa dejan de estar en dos
+// lugares distintos de la misma pantalla.
 //
 // 🔴 Reusa el CRUD existente por fetch a los MISMOS endpoints — la doble
 //    invalidación de cache (invalidateBusinessCache + revalidateTag) y el
@@ -14,8 +19,6 @@
 
 import { useEffect, useState } from 'react';
 import type { AdminServiceRow, AdminStaffManagementRow } from '@/lib/dashboard.types';
-
-type TabKey = 'servicios' | 'equipo' | 'horarios';
 
 const money = (n: number, currency = 'MXN'): string =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
@@ -39,17 +42,19 @@ function Toggle({ on, disabled, onClick, label }: { on: boolean; disabled?: bool
 }
 
 function GestionLink({ children }: { children: React.ReactNode }): React.ReactElement {
-  // La gestión completa vive JUSTO ABAJO, en la misma pestaña "Administrar" → ancla
-  // que hace scroll a #gestion-completa (no cambia de pestaña; es la misma vista).
+  // dv3-4': el panel completo ya no está "abajo" — está en ESTA misma fila de
+  // configuración, unas líneas más abajo. El enlace deja de navegar y pasa a ser
+  // la pista de dónde seguir; se mantiene el texto porque nombra exactamente lo
+  // que el cambio rápido NO hace (crear, dar de alta, horario por barbero).
   return (
-    <a href="#gestion-completa" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-teal-ink hover:underline">
-      {children} <span aria-hidden="true">→</span>
-    </a>
+    <span className="text-[13px] font-medium text-faint">
+      {children} <span aria-hidden="true">↓</span>
+    </span>
   );
 }
 
 // ── Servicios ─────────────────────────────────────────────────────────────────
-function ServiciosTab({ initial }: { initial: AdminServiceRow[] }): React.ReactElement {
+export function ServiciosTab({ initial }: { initial: AdminServiceRow[] }): React.ReactElement {
   const [rows, setRows] = useState<AdminServiceRow[]>(initial);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -119,13 +124,13 @@ function ServiciosTab({ initial }: { initial: AdminServiceRow[] }): React.ReactE
           </li>
         ))}
       </ul>
-      <GestionLink>Agregar servicio nuevo</GestionLink>
+      <p className="mt-3"><GestionLink>Agregar servicio nuevo</GestionLink></p>
     </div>
   );
 }
 
 // ── Equipo ────────────────────────────────────────────────────────────────────
-function EquipoTab({ initial }: { initial: AdminStaffManagementRow[] }): React.ReactElement {
+export function EquipoTab({ initial }: { initial: AdminStaffManagementRow[] }): React.ReactElement {
   const [rows, setRows] = useState<AdminStaffManagementRow[]>(initial);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dayOffId, setDayOffId] = useState<string | null>(null);
@@ -206,7 +211,7 @@ function EquipoTab({ initial }: { initial: AdminStaffManagementRow[] }): React.R
           </li>
         ))}
       </ul>
-      <GestionLink>Alta de barbero, PIN y servicios</GestionLink>
+      <p className="mt-3"><GestionLink>Alta de barbero, PIN y servicios</GestionLink></p>
     </div>
   );
 }
@@ -215,7 +220,7 @@ function EquipoTab({ initial }: { initial: AdminStaffManagementRow[] }): React.R
 type OfficeHours = Record<string, { start: string; end: string } | null>;
 const DOW = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-function HorariosTab(): React.ReactElement {
+export function HorariosTab(): React.ReactElement {
   const [hours, setHours] = useState<OfficeHours | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -297,45 +302,5 @@ function HorariosTab(): React.ReactElement {
         <GestionLink>Horario por barbero</GestionLink>
       </div>
     </div>
-  );
-}
-
-// ── Shell del panel con tabs ──────────────────────────────────────────────────
-const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: 'servicios', label: 'Servicios' },
-  { key: 'equipo', label: 'Equipo' },
-  { key: 'horarios', label: 'Horarios' },
-];
-
-export default function AdminInlinePanel({ services, staff }: { services: AdminServiceRow[]; staff: AdminStaffManagementRow[] }): React.ReactElement {
-  const [tab, setTab] = useState<TabKey>('servicios');
-
-  return (
-    <section className="mt-6 rounded-xl bg-card p-4 shadow-card">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-faint">Administración rápida</p>
-      </div>
-
-      {/* Tabs internos (cambian el contenido inline, sin navegar) */}
-      <div className="mt-2 inline-flex rounded-lg border border-line bg-canvas p-0.5">
-        {TABS.map((t) => (
-          <button key={t.key} type="button" onClick={() => setTab(t.key)}
-            aria-current={tab === t.key ? 'true' : undefined}
-            className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${tab === t.key ? 'bg-card text-ink shadow-card' : 'text-faint hover:text-ink-2'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-3">
-        {tab === 'servicios' && <ServiciosTab initial={services} />}
-        {tab === 'equipo' && <EquipoTab initial={staff} />}
-        {tab === 'horarios' && <HorariosTab />}
-      </div>
-
-      <p className="mt-3 border-t border-line pt-2 text-[11px] text-faint">
-        Cambios rápidos. Para lo completo (crear, dar de alta, config), ve a {String.fromCharCode(0x201C)}Administrar{String.fromCharCode(0x201D)} abajo.
-      </p>
-    </section>
   );
 }

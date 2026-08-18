@@ -1,28 +1,34 @@
-// ─── DashboardLayout ──────────────────────────────────────────────────────────
-// Server Component — shell estructural del dashboard admin.
+// ─── DashboardLayout — el bloque de CONFIGURACIÓN de Administrar (dv3-4') ────
+// Server Component. Antes era el shell entero del dashboard admin (header, nav
+// de días, ingresos, métricas, agenda, y ocho paneles apilados). El Paso 4 del
+// rediseño le saca el nivel 1 y lo deja en lo que de verdad es: el lugar donde
+// se CONFIGURA el negocio.
 //
-// Responsabilidades:
-//   - Header: nombre del negocio + badge de solicitudes pendientes + nav días
-//   - Sección principal: BlockRequestsInbox + DashboardRealtimeProvider
-//   - Sección inferior: MetricsSummary con selector de período
+// Qué se fue y a dónde:
+//   · header + nav de días + "Ingresos de agenda del día" → `AdministrarView`
+//     (el encabezado y el héroe de la pestaña).
+//   · agenda del día (`DashboardRealtimeProvider`: DayTimeline +
+//     StaffAvailability) → `DiaRail`, que dice lo mismo como riel de tiempo.
+//   · `StaffMetricsPanel` (7 tarjetas × 6 tiles) → `EquipoSemana` (5 filas).
+//   · `MetricsSummary` — y con él `HourlyPeaksChart`, `SourceBreakdown`,
+//     `NoShowByDayChart` y `TopClientsCard` — deja de montarse: la mitad de sus
+//     tiles vivía en cero, el día ya está en el héroe, y el canal se replantea
+//     en la pestaña "Análisis" (Paso 6). Los componentes NO se borran.
 //
-// NO fetcha datos propios — recibe todo del page.tsx.
+// Qué se quedó y por qué: lo pasado sin resolver (D3) y el cuadre (D5) son del
+// DÍA y viven arriba de la configuración; la bandeja de solicitudes es una cola
+// de acciones, no un ajuste. Todo lo demás baja a cinco filas de disclosure.
+//
+// **Los paneles legacy no se tocan por dentro** (eso es el Paso 5): cambian de
+// envoltorio, no de comportamiento. El CRUD, sus endpoints, el `management_audit`
+// y la doble invalidación de cache siguen exactamente donde estaban.
 
-import Link from 'next/link';
 import type {
-  DashboardAppointment,
-  DashboardStaff,
-  DayRevenue,
   BlockRequestWithStaff,
   AdminStaffPhotoRow,
   AdminStaffManagementRow,
   AdminServiceRow,
 } from '@/lib/dashboard.types';
-import { toDateStr } from '@/lib/dashboard.types';
-import { isTodayInTz, todayStrInTz } from '@/lib/dayWindow';
-import DashboardRealtimeProvider from './DashboardRealtimeProvider';
-import MetricsSummary from './MetricsSummary';
-import StaffMetricsPanel from './StaffMetricsPanel';
 import BlockRequestsInbox from './BlockRequestsInbox';
 import CorteResumen, { type CorteParaDueno } from './CorteResumen';
 import StaffPhotoManager from './StaffPhotoManager';
@@ -33,18 +39,14 @@ import ReportsConfigPanel  from './ReportsConfigPanel';
 import ReviewConfigPanel   from './ReviewConfigPanel';
 import BusinessHoursPanel  from './BusinessHoursPanel';
 import WaitlistPanel       from './WaitlistPanel';
+import { ServiciosTab, EquipoTab, HorariosTab } from './AdminInlinePanel';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 type Props = {
-  businessId: string;
   businessName: string;
-  date: string;                          // 'YYYY-MM-DD'
-  /** IANA del negocio — el "hoy" de "Ir a hoy" es el hoy LOCAL, no el día UTC. */
+  /** IANA del negocio — baja a StaffManagementPanel para los horarios. */
   timezone: string;
-  appointments: DashboardAppointment[];
-  staffList: DashboardStaff[];
-  dayRevenue: DayRevenue;
   pendingBlockRequests: BlockRequestWithStaff[];
   staffForPhotos: AdminStaffPhotoRow[];
   staffForManagement: AdminStaffManagementRow[];
@@ -57,44 +59,43 @@ type Props = {
   cortes: CorteParaDueno[];
   /** Hoy en la tz del NEGOCIO — para saber si el corte de hoy ya se hizo. */
   hoyLocal: string;
+  /** Clientes inactivos + gente en lista de espera — el badge de esa fila. */
+  atencionCount: number;
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Fila de disclosure ───────────────────────────────────────────────────────
+// `<details>` nativo estilizado — la frontera del plan: nada de estado en React
+// para abrir y cerrar una fila. El badge es opcional y solo aparece cuando hay
+// algo que contar (un "0" ámbar sería una alarma de nada).
 
-function offsetDay(date: string, days: number): string {
-  const d = new Date(`${date}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return toDateStr(d);
-}
-
-function formatDateDisplay(date: string): string {
-  const d = new Date(`${date}T12:00:00`);
-  return d.toLocaleDateString('es-MX', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
-}
-
-function formatCurrency(amount: number, currency: string): string {
-  return new Intl.NumberFormat('es-MX', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+function FilaConfig({
+  titulo, badge, children,
+}: {
+  titulo: string;
+  badge?: number;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <details className="group border-t border-line first:border-t-0">
+      <summary className="flex min-h-[48px] cursor-pointer list-none items-center gap-2 py-3 marker:content-none">
+        <span className="flex-1 text-[15px] font-medium text-ink">{titulo}</span>
+        {badge !== undefined && badge > 0 && (
+          <span className="rounded-full bg-amber-tint px-2 py-0.5 text-[11px] font-medium tabular-nums text-amber">
+            {badge}
+          </span>
+        )}
+        <span className="text-faint transition-transform group-open:rotate-90" aria-hidden>›</span>
+      </summary>
+      <div className="pb-4">{children}</div>
+    </details>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DashboardLayout({
-  businessId,
   businessName,
-  date,
   timezone,
-  appointments,
-  staffList,
-  dayRevenue,
   pendingBlockRequests,
   staffForPhotos,
   staffForManagement,
@@ -102,214 +103,109 @@ export default function DashboardLayout({
   cabosCount,
   cortes,
   hoyLocal,
+  atencionCount,
 }: Props) {
-  const prevDate = offsetDay(date, -1);
-  const nextDate = offsetDay(date, +1);
-
-  const pendingCount  = pendingBlockRequests.length;
-  const hasUrgent     = pendingBlockRequests.some((r) => r.urgent);
+  const activeServices = servicesForManagement
+    .filter((s) => s.active)
+    .map((s) => ({ id: s.id, name: s.name, price: s.price, currency: s.currency }));
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="mx-auto max-w-2xl px-4 pb-8">
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-10 border-b border-gray-200 bg-white px-4 py-3">
-        <div className="mx-auto max-w-2xl">
-
-          {/* Negocio + badge solicitudes + link vista barbero */}
-          <div className="flex items-center justify-between">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="text-sm font-semibold text-gray-900 truncate">
-                {businessName}
-              </span>
-            </div>
-
-            <div className="ml-3 flex shrink-0 items-center gap-3">
-              {/* Badge de solicitudes pendientes */}
-              {pendingCount > 0 && (
-                <div className="relative" aria-label={`${pendingCount} solicitudes pendientes`}>
-                  {/* Icono campana */}
-                  <svg
-                    className="h-5 w-5 text-gray-500"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-                    />
-                  </svg>
-                  {/* Numero */}
-                  <span
-                    className={`absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white ${
-                      hasUrgent ? 'bg-red-600' : 'bg-gray-700'
-                    }`}
-                  >
-                    {pendingCount > 9 ? '9+' : pendingCount}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Navegación de días */}
-          <div className="mt-2 flex items-center gap-2">
-            <Link
-              href={`/dashboard?date=${prevDate}`}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-200 text-base text-gray-600 hover:bg-gray-50"
-              aria-label="Dia anterior"
-            >
-              ‹
-            </Link>
-            <div className="flex flex-1 flex-col items-center">
-              <span className="text-sm font-medium capitalize text-gray-800">
-                {formatDateDisplay(date)}
-              </span>
-              {!isTodayInTz(date, timezone) && (
-                <Link
-                  href={`/dashboard?date=${todayStrInTz(timezone)}`}
-                  className="mt-0.5 text-xs text-gray-400 underline hover:text-gray-600"
-                >
-                  Ir a hoy
-                </Link>
-              )}
-            </div>
-            <Link
-              href={`/dashboard?date=${nextDate}`}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-200 text-base text-gray-600 hover:bg-gray-50"
-              aria-label="Dia siguiente"
-            >
-              ›
-            </Link>
-          </div>
-
-        </div>
-      </header>
-
-      {/* ── Contenido principal ────────────────────────────────────────────── */}
-      <main className="mx-auto max-w-2xl space-y-4 px-4 py-4 pb-8">
-
-        {/* Ingresos del día — resumen rápido */}
-        <div className="rounded-lg border border-gray-200 px-4 py-3">
-          <p className="text-xs text-gray-500">Ingresos de agenda del día</p>
-          <p className="mt-0.5 text-2xl font-bold text-gray-900">
-            {formatCurrency(dayRevenue.total, dayRevenue.currency)}
+      {/* Cabos sueltos (D3) — lo pasado sin resolver se VE, nunca se absorbe en
+          un total: una cita sin cerrar no suma al ingreso ni cuenta como falta,
+          así que desaparecería del cuadre sin dejar rastro. Dato y nada más. */}
+      {cabosCount > 0 && (
+        <div className="mt-5 rounded-xl bg-card p-4 shadow-card">
+          <p className="text-[11px] font-semibold uppercase tracking-[.10em] text-faint">Sin cerrar</p>
+          <p className="mt-1 text-[15px] text-ink">
+            {cabosCount === 1
+              ? '1 cita pasada sigue sin resolver'
+              : `${cabosCount} citas pasadas siguen sin resolver`}
           </p>
-          <p className="mt-0.5 text-xs text-gray-500">
-            {dayRevenue.completedCount}{' '}
-            {dayRevenue.completedCount === 1 ? 'cita completada' : 'citas completadas'}
-          </p>
+          <p className="mt-0.5 text-[11px] text-faint">Últimos 14 días</p>
         </div>
+      )}
 
-        {/* Cabos sueltos (D3) — lo pasado sin resolver se VE, nunca se absorbe en
-            un total: una cita sin cerrar no suma al ingreso ni cuenta como falta,
-            así que desaparecería del cuadre sin dejar rastro. Dato y nada más. */}
-        {cabosCount > 0 && (
-          <div className="rounded-lg border border-gray-200 px-4 py-3">
-            <p className="text-xs text-gray-500">Sin cerrar</p>
-            <p className="mt-0.5 text-sm text-gray-900">
-              {cabosCount === 1
-                ? '1 cita pasada sigue sin resolver'
-                : `${cabosCount} citas pasadas siguen sin resolver`}
-            </p>
-            <p className="mt-0.5 text-xs text-gray-500">Últimos 14 días</p>
-          </div>
-        )}
-
-        {/* El cuadre (D5) — el corte del día con su descuadre CON SIGNO y la
-            serie de la semana. Solo lectura: el dueño no cuenta el cajón. */}
+      {/* El cuadre (D5) — el corte del día con su descuadre CON SIGNO y la
+          serie de la semana. Solo lectura: el dueño no cuenta el cajón. */}
+      <div className="mt-5">
         <CorteResumen cortes={cortes} hoy={hoyLocal} />
+      </div>
 
-        {/* Bandeja de solicitudes de bloqueo */}
+      {/* Bandeja de solicitudes de bloqueo — cola de acciones, no configuración */}
+      <div className="mt-5">
         <BlockRequestsInbox initialRequests={pendingBlockRequests} />
+      </div>
 
-        {/* Timeline del día + disponibilidad de barberos (con Realtime) */}
-        <DashboardRealtimeProvider
-          businessId={businessId}
-          date={date}
-          initialAppointments={appointments}
-          staffList={staffList}
-        />
-
-        {/* Métricas por período */}
-        <MetricsSummary
-          businessId={businessId}
-          date={date}
-          initialRevenue={dayRevenue}
-        />
-
-        {/* Rendimiento del equipo — métricas por barbero */}
-        <StaffMetricsPanel date={date} businessId={businessId} />
-
-        {/* Clientes inactivos — panel de seguimiento */}
-        <InactiveClientsPanel businessName={businessName} />
-
-        {/* Lista de espera */}
-        <WaitlistPanel />
-
-        {/* Horario del negocio — de cara al público (landing + away-message) */}
-        <BusinessHoursPanel />
-
-        {/* Configuración de reportes semanales */}
-        <ReportsConfigPanel />
-
-        {/* Configuración de reseñas automáticas */}
-        <ReviewConfigPanel />
-
-        {/* Catálogo de servicios — crear/editar/activar */}
-        <details className="rounded-lg border border-gray-200">
-          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-gray-900 hover:bg-gray-50">
-            Catálogo de servicios
-          </summary>
-          <div className="border-t border-gray-200 px-4 py-4">
+      {/* ── Configuración ─────────────────────────────────────────────────────
+          Cinco filas. Cada una arranca con el cambio rápido y sigue con el panel
+          completo, para que "editar el precio" y "crear un servicio" dejen de
+          vivir en dos cards distintas de la misma pantalla. */}
+      <section
+        id="gestion-completa"
+        className="mt-5 scroll-mt-4 rounded-xl bg-card px-4 shadow-card"
+      >
+        <FilaConfig titulo="Servicios y precios">
+          <ServiciosTab initial={servicesForManagement} />
+          <div className="mt-4 border-t border-line pt-4">
             <ServicesManagementPanel initialServices={servicesForManagement} />
           </div>
-        </details>
+        </FilaConfig>
 
-        {/* Gestión de staff — activo/inactivo + PIN */}
-        <details className="rounded-lg border border-gray-200">
-          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-gray-900 hover:bg-gray-50">
-            Gestión de staff
-          </summary>
-          <div className="border-t border-gray-200 px-4 py-4">
+        <FilaConfig titulo="Barberos, PIN y horarios">
+          <EquipoTab initial={staffForManagement} />
+          <div className="mt-4 border-t border-line pt-4">
             <StaffManagementPanel
               initialStaff={staffForManagement}
               timezone={timezone}
-              activeServices={servicesForManagement
-                .filter((s) => s.active)
-                .map((s) => ({ id: s.id, name: s.name, price: s.price, currency: s.currency }))}
+              activeServices={activeServices}
             />
           </div>
-        </details>
+          <details className="mt-4 border-t border-line pt-3">
+            <summary className="cursor-pointer select-none text-[13px] font-medium text-ink-2">
+              Fotos del equipo
+            </summary>
+            <div className="mt-3">
+              <StaffPhotoManager initialStaff={staffForPhotos} />
+            </div>
+          </details>
+        </FilaConfig>
 
-        {/* Fotos del equipo — sección colapsable, solo admin */}
-        <details className="rounded-lg border border-gray-200">
-          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-gray-900 hover:bg-gray-50">
-            Fotos del equipo
-          </summary>
-          <div className="border-t border-gray-200 px-4 py-4">
-            <StaffPhotoManager initialStaff={staffForPhotos} />
+        <FilaConfig titulo="Horario del negocio">
+          <HorariosTab />
+          <div className="mt-4 border-t border-line pt-4">
+            <BusinessHoursPanel />
           </div>
-        </details>
+        </FilaConfig>
 
-      </main>
+        <FilaConfig titulo="Clientes inactivos y lista de espera" badge={atencionCount}>
+          <InactiveClientsPanel businessName={businessName} />
+          <div className="mt-4">
+            <WaitlistPanel />
+          </div>
+        </FilaConfig>
 
-      <footer className="border-t border-gray-100 px-4 py-4 text-center">
-        <p className="text-xs text-gray-400">
+        <FilaConfig titulo="Reportes y reseñas">
+          <ReportsConfigPanel />
+          <div className="mt-4">
+            <ReviewConfigPanel />
+          </div>
+        </FilaConfig>
+      </section>
+
+      <footer className="mt-6 px-4 py-4 text-center">
+        <p className="text-[11px] text-faint">
           Soporte:{' '}
-          <a href="mailto:contacto@zentriq.mx" className="hover:text-gray-600 underline">
+          <a href="mailto:contacto@zentriq.mx" className="underline hover:text-ink-2">
             contacto@zentriq.mx
           </a>
           {' · '}
-          <a href="/aviso-de-privacidad" className="hover:text-gray-600 underline">
+          <a href="/aviso-de-privacidad" className="underline hover:text-ink-2">
             Aviso de privacidad
           </a>
           {' · '}
-          <a href="/arco" className="hover:text-gray-600 underline">
+          <a href="/arco" className="underline hover:text-ink-2">
             Derechos ARCO
           </a>
         </p>

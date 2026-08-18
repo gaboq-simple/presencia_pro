@@ -79,3 +79,29 @@ export function localDayRangeUtc(date: string, timeZone: string): { start: strin
     end: zonedWallTimeToUtc(nextStr, '00:00:00', timeZone).toISOString(),
   };
 }
+
+/**
+ * 'HH:MM' de un instante en la tz del NEGOCIO (24 h, cero a la izquierda).
+ *
+ * El riel del día (dv3-4') muestra horas de pared y el server corre en UTC: sin
+ * la tz explícita, una cita de las 19:00 en México se rinde "01:00" — y encima
+ * en la fila de mañana. Acepta ISO o epoch ms.
+ */
+export function hhmmInTz(instant: string | number, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(instant));
+}
+
+/**
+ * Minutos desde la medianoche LOCAL del negocio para un instante dado.
+ * Comparable contra los `staff_availability.start_time/end_time`, que son horas
+ * de pared sin tz. Medianoche exacta rinde 24:00 en algunos locales → 0.
+ */
+export function minutosLocalesInTz(instant: string | number, timeZone: string): number {
+  const [h, m] = hhmmInTz(instant, timeZone).split(':');
+  return (Number(h) % 24) * 60 + Number(m);
+}

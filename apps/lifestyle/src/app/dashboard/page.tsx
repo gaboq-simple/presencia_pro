@@ -49,6 +49,9 @@ import { getNegocioStaffRecompra } from '@/lib/negocioStaff';
 import { getPulsoHoy } from '@/lib/pulsoHoy';
 import { getPulsoSemana } from '@/lib/pulsoSemana';
 import { getFuga } from '@/lib/fugaData';
+import { getEquipoSemana } from '@/lib/equipoSemanaData';
+import { getDiaRail } from '@/lib/diaRailData';
+import { getAtencionCount } from '@/lib/atencionCount';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -211,6 +214,11 @@ export default async function DashboardPage({
   //    en DashboardLayout porque ese componente declara no fetchar datos propios.
   const cabos = await getCabos(businessId);
 
+  // 7b. El badge de la fila plegada "Clientes inactivos y lista de espera"
+  //     (dv3-4'): una fila cerrada esconde lo que hay adentro y el badge es lo
+  //     único que delata que ahí hay gente esperando.
+  const atencionCount = await getAtencionCount(businessId);
+
   // 8. Cortes de los últimos 7 días locales (D5), por la misma razón que arriba.
   //    Se pasan SIN resolver: la regla "la última fila por día manda" vive en
   //    lib/corte.ts (una sola definición, la misma que usará el digest de D7).
@@ -222,15 +230,20 @@ export default async function DashboardPage({
   // 9. El héroe de la semana (dv3-3') — mismo contrato: lo fetcha la página.
   const semanaHero = await getSemanaHero(businessId, timezone);
 
+  // 10. El equipo de la semana que contiene `date` (dv3-4'). Server-side y no por
+  //     el endpoint client-side que reemplaza: ese tarda 1–3.3 s y dejaba un
+  //     "Cargando…" que movía el alto de la página en miles de píxeles.
+  const equipoSemana = await getEquipoSemana(businessId, date, timezone);
+
+  // 11. El riel del día (dv3-4'). Sin query: mapea lo ya cargado y es donde vive
+  //     el reloj — un `Date.now()` en render es impuro y daría dos rieles
+  //     distintos para el mismo árbol.
+  const diaRail = await getDiaRail(appointments, staffList, date, timezone);
+
   const dashboardPanel = (
     <DashboardLayout
-      businessId={businessId}
       businessName={businessName}
-      date={date}
       timezone={timezone}
-      appointments={appointments}
-      staffList={staffList}
-      dayRevenue={dayRevenue}
       pendingBlockRequests={pendingBlockRequests}
       staffForPhotos={staffForPhotos}
       staffForManagement={staffForManagement}
@@ -238,6 +251,7 @@ export default async function DashboardPage({
       cabosCount={cabos.total}
       cortes={cortes}
       hoyLocal={hoyLocal}
+      atencionCount={atencionCount}
     />
   );
 
@@ -257,7 +271,16 @@ export default async function DashboardPage({
         />
       }
       clientela={<ClientelaView stats={clientelaStats} />}
-      administrar={<AdministrarView services={servicesForManagement} staff={staffForManagement} panel={dashboardPanel} />}
+      administrar={
+        <AdministrarView
+          date={date}
+          timezone={timezone}
+          dayRevenue={dayRevenue}
+          rail={diaRail}
+          equipo={equipoSemana}
+          panel={dashboardPanel}
+        />
+      }
       actividad={<ActividadView initialEvents={activityPage.events} initialCursor={activityPage.nextCursor} />}
     />
   );
