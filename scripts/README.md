@@ -116,7 +116,11 @@ reales y para diseñar vistas con densidad real.
 - **Idempotente y determinista**: purga las citas del negocio y re-siembra con
   pseudo-aleatorio por hash (sin `random()`). Fechas relativas a HOY en la
   timezone del negocio — corre fresco cualquier día.
-- **El día de HOY depende de la HORA de corrida** (dv3-5'). Las citas de hoy cuya
+- **El día de HOY depende de la HORA de corrida** (dv3-5') y **el MES en curso
+  depende de la FECHA** (dv3-6: cuántos clientes nacen este mes escala con los
+  días transcurridos, ~0.3/día, piso 2 y techo 10 — sin eso, el "+N este mes"
+  del héroe de Clientela es 0 para siempre y el crecimiento se ve muerto en cada
+  demo). El pasado y el futuro no dependen de nada. Las citas de hoy cuya
   hora de fin ya pasó nacen `completed` con cobro (monto + riel); las demás,
   `confirmed`. Dos corridas a la misma hora dan el mismo estado; a horas
   distintas del mismo día, no — y eso es a propósito. Medido: corridas de 16:20 y

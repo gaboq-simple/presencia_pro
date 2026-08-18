@@ -44,6 +44,13 @@
 --     Al comparar dos corridas, la huella va sobre el CONTENIDO (starts_at,
 --     status, price_charged, payment_method, source, booking_name), nunca sobre
 --     los `id`: los ids se regeneran en cada corrida por diseño.
+--   · Y LA HUELLA DEL MES DEPENDE DE LA FECHA DE CORRIDA (dv3-6). El bloque 8b
+--     ("altas del mes en curso") elige cuántos clientes nacen este mes en función
+--     de los días transcurridos del mes, así que dos corridas del día 5 dan lo
+--     mismo y una del 5 contra una del 20 no. Resumen de las tres escalas:
+--       – el PASADO y el FUTURO no dependen de nada (mismos en cualquier corrida);
+--       – el DÍA de hoy depende de la HORA de corrida (qué citas ya terminaron);
+--       – el MES depende de la FECHA de corrida (cuántas altas caben en él).
 --   · SIN RUIDO DE AUDIT: todo entra por INSERT con valores finales (cero
 --     UPDATEs sobre appointments) y al final limpia las filas viejas de
 --     appointment_audit con actor desconocido ("Acción sin identificar").
@@ -503,6 +510,48 @@ cross join lateral (
 where extract(dow from c.d)::int <> 0     -- domingo: cerrado, no hay qué contar
   and c.r_skip >= 0.18;                   -- ~1 día hábil por semana sin corte
 
+-- ─── 8b. Altas del MES EN CURSO (dv3-6) ──────────────────────────────────────
+-- Sin esto, el "+N este mes" del héroe de Clientela es 0 para siempre: los 125
+-- clientes nacían todos al principio de la ventana de 90 días, así que el
+-- crecimiento —la pregunta que abre esa pestaña— se veía muerto en cada demo.
+--
+-- No se inventan clientes ni citas: se ELIGE un subconjunto por hash y se le
+-- borra la historia anterior al mes en curso, de modo que su primera visita caiga
+-- dentro del mes. Un cliente cuya primera cita es de este mes ES un alta de este
+-- mes; no hay nada que fabricar. Al quitar filas (nunca agregarlas) no se puede
+-- crear un solape, que es el riesgo de sembrar citas fuera del grid.
+--
+-- ⚠️ La cantidad ESCALA con los días transcurridos del mes, y es a propósito:
+-- correr el seed un día 2 y ver "9 altas" apretadas en 48 h sería menos creíble
+-- que verlo vacío. ~0.3 altas por día transcurrido, con piso 2 y techo 10.
+--
+-- DETERMINISMO: la selección es por `md5(id)` —estable entre corridas— pero el
+-- CUÁNTO depende del día del mes. Dos corridas el mismo día dan el mismo estado;
+-- una corrida el 5 y otra el 20 del mismo mes, no. Es la misma clase de
+-- dependencia que ya tiene el día de hoy con la hora de corrida (ver encabezado):
+-- la huella del MES depende de la FECHA de corrida, la del DÍA depende de la HORA.
+create temp table seed_altas_mes as
+select c.id
+from seed_cust c
+join seed_biz b on true
+where exists (
+        select 1 from appointments a
+        where a.customer_id = c.id
+          and (a.starts_at at time zone b.timezone)::date >= date_trunc('month', b.hoy)::date
+      )
+order by pg_temp.h(c.id::text || ':alta-mes')
+limit (
+  select greatest(2, least(10, round((b2.hoy - date_trunc('month', b2.hoy)::date + 1) * 0.3)))::int
+  from seed_biz b2
+);
+
+-- Su historia anterior al mes se va: por eso su primera visita cae en el mes.
+delete from appointments a
+using seed_biz b
+where a.business_id = b.id
+  and a.customer_id in (select id from seed_altas_mes)
+  and (a.starts_at at time zone b.timezone)::date < date_trunc('month', b.hoy)::date;
+
 -- ─── 9. Stats de clientes (el trigger solo corre en UPDATE, no en el seed) ────
 with agg as (
   select a.customer_id,
@@ -520,7 +569,11 @@ set visit_count  = coalesce(g.vc, 0),
     noshow_count = coalesce(g.ns, 0),
     is_flagged   = coalesce(g.ns, 0) >= (select max_noshows_before_flag
                                          from businesses where id = (select id from seed_biz)),
-    created_at   = least(c.created_at, g.primera - interval '1 day')
+    -- Un alta del mes NACE con su primera visita; para el resto vale el mínimo
+    -- de siempre (un cliente no puede ser más nuevo que su primera cita).
+    created_at   = case when c.id in (select id from seed_altas_mes)
+                        then g.primera - interval '1 day'
+                        else least(c.created_at, g.primera - interval '1 day') end
 from agg g where c.id = g.customer_id;
 
 -- Clientes del negocio sin ninguna cita tras la purga → stats en cero coherentes.
@@ -559,4 +612,7 @@ select
                       where c.business_id = b.id and c.corte_date = dd.d::date))                               as dias_sin_corte,
   -- Suma de descuadres CON SIGNO: si diera 0 exacto, el ruido no sería mixto.
   (select coalesce(sum(c.cash_diff + c.card_diff), 0) from caja_cortes c
-     join seed_biz b on c.business_id = b.id)                                                                  as suma_descuadres;
+     join seed_biz b on c.business_id = b.id)                                                                  as suma_descuadres,
+  -- El "+N este mes" del héroe de Clientela (8b). En 0 el crecimiento se ve muerto.
+  (select count(*) from customers c join seed_biz b on c.business_id = b.id
+    where c.created_at >= date_trunc('month', b.hoy))                                                          as altas_del_mes;
