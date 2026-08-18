@@ -13,14 +13,22 @@ export type SegmentStyle = {
   /** border-left del card (grupos). */ card: string;
   /** color del número (grupos). */      count: string;
   /** pill de fondo/borde. */            pill: string;
+  /** Color del segmento en la barra de composición y de su punto en la leyenda
+   *  (dv3-5''). NO es la categórica: sigue al CICLO DE VIDA. La rampa secuencial
+   *  teal cae de campeón a regular porque hay un gradiente de pertenencia; nuevos
+   *  sale de esa rampa (azul) porque todavía no pertenece, no porque pertenezca
+   *  poco; y los dos estados de salida usan sus colores semánticos. Pintarlos con
+   *  cinco categóricos diría "cinco cosas distintas sin orden", que es lo contrario
+   *  de lo que mide. */
+  dot: string;
 };
 
 export const SEGMENT_STYLE: Record<RfmSegment, SegmentStyle> = {
-  campeones:      { label: 'Campeones',      card: 'border-l-4 border-l-teal-border',  count: 'text-teal-ink', pill: 'bg-tint-1 text-teal-ink border border-teal-border' },
-  regulares:      { label: 'Regulares',      card: 'border-l-4 border-l-line-2',       count: 'text-ink',      pill: 'bg-card text-ink-2 border border-line-2' },
-  nuevos:         { label: 'Nuevos',         card: 'border-l-4 border-l-line-2',        count: 'text-ink',      pill: 'bg-card text-ink-2 border border-line-2' },
-  se_estan_yendo: { label: 'Se están yendo', card: 'border-l-4 border-l-amber-border',  count: 'text-amber',    pill: 'bg-amber-tint text-amber border border-amber-border' },
-  perdidos:       { label: 'Perdidos',       card: 'border-l-4 border-l-past-line',     count: 'text-past-ink', pill: 'bg-past-bg text-past-ink border border-past-line' },
+  campeones:      { label: 'Campeones',      card: 'border-l-4 border-l-teal-border',  count: 'text-teal-ink', pill: 'bg-tint-1 text-teal-ink border border-teal-border',            dot: 'var(--color-viz-seq-6)' },
+  regulares:      { label: 'Regulares',      card: 'border-l-4 border-l-line-2',       count: 'text-ink',      pill: 'bg-card text-ink-2 border border-line-2',                      dot: 'var(--color-viz-seq-4)' },
+  nuevos:         { label: 'Nuevos',         card: 'border-l-4 border-l-line-2',        count: 'text-ink',      pill: 'bg-card text-ink-2 border border-line-2',                      dot: 'var(--color-viz-cat-2)' },
+  se_estan_yendo: { label: 'Se están yendo', card: 'border-l-4 border-l-amber-border',  count: 'text-amber',    pill: 'bg-amber-tint text-amber border border-amber-border',          dot: 'var(--color-amber-border)' },
+  perdidos:       { label: 'Perdidos',       card: 'border-l-4 border-l-past-line',     count: 'text-past-ink', pill: 'bg-past-bg text-past-ink border border-past-line',             dot: 'var(--color-past-line)' },
 };
 
 /** Orden de presentación de los grupos en Clientela. */

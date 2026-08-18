@@ -78,3 +78,61 @@ export function foldOtros(filas: readonly VizRow[], tope: number): VizFoldedRow[
     { label: `Otros ${resto.length}`, value: suma, esOtros: true, agrupadas: resto.length },
   ];
 }
+
+/** Reparte 100% entre los valores de una composición, conservando la suma.
+ *
+ * `pctWidth` NO sirve acá: mide contra el MÁXIMO de la serie (magnitud), y una
+ * apilada mide contra el TOTAL (proporción). Usar una donde va la otra da una
+ * barra que suma 240% y parece correcta.
+ *
+ * Dos cosas que esta función garantiza y que a mano se pierden siempre:
+ *
+ *   · **La suma es exactamente 100** cuando hay algún valor > 0. Redondear cinco
+ *     porcentajes por separado deja un hueco (o un desborde) de hasta medio punto,
+ *     y en una barra con `overflow:hidden` eso se ve como un mordisco en el último
+ *     segmento. El residuo se le da al segmento más grande, que es donde menos se
+ *     nota en términos relativos.
+ *   · **Un valor > 0 nunca desaparece.** Con 125 clientes, un segmento de 1 es el
+ *     0.8% y a 375px eso es menos de tres píxeles: se redondearía a 0 y el grupo
+ *     se volvería invisible justo cuando aparece. El piso es 1% —más chico que el
+ *     de `pctWidth`, porque acá cada punto que se le regala a uno se le quita a
+ *     otro— y se descuenta proporcionalmente del resto.
+ *
+ * Los ceros salen en 0: un grupo vacío no ocupa lugar.
+ */
+export function sharePcts(valores: readonly number[]): number[] {
+  const limpios = valores.map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
+  const total = limpios.reduce((a, b) => a + b, 0);
+  if (total <= 0) return limpios.map(() => 0);
+
+  const MIN = MIN_SHARE_PCT;
+  const crudos = limpios.map((v) => (v / total) * 100);
+
+  // Piso: lo que se le sube a los chicos se le baja a los grandes, en proporción
+  // a lo que tienen de más — así el orden relativo se conserva.
+  const bajoPiso = crudos.map((p, i) => (limpios[i]! > 0 && p < MIN ? MIN - p : 0));
+  const deuda = bajoPiso.reduce((a, b) => a + b, 0);
+  const sobrante = crudos.reduce((a, p, i) => a + (bajoPiso[i]! > 0 ? 0 : Math.max(0, p - MIN)), 0);
+  const ajustados = crudos.map((p, i) => {
+    if (limpios[i] === 0) return 0;
+    if (bajoPiso[i]! > 0) return MIN;
+    if (sobrante <= 0) return p;
+    return p - (deuda * Math.max(0, p - MIN)) / sobrante;
+  });
+
+  // Redondeo a 2 decimales y el residuo al más grande (una sola pasada, determinista).
+  const redondeados = ajustados.map((p) => Math.round(p * 100) / 100);
+  const suma = redondeados.reduce((a, b) => a + b, 0);
+  const resto = Math.round((100 - suma) * 100) / 100;
+  if (resto !== 0) {
+    let iMax = -1;
+    for (let i = 0; i < redondeados.length; i++) {
+      if (redondeados[i]! > 0 && (iMax === -1 || redondeados[i]! > redondeados[iMax]!)) iMax = i;
+    }
+    if (iMax >= 0) redondeados[iMax] = Math.round((redondeados[iMax]! + resto) * 100) / 100;
+  }
+  return redondeados;
+}
+
+/** Piso de un segmento con valor > 0 en una composición 100%. */
+export const MIN_SHARE_PCT = 1;

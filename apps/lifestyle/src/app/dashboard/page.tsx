@@ -281,7 +281,14 @@ export default async function DashboardPage({
           panel={dashboardPanel}
         />
       }
-      actividad={<ActividadView initialEvents={activityPage.events} initialCursor={activityPage.nextCursor} />}
+      actividad={
+        <ActividadView
+          initialEvents={activityPage.events}
+          initialCursor={activityPage.nextCursor}
+          timezone={timezone}
+          hoyLocal={hoyLocal}
+        />
+      }
     />
   );
 }

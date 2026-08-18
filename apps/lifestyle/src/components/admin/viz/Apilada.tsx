@@ -21,9 +21,17 @@ const PALETA = [
 
 export type SegmentoApilada = {
   label:    string;
-  /** Ancho del segmento en % del total. Usar `pctWidth` de `lib/viz`. */
+  /** Ancho del segmento en % del total. Usar `sharePcts` de `lib/viz` — NO
+   *  `pctWidth`, que mide contra el máximo de la serie y no contra el total. */
   pct:      number;
   esOtros?: boolean;
+  /** Color explícito, para cuando los segmentos NO son identidades intercambiables.
+   *  La categórica dice "cinco cosas distintas, sin orden"; hay composiciones donde
+   *  eso es falso — los grupos de la clientela son una ESCALA (campeón → regular →
+   *  nuevo → yéndose → perdido), y pintarlos con la categórica borraría el
+   *  gradiente. Puerta deliberada y acotada, la misma que ya tiene `BarraFila`;
+   *  sin `color`, manda el orden fijo de la categórica. */
+  color?:   string;
 };
 
 export function colorCategorico(indice: number, esOtros = false): string {
@@ -34,11 +42,13 @@ export function colorCategorico(indice: number, esOtros = false): string {
 export function Apilada({ segmentos }: { segmentos: readonly SegmentoApilada[] }): React.ReactElement {
   return (
     <div className="flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full bg-gap">
-      {segmentos.map((s, idx) => (
+      {/* Un grupo en cero no ocupa lugar — sin este filtro el `gap` de 2px le
+          dibuja una raya a algo que no existe. */}
+      {segmentos.filter((s) => s.pct > 0).map((s, idx) => (
         <span
           key={s.label}
           className="h-full first:rounded-l-full last:rounded-r-full"
-          style={{ width: `${s.pct}%`, backgroundColor: colorCategorico(idx, s.esOtros) }}
+          style={{ width: `${s.pct}%`, backgroundColor: s.color ?? colorCategorico(idx, s.esOtros) }}
         />
       ))}
     </div>
