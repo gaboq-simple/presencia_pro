@@ -571,8 +571,15 @@ set visit_count  = coalesce(g.vc, 0),
                                          from businesses where id = (select id from seed_biz)),
     -- Un alta del mes NACE con su primera visita; para el resto vale el mínimo
     -- de siempre (un cliente no puede ser más nuevo que su primera cita).
+    --
+    -- El `greatest` con el inicio del mes cierra un borde que se ve al medirlo:
+    -- a quien viene por primera vez el DÍA 1, restarle un día lo hace nacer el
+    -- último día del mes anterior y deja de contar como alta del mes — el bloque
+    -- elegía 5 y el héroe mostraba 4. Nacer el primer día del mes sigue siendo
+    -- ≤ su primera cita, que es la única invariante que importa acá.
     created_at   = case when c.id in (select id from seed_altas_mes)
-                        then g.primera - interval '1 day'
+                        then greatest(g.primera - interval '1 day',
+                                      date_trunc('month', g.primera))
                         else least(c.created_at, g.primera - interval '1 day') end
 from agg g where c.id = g.customer_id;
 
