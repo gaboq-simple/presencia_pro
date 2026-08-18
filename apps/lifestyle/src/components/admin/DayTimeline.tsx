@@ -38,9 +38,9 @@ function formatGap(minutes: number): string {
 export default function DayTimeline({ appointments, date }: Props) {
   if (appointments.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center">
-        <p className="text-sm text-gray-400">Sin citas para este día.</p>
-        <p className="mt-1 text-xs text-gray-300">{date}</p>
+      <div className="rounded-lg border border-dashed border-line px-4 py-8 text-center">
+        <p className="text-sm text-faint">Sin citas para este día.</p>
+        <p className="mt-1 text-xs text-past-line">{date}</p>
       </div>
     );
   }
@@ -65,11 +65,11 @@ export default function DayTimeline({ appointments, date }: Props) {
             className="flex items-center gap-2 px-1"
             aria-label={`Hueco disponible: ${Math.round(gap)} minutos`}
           >
-            <div className="h-px flex-1 border-t border-dashed border-gray-200" />
-            <span className="shrink-0 text-xs text-gray-300">
+            <div className="h-px flex-1 border-t border-dashed border-line" />
+            <span className="shrink-0 text-xs text-past-line">
               {formatGap(gap)}
             </span>
-            <div className="h-px flex-1 border-t border-dashed border-gray-200" />
+            <div className="h-px flex-1 border-t border-dashed border-line" />
           </div>,
         );
       }
@@ -82,7 +82,7 @@ export default function DayTimeline({ appointments, date }: Props) {
 
   return (
     <div className="space-y-2">
-      <p className="px-1 text-xs font-medium text-gray-500">
+      <p className="px-1 text-xs font-medium text-faint">
         Agenda del día · {sorted.length} {sorted.length === 1 ? 'cita' : 'citas'}
       </p>
       <div className="space-y-2">{items}</div>
