@@ -2030,6 +2030,13 @@ El copy de plantillas deterministas y el generado por LLM evolucionaron por sepa
 
 ---
 
+## Permiso (plan en docs/planes/permiso.md)
+
+- **S8-PER-01 · Permiso: la baja existe y manda** ⚪ todo · **pendiente de "va" de Gabriel para ejecutar**
+  Plan completo y verificado contra el repo en `docs/planes/permiso.md` (aterrizado 2026-08-18 desde el borrador de Fable; siete afirmaciones que el repo contradecía quedaron corregidas y marcadas en el propio documento). **Cinco pasos, orden estricto P0→P4, todo pre-WABA** — no manda nada nuevo, deja de mandar. **P0** publica el aviso de privacidad, que hoy es un 404 al que apuntan **cuatro enlaces vivos en producción** (mini-sitio, dashboard, Home y el formulario ARCO); cierra S2-LEG-01. **P1** agrega `customers.opted_out_at` + `opted_out_via`, espejo de las tres columnas de alta de la 037. **P2** intercepta "BAJA" de forma DETERMINISTA en los tres puntos de `api/bot/route.ts` donde ya se intercepta el comando de test reset —antes del handoff gate, que hoy se traga la baja, y antes del matcher ARCO— sin pasar jamás por el clasificador: un opt-out no puede depender del humor de un modelo. **P3** mete la exclusión en `sendWhatsAppMeta` (18 llamadas en 13 archivos) con un `purpose` obligatorio de cuatro valores, para que la regla de niveles sea un tipo y no una memoria. **P4** hace que el walk-in deje de fabricar consentimiento (`pending_notice`). Su aceptación estrella: tras una baja por ruta real, **cero** queries salientes incluyen a ese cliente y la reactivación retorna `suppressed` visible — con filas presentes, nunca contra tablas vacías. **No ejecutar sin el "va".**
+
+---
+
 ## Rediseño visual del dueño (aprobado sobre maqueta, plan en docs/planes/dueno-v3.md)
 
 - **S7-DV3-01 · Rediseño VISUAL de la vista de dueño (pasos dv3-1…dv3-6)** 🔵 in-progress (arrancado 2026-08-12)
