@@ -471,7 +471,7 @@ Componentes principales del panel. Todos en `apps/lifestyle/src/components/`.
 ### Vista del asistente (`staff/`)
 | Componente | Descripción |
 |---|---|
-| `AssistantLayout.tsx` | **Ya NO es la vista del asistente** (el asistente monta `AssistantControlDesk`, diseño congelado). Sobrevive como la vista del barbero en `/staff/gestion`. Contiene: buscador de clientes, botón "+ Nueva cita", AvailabilityTimeline, AssistantUpcoming, AssistantDayTimeline. Polling cada 30s. Header con botón de chat (badge amarillo si hay convs. humanas). |
+| `AssistantLayout.tsx` | **CÓDIGO MUERTO — ninguna ruta lo renderiza.** Fue la vista del asistente (hoy: `AssistantControlDesk`) y después la del barbero en `/staff/gestion`, pero esa ruta quedó como un `redirect()` a `/staff` cuando el barbero se rediseñó. Con él quedaron desconectados `DayTimeline` y `AppointmentCard`, sus únicos consumidores. Contiene: buscador de clientes, botón "+ Nueva cita", AvailabilityTimeline, AssistantUpcoming, AssistantDayTimeline. Polling cada 30s. Header con botón de chat (badge amarillo si hay convs. humanas). |
 | `ConversationList.tsx` | Bottom sheet con lista de bot_conversations activas. Orden: human→paused→bot. Polling cada 10s. Click → abre ChatPanel en overlay. |
 | `ChatPanel.tsx` | Panel de chat 85vh. Header con modo + "Tomar control"/"Devolver al bot". Burbujas: cliente=izquierda/gris, bot=derecha/oscuro, staff=derecha/azul. Polling cada 5s. Input deshabilitado si modo≠human. |
 | `AvailabilityTimeline.tsx` | Grid horizontal staff×hora. Línea "ahora" en rojo. Slots clickables. |

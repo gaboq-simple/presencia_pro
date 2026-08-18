@@ -29,21 +29,21 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-amber-tint text-amber',
-  confirmed: 'bg-past-bg text-ink-2',
-  completed: 'bg-tint-1 text-teal-ink',
-  cancelled: 'bg-past-bg text-faint',
-  no_show:   'bg-red-tint text-red-ink',
-  walkin:    'bg-walk-tint text-walk',
+  pending:   'bg-yellow-100 text-yellow-800',
+  confirmed: 'bg-blue-100 text-blue-800',
+  completed: 'bg-green-100 text-green-800',
+  cancelled: 'bg-gray-100 text-gray-500',
+  no_show:   'bg-red-100 text-red-800',
+  walkin:    'bg-purple-100 text-purple-800',
 };
 
 const STATUS_BORDER: Record<string, string> = {
-  pending:   'border-amber-border',
-  confirmed: 'border-line-2',
-  completed: 'border-teal-border',
-  cancelled: 'border-line opacity-60',
-  no_show:   'border-red-border opacity-60',
-  walkin:    'border-walk-border',
+  pending:   'border-yellow-200',
+  confirmed: 'border-blue-200',
+  completed: 'border-green-200',
+  cancelled: 'border-gray-200 opacity-60',
+  no_show:   'border-red-200 opacity-60',
+  walkin:    'border-purple-200',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -68,8 +68,8 @@ export default function AppointmentCard({ appointment }: Props) {
 
   const { id, starts_at, ends_at, status, service, customer, staff } = appointment;
 
-  const badgeClass = STATUS_BADGE[status] ?? 'bg-past-bg text-ink-2';
-  const borderClass = STATUS_BORDER[status] ?? 'border-line';
+  const badgeClass = STATUS_BADGE[status] ?? 'bg-gray-100 text-gray-600';
+  const borderClass = STATUS_BORDER[status] ?? 'border-gray-200';
 
   function handleAction(newStatus: 'completed' | 'no_show') {
     startTransition(async () => {
@@ -84,11 +84,11 @@ export default function AppointmentCard({ appointment }: Props) {
       {/* Fila superior: hora + badge de estado */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs font-semibold tabular-nums text-ink-2">
+          <p className="text-xs font-semibold tabular-nums text-gray-700">
             {formatTime(starts_at)}
-            <span className="font-normal text-faint"> – {formatTime(ends_at)}</span>
+            <span className="font-normal text-gray-400"> – {formatTime(ends_at)}</span>
           </p>
-          <p className="mt-0.5 truncate text-sm font-medium text-ink">
+          <p className="mt-0.5 truncate text-sm font-medium text-gray-900">
             {service.name}
           </p>
         </div>
@@ -100,11 +100,11 @@ export default function AppointmentCard({ appointment }: Props) {
       </div>
 
       {/* Fila media: cliente + barbero */}
-      <div className="mt-1.5 flex items-center gap-3 text-xs text-faint">
+      <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-500">
         <span className="truncate">
           {customer ? customer.name : 'Sin cliente registrado'}
         </span>
-        <span className="shrink-0 text-past-line">·</span>
+        <span className="shrink-0 text-gray-300">·</span>
         <span className="shrink-0">{staff.name}</span>
       </div>
 
@@ -114,14 +114,14 @@ export default function AppointmentCard({ appointment }: Props) {
           <button
             onClick={() => handleAction('completed')}
             disabled={isPending}
-            className="flex-1 rounded border border-teal-border bg-tint-1 py-1 text-xs font-medium text-teal-ink hover:bg-tint-1 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1 rounded border border-green-300 bg-green-50 py-1 text-xs font-medium text-green-800 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Completar
           </button>
           <button
             onClick={() => handleAction('no_show')}
             disabled={isPending}
-            className="flex-1 rounded border border-red-border bg-red-tint py-1 text-xs font-medium text-red-ink hover:bg-red-tint disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1 rounded border border-red-200 bg-red-50 py-1 text-xs font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             No asistió
           </button>
