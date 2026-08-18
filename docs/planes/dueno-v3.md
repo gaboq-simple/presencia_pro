@@ -522,8 +522,20 @@ en toda la vista: cero paleta numérica, cero voseo, cero emoji.
 
 **Qué NO tocar:** la lógica/props de los paneles legacy (solo clases y
 strings); `lib/clientelaStats.ts` y `lib/activityFeed.ts` (solo se consumen).
-**Aceptación observable:**
-`grep -rE "(text|bg|border|ring)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|green|emerald|teal|blue|indigo|violet|purple)-[0-9]{2,3}" apps/lifestyle/src/components/admin/` → **0 resultados**; el grep de voseo del plan → 0.
+**Aceptación observable** *(ENMENDADA al ejecutar dv3-5', 2026-08-18)*:
+el grep de paleta numérica
+
+```
+grep -rE "(text|bg|border|ring)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|green|emerald|teal|blue|indigo|violet|purple)-[0-9]{2,3}" apps/lifestyle/src/components/admin/
+```
+
+debe dar **0 en la SUPERFICIE VIVA** — no 0 en el directorio. El criterio
+original se escribió antes de que el Paso 4 desmontara la mitad de la carpeta, y
+tal como estaba exigía restilar componentes que ninguna ruta renderiza y que el
+Paso 6 va a revivir con diseño nuevo o a borrar: diff sin un solo píxel de
+efecto, y un archivo más que revisar en cada PR. **Superficie viva = todo lo que
+tenga un camino de render desde una ruta**; los huérfanos se listan por nombre en
+el Paso 6 y se resuelven ahí. El grep de voseo del plan → 0 (ya lo estaba).
 **Red visual** *(prerrequisito: `scripts/seed-demo-densa.sql` corrido — sin datos densos la comparación no prueba nada)*: Clientela y Actividad cambian de composición; Administrar
 cambia SOLO dentro de los disclosures abiertos; Panorama idéntico.
 
@@ -582,6 +594,29 @@ starts_at ≥ lunes`, `bot_conversations.taken_at ≥ lunes`.
 centavo. Cita con `starts_at` domingo 23:30 local NO entra a la semana que
 empieza ese lunes. `foldOtros`: con los 8 servicios del seed, la vista rinde
 5 filas.
+
+**Los huérfanos, y qué hacer con cada uno** *(inventario levantado en dv3-5',
+2026-08-18 — ninguno tiene hoy un camino de render desde una ruta):*
+
+| Componente | Por qué quedó suelto | Destino |
+|---|---|---|
+| `MetricsSummary` | El Paso 4 lo sacó del nivel 1. Sin importadores | **Revivir restilado, partido**: su desglose por canal es la barra apilada de esta pestaña; sus contadores por status ya no vuelven |
+| `SourceBreakdown` | Solo lo importaba `MetricsSummary` | **Revivir restilado** como la apilada de canal |
+| `HourlyPeaksChart` | idem | **Revivir restilado** como "semana típica", o borrar si el heatmap de ocupación ya lo dice |
+| `NoShowByDayChart` | idem | **Decidir**: dato de consulta; si no cambia una conducta, borrar |
+| `TopClientsCard` | idem | **Borrar** — las notas de la maqueta ya lo dictaminaron ("con datos densos sigue sin decidir nada") |
+| `StaffMetricsPanel` | Lo reemplazó `EquipoSemana` en el Paso 4. Sin importadores | **Borrar** — su superficie ya existe, mejor |
+| `BranchComparisonTable` | Murió con el retiro del token de organización (PR #152). Sin importadores | **Borrar** |
+| `AssistantLayout` | Fue la vista del asistente y después la del barbero; `/staff/gestion` quedó como `redirect()` a `/staff` | **Borrar** — y con él caen sus dos únicos consumidores |
+| `DayTimeline` | Solo lo importan `DashboardRealtimeProvider` (desmontado) y `AssistantLayout` | **Borrar** con `AssistantLayout` |
+| `AppointmentCard` | Solo lo importa `DayTimeline` | **Borrar** con `DayTimeline` |
+
+**Regla para quien lo ejecute:** *revivir* significa **restilado a tokens** (nunca
+tal cual: son justo los archivos donde vive el residuo de paleta numérica que el
+Paso 5 dejó a propósito). *Borrar* va **con su red visual**, que acá no es
+opcional aunque el componente esté muerto: la prueba de que estaba muerto es que
+las cinco pestañas dan **0 px** después de borrarlo. Si alguna se mueve, no
+estaba muerto y el inventario tenía un error.
 
 **Qué NO tocar:** los tres módulos de BI movidos (cero cambios de lógica); el
 resto de Panorama.
