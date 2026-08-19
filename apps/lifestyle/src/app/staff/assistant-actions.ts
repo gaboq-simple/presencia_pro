@@ -538,8 +538,13 @@ export async function createAssistantAppointment(
           .insert({
             name,
             phone,
+            // S8-PER-01 · P4 — el dato existe, el CONSENTIMIENTO no. Nadie le
+            // mostró el aviso a esta persona: lo tecleó la recepción. Se
+            // consolida solo cuando el titular escribe al bot y ve el aviso
+            // (`whatsapp_first_message`). Mientras tanto cuenta como NO
+            // consentido para todo lo proactivo.
             consent_at:    new Date().toISOString(),
-            consented_via: 'manual_registration',
+            consented_via: 'pending_notice',
           })
           .select('id')
           .single();
@@ -567,8 +572,9 @@ export async function createAssistantAppointment(
           .insert({
             name,
             phone:         null,
+            // Idem: alta manual sin teléfono. Ver la nota de arriba.
             consent_at:    new Date().toISOString(),
-            consented_via: 'manual_registration',
+            consented_via: 'pending_notice',
           })
           .select('id')
           .single();

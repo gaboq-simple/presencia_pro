@@ -140,8 +140,14 @@ export interface WhatsAppSendResult {
 /** Cómo preguntar si un titular se dio de baja. Interfaz mínima a propósito:
  *  el engine no conoce supabase-js y no va a empezar acá. */
 export interface OptOutLookup {
-  /** `true` = ese teléfono NO debe recibir mensajes proactivos de ese negocio. */
-  isOptedOut(businessId: string, phone: string): Promise<boolean>;
+  /** `null` = puede recibir proactivos. Si no, la RAZÓN por la que no.
+   *
+   *  Devuelve la razón y no un booleano porque los dos motivos que bloquean son
+   *  distintos y el de al lado no lo sabe: "pidió la baja" y "nunca vio el aviso"
+   *  se arreglan de maneras opuestas —uno se respeta para siempre, el otro se
+   *  resuelve la primera vez que el cliente escriba—. Decirle "se dio de baja" a
+   *  un dueño cuyo cliente solo fue tecleado en el mostrador es mentirle. */
+  blockedReason(businessId: string, phone: string): Promise<string | null>;
 }
 
 export type SendPurpose =

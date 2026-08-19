@@ -116,18 +116,18 @@ export async function sendWhatsAppMeta(
     // dirección segura — mandarle a alguien que quizá se dio de baja es el daño
     // que este paso vino a evitar, y no mandarle a alguien que no se dio de baja
     // se arregla reintentando.
-    let optedOut: boolean;
+    let motivo: string | null;
     try {
-      optedOut = await intent.db.isOptedOut(intent.businessId, message.to);
+      motivo = await intent.db.blockedReason(intent.businessId, message.to);
     } catch (err) {
       return {
         success: false,
         suppressed: true,
-        suppressedReason: `no se pudo verificar la baja: ${err instanceof Error ? err.message : String(err)}`,
+        suppressedReason: `no se pudo verificar el permiso: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
-    if (optedOut) {
-      return { success: false, suppressed: true, suppressedReason: 'el titular se dio de baja' };
+    if (motivo !== null) {
+      return { success: false, suppressed: true, suppressedReason: motivo };
     }
   }
 

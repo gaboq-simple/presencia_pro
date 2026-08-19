@@ -1107,7 +1107,7 @@ export default function AssistantControlDesk({
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">
-                  Teléfono {requireCustomerPhone ? <span className="text-red-ink">(requerido)</span> : <span className="text-faint">(opcional)</span>}
+                  Teléfono {requireCustomerPhone ? <span className="text-red-ink">(requerido)</span> : <span className="text-faint">(recomendado)</span>}
                 </span>
                 <input
                   value={wiPhone}
@@ -1116,6 +1116,17 @@ export default function AssistantControlDesk({
                   placeholder="55…"
                   className="rounded-pill border border-line px-3 py-2 text-sm tabular-nums outline-none focus:border-teal-border"
                 />
+                {/* S8-PER-01 · P4 — el teléfono pasa de "opcional" a "recomendado"
+                    y se dice PARA QUÉ. La costumbre de la libreta es nombre y
+                    teléfono; sin él, el cliente no puede recibir su recordatorio
+                    ni ver nunca el aviso de privacidad, y el alta queda en
+                    `pending_notice` para siempre. Sigue sin bloquear: forzarlo
+                    convertiría un walk-in de treinta segundos en un trámite. */}
+                {!requireCustomerPhone && !wiPhone.trim() && (
+                  <span className="text-[11px] text-faint">
+                    Sin teléfono no podrá recibir su recordatorio.
+                  </span>
+                )}
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Servicio <span className="text-faint">(opcional)</span></span>

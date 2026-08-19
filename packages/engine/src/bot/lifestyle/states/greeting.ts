@@ -49,6 +49,8 @@ type CustomerRow = {
   favorite_staff_id: string | null;
   favorite_service_id: string | null;
   last_visit: string | null;
+  consent_at: string | null;
+  consented_via: string | null;
   favorite_staff: { name: string } | null;
   favorite_service: { name: string } | null;
 };
@@ -75,6 +77,13 @@ export async function handleGreeting(
   let customerId: string;
   let customerName: string;
   let isReturning = false;
+  // S8-PER-01 · P4 — un cliente que EXISTE puede no haber visto nunca el aviso:
+  // lo tecleó la recepción (`pending_notice`) o es anterior a la migración 037
+  // (`consent_at` NULL, sin backfill por decisión explícita). A ese hay que
+  // mostrarle el aviso aunque no sea "nuevo", y consolidar su consentimiento
+  // cuando lo ve. Sin esto, un alta manual quedaba en `pending_notice` para
+  // siempre y el guard de P3 la bloqueaba de por vida.
+  let necesitaAviso = false;
   let favoriteStaffId: string | null    = null;
   let favoriteServiceId: string | null  = null;
   let favStaffName: string | null       = null;
@@ -82,7 +91,7 @@ export async function handleGreeting(
 
   const { data: existing } = await tenantDb(supabase, business.id)
     .table('customers')
-    .select('id, name, favorite_staff_id, favorite_service_id, last_visit, favorite_staff:favorite_staff_id(name), favorite_service:favorite_service_id(name)')
+    .select('id, name, favorite_staff_id, favorite_service_id, last_visit, consent_at, consented_via, favorite_staff:favorite_staff_id(name), favorite_service:favorite_service_id(name)')
     .eq('phone', msg.customerPhone)
     .maybeSingle();
 
@@ -95,6 +104,27 @@ export async function handleGreeting(
     favStaffName      = row.favorite_staff?.name ?? null;
     favServiceName    = row.favorite_service?.name ?? null;
     isReturning       = true;
+    necesitaAviso     = row.consent_at === null || row.consented_via === 'pending_notice';
+
+    if (necesitaAviso) {
+      // Consolidar por la MISMA vía que un cliente nuevo: acaba de ver el aviso.
+      // Best-effort ruidoso: si falla, el cliente lo vuelve a ver la próxima vez
+      // (molesto pero honesto), nunca se marca como consentido sin haberlo visto.
+      const { error: consErr } = await tenantDb(supabase, business.id)
+        .table('customers')
+        .update({
+          consent_at:         new Date().toISOString(),
+          consented_via:      'whatsapp_first_message',
+          consent_message_id: msg.messageId ?? null,
+        })
+        .eq('id', row.id);
+      if (consErr) {
+        console.error(JSON.stringify({
+          ts: new Date().toISOString(), service: 'bot', event: 'consent_consolidate_failed',
+          business_id: business.id, customer_phone: maskPhone(msg.customerPhone), error: consErr.message,
+        }));
+      }
+    }
   } else {
     const nameToSave = msg.customerName ?? 'Cliente';
     const { data: inserted, error } = await tenantDb(supabase, business.id)
@@ -310,7 +340,7 @@ export async function handleGreeting(
       businessName: business.name,
       hasHistory:   history.length > 0,
     });
-    const responseText = !isReturning
+    const responseText = (!isReturning || necesitaAviso)
       ? `${composed}\n\n${buildPrivacyNotice()}`
       : composed;
 
@@ -436,7 +466,7 @@ export async function handleGreeting(
       // Determinista, nunca Sonnet (S5-BOT-11: greeting confirma, slots presenta).
       const hasHourU     = Boolean(parsedTimeStr || parsedAgendaTime);
       const confirmation = hasHourU ? '' : `${resolvedService!.name} para ${dateExpr ?? ''}, anotado.`;
-      const privacyU     = isReturning ? '' : buildPrivacyNotice();
+      const privacyU     = (isReturning && !necesitaAviso) ? '' : buildPrivacyNotice();
       return {
         newState:     'SHOWING_SLOTS',
         newContext:   { ...baseContext },
@@ -470,7 +500,7 @@ export async function handleGreeting(
   if (greetCase === 'full') {
     const hasHour      = Boolean(parsedTimeStr || parsedAgendaTime);
     const confirmation = hasHour ? '' : plan.deterministicFallback;
-    const privacy      = isReturning ? '' : buildPrivacyNotice();
+    const privacy      = (isReturning && !necesitaAviso) ? '' : buildPrivacyNotice();
     const responseText = [confirmation, privacy].filter((s) => s.length > 0).join('\n\n');
     return {
       newState:     plan.nextState,
@@ -500,7 +530,7 @@ export async function handleGreeting(
 
   // Para clientes nuevos: append aviso de privacidad al final (LFPDPPP Art. 8).
   // Consentimiento tácito: el cliente sigue interactuando tras el aviso.
-  const responseText = !isReturning
+  const responseText = (!isReturning || necesitaAviso)
     ? `${greetingText}\n\n${buildPrivacyNotice()}`
     : greetingText;
 
