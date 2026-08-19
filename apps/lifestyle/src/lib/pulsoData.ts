@@ -16,6 +16,7 @@ import { localDayRangeUtc } from '@/lib/dayWindow';
 import { generateSlotsForStaff } from '@presenciapro/engine/bot/lifestyle/scheduling';
 import { noonUTCDate, weekdayFromDateStr } from '@presenciapro/engine/bot/lifestyle/tzUtils';
 import type { StaffAvailabilityRow } from '@presenciapro/engine/bot/lifestyle/types';
+import { sumarDias } from '@/lib/timeWindows';
 import { tileCapacity, occupancyPct } from '@/lib/pulso';
 
 export function getServiceClient(): SupabaseClient {
@@ -27,11 +28,9 @@ export function getServiceClient(): SupabaseClient {
 
 /** 'YYYY-MM-DD' desplazada `days` (puede ser negativo). Ancla a mediodía UTC →
  *  sumar días enteros nunca cruza un borde DST. TZ-independiente del runtime. */
-export function shiftDateStr(dateStr: string, days: number): string {
-  const d = noonUTCDate(dateStr);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+// S7-BUG-01: la aritmética de calendario vive en `lib/timeWindows`; acá queda el
+// nombre que los consumidores ya usan.
+export const shiftDateStr = (dateStr: string, days: number): string => sumarDias(dateStr, days);
 
 export type Barber = { id: string; name: string };
 type AvailRow = StaffAvailabilityRow;

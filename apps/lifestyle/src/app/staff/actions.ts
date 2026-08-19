@@ -20,6 +20,7 @@ import {
   getBarberWeekTipTotal,
   type BarberDayAppointment,
 } from '@/lib/barberDay';
+import { sumarDias, diaDeLaSemana } from '@/lib/timeWindows';
 
 function getServiceClient() {
   const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
@@ -235,16 +236,14 @@ export async function getBarberWeekAppointments(
   if (!staffId) throw new Error('No staff_id en la sesión');
 
   // 2. Calcular rango de la semana (lunes → domingo)
-  const anchor = new Date(`${anchorDate}T12:00:00`);
-  const day = anchor.getDay(); // 0=dom
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(anchor);
-  monday.setDate(anchor.getDate() + diffToMonday);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
+  // S7-BUG-01: el lunes salía de `getDay()`, que lee la tz del PROCESO. Ahora del
+  // helper único, que no toca el reloj.
+  const dow = diaDeLaSemana(anchorDate);
+  const mondayStr = sumarDias(anchorDate, dow === 0 ? -6 : 1 - dow);
+  const sundayStr = sumarDias(mondayStr, 6);
 
-  const weekStart = toDateStr(monday);
-  const weekEnd   = toDateStr(sunday);
+  const weekStart = mondayStr;
+  const weekEnd   = sundayStr;
 
   // 3. Query — todos los appointments del barbero en esa semana.
   // La ventana se acota a la tz del negocio (lunes 00:00 → lunes siguiente 00:00
@@ -282,9 +281,7 @@ export async function getBarberWeekAppointments(
   const grouped: Record<string, DayAppointmentForStaff[]> = {};
 
   for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    grouped[toDateStr(d)] = [];
+    grouped[sumarDias(mondayStr, i)] = [];
   }
 
   for (const row of rows) {

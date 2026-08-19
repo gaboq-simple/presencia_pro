@@ -14,6 +14,7 @@ import { tenantDb } from '@/lib/tenantDb';
 import { localDayRangeUtc, todayStrInTz } from '@/lib/dayWindow';
 import { getCortesDesde } from '@/lib/corteData';
 import { computeCobrado } from '@/lib/cobrado';
+import { sumarDias } from '@/lib/timeWindows';
 import { VENTANA_DIAS, type EntradaSenales, type DiaDeCaja, type CorteParaSenal } from '@/lib/senales';
 
 function getServiceClient() {
@@ -30,11 +31,8 @@ type CitaRow = {
 };
 type MovRow = { occurred_on: string; type: string; amount: number | string };
 
-function restarDias(fecha: string, dias: number): string {
-  const d = new Date(`${fecha}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - dias);
-  return d.toISOString().slice(0, 10);
-}
+// S7-BUG-01: era una copia local; ahora sale del helper único (`lib/timeWindows`).
+const restarDias = (fecha: string, dias: number): string => sumarDias(fecha, -dias);
 
 /**
  * Todo lo que las señales necesitan de un negocio, en la ventana de 14 días.

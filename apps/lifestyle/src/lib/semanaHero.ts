@@ -12,6 +12,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { tenantDb } from '@/lib/tenantDb';
 import { localDayRangeUtc, todayStrInTz } from '@/lib/dayWindow';
+import { sumarDias } from '@/lib/timeWindows';
 import { computeCobrado } from '@/lib/cobrado';
 import { computeSemanaHero, type DiaSemana, type SemanaHero } from '@/lib/semanaCalc';
 import { getCortesDelDia, type CorteRow } from '@/lib/corteData';
@@ -28,11 +29,7 @@ type CitaRow = { completed_at: string; price_charged: number | string | null; se
 type MovRow  = { occurred_on: string; type: string; amount: number | string };
 type AvailRow = { day_of_week: number };
 
-function sumarDias(fecha: string, dias: number): string {
-  const d = new Date(`${fecha}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + dias);
-  return d.toISOString().slice(0, 10);
-}
+// S7-BUG-01: era una copia local; ahora sale del helper único (`lib/timeWindows`).
 
 /** El lunes de la semana de `fecha`. La semana del local va lunes → domingo. */
 export function lunesDe(fecha: string): string {

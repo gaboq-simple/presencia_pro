@@ -203,7 +203,7 @@ export default async function DashboardPage({
     getRetentionFeed(businessId),
     getContactadosCount(businessId),
     getClientelaStats(businessId),
-    getNegocioRevenue(businessId),
+    getNegocioRevenue(businessId, timezone),
     getNegocioOccupancy(businessId),
     getNegocioStaffRecompra(businessId),
     getPulsoHoy(businessId),

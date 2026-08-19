@@ -47,10 +47,14 @@ type FutureAppointment = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// S7-BUG-01: aritmética de calendario, no de instantes.
 function nextDayStr(dateStr: string): string {
-  const d = noonUTCDate(dateStr);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dim = [31, (y! % 4 === 0 && y! % 100 !== 0) || y! % 400 === 0 ? 29 : 28,
+               31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m! - 1]!;
+  return d! < dim ? `${y}-${String(m).padStart(2, '0')}-${String(d! + 1).padStart(2, '0')}`
+       : m! < 12  ? `${y}-${String(m! + 1).padStart(2, '0')}-01`
+       :            `${y! + 1}-01-01`;
 }
 
 function humanDayLabel(startsAt: Date, tz: string): string {

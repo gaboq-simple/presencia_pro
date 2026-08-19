@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { localDayRangeUtc, isTodayInTz } from '@/lib/dayWindow';
 import type { DayAppointmentForStaff } from '@/lib/dashboard.types';
+import { sumarDias } from '@/lib/timeWindows';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -65,11 +66,8 @@ const FRASES = [
 const TERMINAL_STATUSES = new Set(['completed', 'no_show', 'cancelled']);
 const ACTIVE_STATUSES = new Set(['pending', 'confirmed', 'walkin']);
 
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+// S7-BUG-01: era una copia local que además leía la tz del proceso.
+const addDays = (dateStr: string, days: number): string => sumarDias(dateStr, days);
 
 /** Frase del pool, sembrada por la fecha (puro → mismo valor en server/client,
  *  sin hydration mismatch; cambia cada día, estable dentro del día). */

@@ -40,7 +40,8 @@ export type NegocioRevenue = {
   hasAnyRevenue: boolean;                // false → "aún juntando historia"
 };
 
-/** Suma el revenue SELLADO de las completadas en [start, end] del negocio. */
+/** Suma el revenue SELLADO de las completadas en la ventana SEMIABIERTA
+ *  [start, end) del negocio. */
 async function sumSealedRevenue(
   supabase: ReturnType<typeof getServiceClient>,
   businessId: string,
@@ -51,7 +52,9 @@ async function sumSealedRevenue(
     .select('price_charged, service:service_id(price)')
     .eq('status', 'completed')
     .gte('starts_at', new Date(range.startMs).toISOString())
-    .lte('starts_at', new Date(range.endMs).toISOString());
+    // S7-BUG-01: `.lt`, no `.lte`. Con ventanas contiguas, `.lte` cuenta dos veces
+    // la cita que cae exactamente en el borde.
+    .lt('starts_at', new Date(range.endMs).toISOString());
 
   let sum = 0;
   for (const r of (data ?? []) as unknown as RawRevenueRow[]) {
@@ -62,13 +65,17 @@ async function sumSealedRevenue(
 
 export async function getNegocioRevenue(
   businessId: string,
+  timeZone: string,
   now: Date = new Date(),
 ): Promise<NegocioRevenue> {
   const supabase = getServiceClient();
   const nowMs = now.getTime();
 
-  const tr = tramoRanges(nowMs);
-  const specs = monthlySpecs(nowMs, 6);
+  // S7-BUG-01: las ventanas se resuelven en la tz del NEGOCIO. La firma pide la
+  // tz a propósito — un módulo de ventanas al que no se le puede pasar la zona
+  // horaria es un módulo que garantiza el bug.
+  const tr = tramoRanges(nowMs, timeZone);
+  const specs = monthlySpecs(nowMs, timeZone, 6);
 
   // Todas las ventanas en paralelo (queries chicas, scopeadas por negocio).
   const [thisMonth, prevTramo, monthRevenues] = await Promise.all([
@@ -90,7 +97,7 @@ export async function getNegocioRevenue(
         thisMonthToDate: thisMonth,
         prevMonthSameTramo: prevTramo,
         prevMonthClamped: tr.prevClamped,
-        prevMonthName: prevMonthName(nowMs),
+        prevMonthName: prevMonthName(nowMs, timeZone),
       }
     : null;
 

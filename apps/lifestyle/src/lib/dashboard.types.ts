@@ -62,6 +62,7 @@ export type AdminStaffPhotoRow = {
 import { createClient } from '@supabase/supabase-js';
 import { tenantDb } from '@/lib/tenantDb';
 import { zonedWallTimeToUtc, localDayRangeUtc } from './dayWindow';
+import { dayWindow, weekWindow, monthWindow, sumarDias, diaDeLaSemana, diasDelMes } from './timeWindows';
 import type {
   AppointmentStatus,
   AppointmentSource,
@@ -722,38 +723,26 @@ export function getPeriodRange(
   date: string,
   timezone: string,
 ): { start: string; end: string; startDate: string; endDate: string } {
-  const d = new Date(`${date}T12:00:00`);  // mediodía para evitar DST edge cases
+  // S7-BUG-01 — los límites salen del helper único. Antes se calculaban con
+  // `new Date(…)` + `getDay()`/`setDate()`, que leen la tz del PROCESO: con el
+  // server en UTC y la máquina de desarrollo en México, la misma fecha podía caer
+  // en dos semanas distintas. El helper no toca el reloj.
+  const w = period === 'day'   ? dayWindow(date, timezone)
+          : period === 'week'  ? weekWindow(date, timezone)
+          :                      monthWindow(date, timezone);
 
-  let firstDate: string;
-  let lastDate: string;
+  // Las etiquetas de fecha (inclusivas) que algunos consumidores muestran.
+  const firstDate = period === 'day'  ? date
+                  : period === 'week' ? sumarDias(date, (() => {
+                      const dow = diaDeLaSemana(date);
+                      return dow === 0 ? -6 : 1 - dow;
+                    })())
+                  : `${date.slice(0, 8)}01`;
+  const lastDate = period === 'day'  ? date
+                 : period === 'week' ? sumarDias(firstDate, 6)
+                 : `${date.slice(0, 8)}${String(diasDelMes(Number(date.slice(0, 4)), Number(date.slice(5, 7)))).padStart(2, '0')}`;
 
-  if (period === 'day') {
-    firstDate = date;
-    lastDate = date;
-  } else if (period === 'week') {
-    // Semana: lunes → domingo
-    const day = d.getDay();                        // 0=domingo
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(d);
-    monday.setDate(d.getDate() + diffToMonday);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    firstDate = toDateStr(monday);
-    lastDate = toDateStr(sunday);
-  } else {
-    // month
-    const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
-    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-    firstDate = toDateStr(firstDay);
-    lastDate = toDateStr(lastDay);
-  }
-
-  return {
-    start: localDayRangeUtc(firstDate, timezone).start,   // 00:00 local del primer día
-    end: localDayRangeUtc(lastDate, timezone).end,        // 00:00 local del día siguiente al último (exclusivo)
-    startDate: firstDate,
-    endDate: lastDate,
-  };
+  return { start: new Date(w.startMs).toISOString(), end: new Date(w.endMs).toISOString(), startDate: firstDate, endDate: lastDate };
 }
 
 // ─── Helper: Date → 'YYYY-MM-DD' ─────────────────────────────────────────────

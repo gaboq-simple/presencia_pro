@@ -1,13 +1,30 @@
 // ─── Ingresos (Negocio) — fechas, tramo y serie mensual (PURO, sin DB) ────────
 // La matemática de fechas del bloque Ingresos: el tramo del mes en curso, el mismo
 // tramo del mes anterior (con el borde de mes), y las ventanas de la serie de 6 meses.
-// Puro y determinista (`nowMs` inyectable) → testeable sin reloj real ni Supabase.
-// El revenue de cada ventana lo llena el server (lib/negocioMetrics) con el precio
-// SELLADO (COALESCE(price_charged, service.price), igual que #81).
+// Puro y determinista → testeable sin reloj real ni Supabase. El revenue de cada
+// ventana lo llena el server (lib/negocioMetrics) con el precio SELLADO.
+//
+// 🔴 **S7-BUG-01 — este módulo ERA el bug.** Armaba sus ventanas con `Date.UTC`
+//    puro mientras el resto del dashboard usaba el mes LOCAL del negocio, así que
+//    al titular le entraban las últimas seis horas del mes anterior: medido el
+//    2026-08-18, **$47,100 contra $46,580** — tres citas de la noche del 31 de
+//    julio contadas como agosto. Ahora los límites salen de `lib/timeWindows`, y
+//    por eso la firma cambió: ya no basta un `nowMs`, hace falta **la timezone
+//    del negocio**. Ese cambio de firma es la parte importante: un módulo de
+//    ventanas al que no se le puede pasar la tz es un módulo que garantiza el
+//    bug.
+//
+//    Las ventanas también pasaron a ser **semiabiertas [inicio, fin)**. Antes el
+//    fin era 23:59:59.999 y `negocioMetrics` filtraba con `.lte()`: dos meses
+//    contiguos contaban dos veces la cita del último milisegundo.
+
+import {
+  monthWindow, monthToDateWindow, prevMonthTramoWindow, sumarMeses, todayStrInTz,
+} from './timeWindows';
 
 const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-/** Ventana [startMs, endMs] para sumar revenue. */
+/** Ventana SEMIABIERTA [startMs, endMs) para sumar revenue. */
 export type RevenueRange = { startMs: number; endMs: number };
 
 /** Especificación de una barra mensual (el server le agrega `revenue`). */
@@ -21,78 +38,52 @@ export type TramoRanges = {
   prevClamped: boolean;      // hoy > días del mes anterior → prevTramo = mes anterior COMPLETO
 };
 
-function startOfMonthUtc(y: number, mZeroBased: number): number {
-  return Date.UTC(y, mZeroBased, 1);
-}
-
-/** Días del mes (UTC): el "día 0" del mes siguiente. */
-function daysInMonthUtc(y: number, mZeroBased: number): number {
-  return new Date(Date.UTC(y, mZeroBased + 1, 0)).getUTCDate();
-}
-
-/** Fin de un día calendario (UTC) — 23:59:59.999. */
-function endOfDayUtc(y: number, mZeroBased: number, day: number): number {
-  return Date.UTC(y, mZeroBased, day, 23, 59, 59, 999);
-}
-
 /**
  * Tramo del mes en curso (hasta ahora) vs el MISMO tramo del mes anterior.
- * 🔴 Borde de mes: el tramo se define por DÍA DE MES, no por fecha calendario. Si hoy
- * es el día 31 y el mes anterior tuvo 30 días → se compara contra el mes anterior
- * COMPLETO (clamp al último día) y se marca `prevClamped=true`, en vez de fallar por
- * "no existe 31 de junio".
+ * 🔴 Borde de mes: el tramo se define por DÍA DE MES, no por fecha calendario. Si
+ * hoy es el día 31 y el mes anterior tuvo 30 días → se compara contra el mes
+ * anterior COMPLETO (clamp al último día) y se marca `prevClamped=true`, en vez de
+ * fallar por "no existe 31 de junio".
  */
-export function tramoRanges(nowMs: number): TramoRanges {
-  const now = new Date(nowMs);
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const elapsedDay = now.getUTCDate();
-
-  // Mes anterior (con wrap de año).
-  const prevM = m === 0 ? 11 : m - 1;
-  const prevY = m === 0 ? y - 1 : y;
-  const prevDays = daysInMonthUtc(prevY, prevM);
-
-  const tramoDay = Math.min(elapsedDay, prevDays);
-  const prevClamped = elapsedDay > prevDays;
-
+export function tramoRanges(nowMs: number, timeZone: string): TramoRanges {
+  const hoy = todayStrInTz(timeZone, new Date(nowMs));
+  const prev = prevMonthTramoWindow(hoy, timeZone);
   return {
-    thisMonth: { startMs: startOfMonthUtc(y, m), endMs: nowMs },
-    prevTramo: { startMs: startOfMonthUtc(prevY, prevM), endMs: endOfDayUtc(prevY, prevM, tramoDay) },
-    elapsedDay,
-    prevClamped,
+    thisMonth:  monthToDateWindow(hoy, timeZone, nowMs),
+    prevTramo:  { startMs: prev.startMs, endMs: prev.endMs },
+    elapsedDay: Number(hoy.slice(8, 10)),
+    prevClamped: prev.clamped,
   };
 }
 
 /**
- * Ventanas de la serie de N meses (default 6), del más viejo al más nuevo. El último
- * es el mes en curso (`partial:true`, termina AHORA); los previos son meses cerrados.
+ * Ventanas de la serie de N meses (default 6), del más viejo al más nuevo. El
+ * último es el mes en curso (`partial:true`, termina AHORA); los previos son meses
+ * calendario completos del NEGOCIO.
  */
-export function monthlySpecs(nowMs: number, count = 6): MonthSpec[] {
-  const now = new Date(nowMs);
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
+export function monthlySpecs(nowMs: number, timeZone: string, count = 6): MonthSpec[] {
+  const hoy = todayStrInTz(timeZone, new Date(nowMs));
+  const anioActual = Number(hoy.slice(0, 4));
   const specs: MonthSpec[] = [];
 
   for (let i = count - 1; i >= 0; i--) {
-    // Mes = (y, m - i) normalizado.
-    const monthIndex = m - i;
-    const yy = y + Math.floor(monthIndex / 12);
-    const mm = ((monthIndex % 12) + 12) % 12;
+    const ancla = sumarMeses(`${hoy.slice(0, 8)}01`, -i);
+    const w = monthWindow(ancla, timeZone);
     const partial = i === 0;
-    const startMs = startOfMonthUtc(yy, mm);
-    const endMs = partial ? nowMs : endOfDayUtc(yy, mm, daysInMonthUtc(yy, mm));
-    // Etiqueta: mes; si la serie cruza de año, se desambigua con el año corto.
-    const crossesYear = yy !== y;
-    const label = crossesYear ? `${MESES_ES[mm]} '${String(yy).slice(2)}` : MESES_ES[mm];
-    specs.push({ label, startMs, endMs, partial });
+    const yy = Number(ancla.slice(0, 4));
+    const mm = Number(ancla.slice(5, 7)) - 1;
+    // Si la serie cruza de año, la etiqueta se desambigua con el año corto.
+    const label = yy !== anioActual ? `${MESES_ES[mm]} '${String(yy).slice(2)}` : MESES_ES[mm]!;
+    specs.push({ label, startMs: w.startMs, endMs: partial ? nowMs : w.endMs, partial });
   }
   return specs;
 }
 
-/** Nombre del mes anterior (para el copy "el mes pasado…"). */
-export function prevMonthName(nowMs: number): string {
-  const now = new Date(nowMs);
-  const prevM = now.getUTCMonth() === 0 ? 11 : now.getUTCMonth() - 1;
-  return MESES_ES[prevM]!;
+/** Nombre del mes anterior (para el copy "el mes pasado…"), en la tz del negocio.
+ *  A las 23:00 del 31 de julio en México, el mes anterior es junio — con
+ *  `getUTCMonth()` habría dicho julio, porque en UTC ya era agosto. */
+export function prevMonthName(nowMs: number, timeZone: string): string {
+  const hoy = todayStrInTz(timeZone, new Date(nowMs));
+  const anterior = sumarMeses(`${hoy.slice(0, 8)}01`, -1);
+  return MESES_ES[Number(anterior.slice(5, 7)) - 1]!;
 }

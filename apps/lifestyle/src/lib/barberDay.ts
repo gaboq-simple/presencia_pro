@@ -11,6 +11,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { tenantDb } from '@/lib/tenantDb';
 import { localDayRangeUtc } from '@/lib/dayWindow';
+import { weekWindow } from '@/lib/timeWindows';
 import { getStaffDayAppointments, type DashboardAppointment } from '@/lib/dashboard.types';
 
 // El tipo extendido vive ACÁ, no en DashboardAppointment (compartido con las
@@ -79,15 +80,12 @@ export async function getBarberWeekTipTotal(
   anchorDate: string,
   timezone: string,
 ): Promise<number> {
-  const anchor = new Date(`${anchorDate}T12:00:00`);
-  const monday = new Date(anchor);
-  monday.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const toStr = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const { start } = localDayRangeUtc(toStr(monday), timezone);
-  const { end } = localDayRangeUtc(toStr(sunday), timezone);
+  // S7-BUG-01: el lunes salía de `getDay()`, que lee la tz del PROCESO — con el
+  // server en UTC y la máquina de desarrollo en México, la misma fecha podía caer
+  // en dos semanas distintas. Ahora sale del helper, que no depende del reloj.
+  const { startMs, endMs } = weekWindow(anchorDate, timezone);
+  const start = new Date(startMs).toISOString();
+  const end   = new Date(endMs).toISOString();
 
   const db = tenantDb(getServiceClient(), businessId);
 
