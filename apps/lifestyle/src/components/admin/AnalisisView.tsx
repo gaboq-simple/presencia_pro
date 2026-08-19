@@ -168,10 +168,16 @@ function SemanaTipica({ occ }: { occ: OccupancyResult }): React.ReactElement | n
 function Servicios({ data, mesLabel }: { data: AnalisisData['servicios']; mesLabel: string }): React.ReactElement {
   return (
     <section aria-label="Servicios del mes" className="mt-5 rounded-xl bg-card p-4 shadow-card">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[.10em] text-faint">Servicios · {mesLabel}</p>
-        <span className="shrink-0 text-[11px] font-medium tabular-nums text-faint">{money(data.total)}</span>
-      </div>
+      {/* 🔴 El total del mes NO se repite acá, y la maqueta sí lo pone. Al montar
+          la card se midió que no cuadra con el titular del héroe: $46,580 contra
+          $47,100 el 2026-08-18. La causa NO es esta card —es que `revenueTrend`
+          arma sus ventanas en UTC puro (`Date.UTC`) mientras que todo lo demás
+          usa el mes LOCAL del negocio, así que al titular le entran las horas de
+          la noche del último día del mes anterior. Repetir acá un total que
+          contradice al de arriba es peor que no repetirlo: el dueño no tiene
+          manera de saber cuál creer. Vuelve cuando el bug esté arreglado —
+          S7-BUG-01 en SPRINT.md. */}
+      <p className="text-[11px] font-semibold uppercase tracking-[.10em] text-faint">Servicios · {mesLabel}</p>
       {data.vacio ? (
         <p className="py-6 text-center text-[13px] text-faint">Sin servicios cobrados este mes todavía.</p>
       ) : (
@@ -232,7 +238,7 @@ function CanalYBot({ canal, bot, mesLabel }: {
       <div className="mt-4 flex border-t border-line pt-3">
         {[
           { n: bot.conversaciones,   l: <>conversaciones<br />esta semana</> },
-          { n: bot.citasDelBot,      l: <>citas agendadas<br />por el bot</> },
+          { n: bot.citasDelBot,      l: <>citas del bot<br />esta semana</> },
           { n: bot.tomadasPorHumano, l: <>tomadas por<br />tu equipo</> },
         ].map((x, i) => (
           <div key={i} className="min-w-0 flex-1">
