@@ -29,6 +29,7 @@ import {
   buildMultiClassifierMetadata,
 } from '../classifierLog';
 import { buildBusinessContext } from '../businessContext';
+import { buildPrivacyNotice as buildPrivacyNoticeCopy } from '../copy';
 import { routeSideQuestion, derivaFallback, composeGreetingSideAnswer, refineTopic, closingForTopic } from '../sideQuestion';
 import { getCatalog, getActiveStaff } from '../catalog';
 import { parseDate, resolveInterpretedTime, applyTimeRes } from './qualifyingDatetime';
@@ -523,10 +524,13 @@ export async function handleGreeting(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Aviso de privacidad para clientes nuevos (LFPDPPP Art. 8). Consentimiento tácito. */
+/** Aviso de privacidad para clientes nuevos (LFPDPPP Art. 8). Consentimiento tácito.
+ *  La resolución de la URL (y su degradado sin dominio) vive en `copy.ts`. */
 function buildPrivacyNotice(): string {
-  const privacyUrl = process.env['PRIVACY_POLICY_URL'] ?? 'https://zentriq.mx/aviso-de-privacidad';
-  return `Al continuar, aceptas nuestro aviso de privacidad:\n${privacyUrl}`;
+  return buildPrivacyNoticeCopy({
+    PRIVACY_POLICY_URL:  process.env['PRIVACY_POLICY_URL'],
+    NEXT_PUBLIC_APP_URL: process.env['NEXT_PUBLIC_APP_URL'],
+  });
 }
 
 /**

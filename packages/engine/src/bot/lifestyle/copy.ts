@@ -137,3 +137,49 @@ export async function buildSideAnswerFromService(
     return null;
   }
 }
+
+// ─── Aviso de privacidad — la URL que el bot manda (S8-PER-01 · P0) ──────────
+// El link viaja por WhatsApp, así que tiene que ser ABSOLUTO: una ruta relativa
+// no es clickeable ahí.
+//
+// Decisión de dominio (Gabriel, 2026-08-18): **el aviso vive en el dominio de la
+// APP**, no en zentriq.mx. El default anterior apuntaba a
+// `https://zentriq.mx/aviso-de-privacidad`, que nunca existió — el bot llevaba
+// meses mandándole a cada cliente nuevo un link 404 justo en el mensaje donde le
+// pide su consentimiento. `zentriq.mx` queda fuera del camino crítico (un 301
+// futuro, si Gabriel lo quiere).
+//
+// Orden de resolución, y el degradado es lo importante:
+//   1. `PRIVACY_POLICY_URL` — override explícito, gana siempre.
+//   2. `NEXT_PUBLIC_APP_URL` + `/aviso-de-privacidad` — el caso normal.
+//   3. **Ninguna → no se manda link.** Un enlace roto es peor que ninguno: le
+//      dice al titular que hay un aviso y le cierra la puerta en la cara. Sin
+//      dominio configurado se le da el canal que SÍ existe (el correo), que es
+//      además el que ya ofrece el matcher ARCO.
+
+/** Correo del encargado — el canal que siempre existe, sin depender de un deploy. */
+export const PRIVACY_CONTACT_EMAIL = 'contacto@zentriq.mx';
+
+/** URL absoluta del aviso, o `null` si no hay dominio configurado. */
+export function resolvePrivacyUrl(env: {
+  PRIVACY_POLICY_URL?: string | undefined;
+  NEXT_PUBLIC_APP_URL?: string | undefined;
+}): string | null {
+  const override = env.PRIVACY_POLICY_URL?.trim();
+  if (override) return override;
+
+  const base = env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!base) return null;
+  return `${base.replace(/\/+$/, '')}/aviso-de-privacidad`;
+}
+
+/** El aviso que se le cuelga al saludo de un cliente nuevo (LFPDPPP Art. 8). */
+export function buildPrivacyNotice(env: {
+  PRIVACY_POLICY_URL?: string | undefined;
+  NEXT_PUBLIC_APP_URL?: string | undefined;
+}): string {
+  const url = resolvePrivacyUrl(env);
+  return url
+    ? `Al continuar, aceptas nuestro aviso de privacidad:\n${url}`
+    : `Al continuar, aceptas nuestro aviso de privacidad. Puedes pedirlo en ${PRIVACY_CONTACT_EMAIL}.`;
+}

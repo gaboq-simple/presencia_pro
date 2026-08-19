@@ -83,15 +83,24 @@ El default apunta a **otro dominio**. Crear la página en `apps/lifestyle` la
 sirve en el dominio de la app, no en `zentriq.mx`. Además, `PRIVACY_POLICY_URL`
 **no está en `.env.local.example`**, así que hoy nadie sabe que existe.
 
-Se cierra con las tres piezas juntas, no con una:
+**✅ DECISIÓN DE DOMINIO (Gabriel, 2026-08-18, al dar el "va"): el aviso vive en
+el dominio de la APP.** `zentriq.mx` queda **fuera del camino crítico** — un 301
+futuro y opcional, columna de Gabriel. Eso simplifica el cierre y elimina la
+dependencia manual que este paso tenía:
 
-1. la página en la app;
-2. `PRIVACY_POLICY_URL` agregada a `.env.local.example` **documentada**;
-3. **dependencia manual (Gabriel):** setear `PRIVACY_POLICY_URL` en Vercel al
-   dominio de la app —o publicar el mismo aviso en `zentriq.mx`—. **No bloquea
-   el merge**, bloquea el efecto: hasta que se haga, el bot sigue mandando un
-   link muerto. Estado honesto y visible, prohibido maquillarlo (regla de
-   dependencias manuales de `capa-de-dinero.md`).
+1. la página en la app (`/aviso-de-privacidad`);
+2. **la URL se resuelve sola**: `resolvePrivacyUrl` construye
+   `${NEXT_PUBLIC_APP_URL}/aviso-de-privacidad`, y `NEXT_PUBLIC_APP_URL` ya
+   existía y ya estaba documentada. `PRIVACY_POLICY_URL` queda como **override
+   opcional** por si el aviso se publica en otro dominio, documentada en
+   `.env.local.example`;
+3. **sin dominio configurado NO se manda link** y se ofrece el correo. Un enlace
+   roto es peor que ninguno: le dice al titular que hay un aviso y le cierra la
+   puerta en la cara. Es el degradado, no el caso normal.
+
+Así, el paso **no tiene dependencia manual**: con `NEXT_PUBLIC_APP_URL` seteada
+—que ya lo está, porque la usan los reportes y el minisite— el link funciona en
+cuanto el deploy sale.
 
 **Dependencia manual adicional, NO bloqueante:** revisión de abogado. Se publica
 la v1 fechada; la revisión ajusta, no estrena.
@@ -289,8 +298,9 @@ verificado ni plantillas aprobadas, porque no manda nada nuevo — deja de manda
 
 | Paso | Dependencia (quién: Gabriel) | Si no está lista |
 |---|---|---|
-| P0 | `PRIVACY_POLICY_URL` en Vercel apuntando al dominio de la app (o publicar el aviso en `zentriq.mx`) | La página existe y los 4 links del producto funcionan; **el link que manda el bot sigue muerto**, visible y anotado |
+| P0 | ~~`PRIVACY_POLICY_URL` en Vercel~~ — **eliminada** por la decisión de dominio: la URL se construye desde `NEXT_PUBLIC_APP_URL`, que ya está seteada | — |
 | P0 | Revisión de abogado | Se publica la v1 fechada; la revisión ajusta, no estrena |
+| P0 | *(opcional, sin prisa)* 301 de `zentriq.mx/aviso-de-privacidad` a la app | Nada se rompe: nadie apunta ahí desde que P0 cerró |
 
 ## Criterio de éxito, pre-registrado
 

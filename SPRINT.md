@@ -265,13 +265,17 @@ Bloqueada externa: tramitando cuenta de Meta Business y obtención de App Secret
 
 ---
 
-#### S2-LEG-01 — Publicar /aviso-de-privacidad ⚪ todo
-**Depende de:** S2-G-01
-**Archivos:** nueva ruta en lifestyle (decidir si `apps/lifestyle/src/app/aviso-de-privacidad/page.tsx` o publicar en zentriq.mx — preguntar a Gabriel)
+#### S2-LEG-01 — Publicar /aviso-de-privacidad 🟢 done (2026-08-18, vía S8-PER-01 · P0)
+**Archivos:** `apps/lifestyle/src/app/aviso-de-privacidad/page.tsx`
+**Decisión de dominio (Gabriel, 2026-08-18):** el aviso vive en el dominio de la **APP**; `zentriq.mx` queda fuera del camino crítico (301 opcional futuro).
 **Criterios de aceptación:**
-- [ ] Aviso accesible públicamente
-- [ ] Link en footer del dashboard
-- [ ] Link en footer del mini-sitio `/[slug]`
+- [x] Aviso accesible públicamente — verificado por ruta real: **200** con las 9 marcas de contenido (responsable/encargado, finalidad primaria vs secundaria, la baja por BAJA, ARCO y los 20 días hábiles). La **negativa** también: en `main` sin P0 la misma ruta daba **404**
+- [x] Link en footer del dashboard — **ya existía**, y ahora resuelve (200)
+- [x] Link en footer del mini-sitio `/[slug]` — **ya existía**, y ahora resuelve (200)
+- [x] *(no estaba en la spec y era el peor)* el link del formulario **ARCO** y el del **Home** — los dos existían y daban 404; ahora 200
+**Notas de ejecución:**
+- Lo que faltaba nunca fueron los links: eran **cuatro y estaban rotos**. Faltaba la página.
+- El link que el bot manda por WhatsApp se resolvía a `https://zentriq.mx/aviso-de-privacidad`, que nunca existió — o sea que cada cliente nuevo recibía un 404 justo en el mensaje donde se le pide el consentimiento. Ahora se construye desde `NEXT_PUBLIC_APP_URL`, y **sin dominio configurado no se manda link**: se ofrece el correo, porque un enlace roto es peor que ninguno.
 **Prompt:** Ver `SPRINT-PROMPTS.md` → S2-LEG-01
 
 ---
@@ -2032,7 +2036,8 @@ El copy de plantillas deterministas y el generado por LLM evolucionaron por sepa
 
 ## Permiso (plan en docs/planes/permiso.md)
 
-- **S8-PER-01 · Permiso: la baja existe y manda** ⚪ todo · **pendiente de "va" de Gabriel para ejecutar**
+- **S8-PER-01 · Permiso: la baja existe y manda** 🔵 in-progress ("va" de Gabriel 2026-08-18; P0→P4 en orden estricto, un merge por paso)
+  - **P0 · El aviso deja de ser 404** 🟢 done (2026-08-18, rama `feat/permiso-p0`). Cuatro enlaces vivos del producto apuntaban a `/aviso-de-privacidad` y los cuatro daban **404** —mini-sitio, dashboard, Home y, el peor, el formulario con el que un titular ejerce sus derechos ARCO—; más el link que el bot le manda por WhatsApp a cada cliente nuevo, que resolvía a `zentriq.mx/aviso-de-privacidad` y **nunca existió**: un 404 justo en el mensaje donde se pide el consentimiento. **Decisión de dominio de Gabriel:** el aviso vive en el dominio de la APP, y eso **eliminó la dependencia manual** que el plan traía — la URL se construye desde `NEXT_PUBLIC_APP_URL`, que ya estaba seteada y documentada; `PRIVACY_POLICY_URL` queda como override opcional. **Degradado deliberado:** sin dominio configurado NO se manda link y se ofrece el correo — un enlace roto es peor que ninguno, porque le dice al titular que hay un aviso y le cierra la puerta en la cara (7 tests en `privacyNotice.test.ts`, incluida la negativa de que `zentriq.mx` ya no aparece por default). **Aceptación por ruta real:** la ruta responde **200** con las 9 marcas de contenido y los **cuatro enlaces resuelven 200**; la **negativa** medida en `main` limpio: **404** (la primera corrida de esa negativa fue inválida —el archivo estaba untracked y sobrevivió al checkout— y se rehízo commiteando primero). **Red visual: 0 px en cuatro pestañas y 119 px en Administrar que coinciden EXACTAMENTE con su piso de ruido** (la línea "ahora" del riel): P0 no movió un píxel del dashboard. **Cierra S2-LEG-01.** tsc 0 · eslint 0 err · build ✓.
   Plan completo y verificado contra el repo en `docs/planes/permiso.md` (aterrizado 2026-08-18 desde el borrador de Fable; siete afirmaciones que el repo contradecía quedaron corregidas y marcadas en el propio documento). **Cinco pasos, orden estricto P0→P4, todo pre-WABA** — no manda nada nuevo, deja de mandar. **P0** publica el aviso de privacidad, que hoy es un 404 al que apuntan **cuatro enlaces vivos en producción** (mini-sitio, dashboard, Home y el formulario ARCO); cierra S2-LEG-01. **P1** agrega `customers.opted_out_at` + `opted_out_via`, espejo de las tres columnas de alta de la 037. **P2** intercepta "BAJA" de forma DETERMINISTA en los tres puntos de `api/bot/route.ts` donde ya se intercepta el comando de test reset —antes del handoff gate, que hoy se traga la baja, y antes del matcher ARCO— sin pasar jamás por el clasificador: un opt-out no puede depender del humor de un modelo. **P3** mete la exclusión en `sendWhatsAppMeta` (18 llamadas en 13 archivos) con un `purpose` obligatorio de cuatro valores, para que la regla de niveles sea un tipo y no una memoria. **P4** hace que el walk-in deje de fabricar consentimiento (`pending_notice`). Su aceptación estrella: tras una baja por ruta real, **cero** queries salientes incluyen a ese cliente y la reactivación retorna `suppressed` visible — con filas presentes, nunca contra tablas vacías. **No ejecutar sin el "va".**
 
 ---
