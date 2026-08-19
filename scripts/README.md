@@ -127,6 +127,16 @@ reales y para diseñar vistas con densidad real.
   16:22 dieron huellas de contenido idénticas en pasado/hoy/futuro; entre 16:19 y
   16:20 cambió solo la de hoy, por el fin de una cita. Al comparar corridas, la
   huella va sobre el CONTENIDO, nunca sobre los `id` (se regeneran por diseño).
+- **Siembra las conversaciones del bot** (`bot_conversations` +
+  `conversation_messages`, bloques 8c/8d): una por PERSONA con reserva por bot,
+  más las que preguntaron y no agendaron, y dos tomadas por el asistente. Sin
+  ellas la ventana al bot de Análisis leía **"0 conversaciones"** al lado de las
+  decenas de citas que el propio seed le atribuye al bot. Solo purga y re-siembra
+  **lo suyo** (marcado con `context->>'seed'`): las conversaciones reales de los
+  smokes por WhatsApp sobreviven intactas, con su hilo.
+  El conteo semanal de conversaciones **no empata** con el de citas del bot y no
+  hay que forzarlo: la tabla guarda una fila por persona (estado actual de la
+  charla, no un log) y el mismo mes se mide contra ventanas distintas.
 - **⚠️ Destructivo** para el negocio objetivo (borra citas, waitlist,
   notificaciones y su audit — suspende momentáneamente el trigger append-only
   de `appointment_audit`). **Solo BD demo, nunca producción con datos reales.**

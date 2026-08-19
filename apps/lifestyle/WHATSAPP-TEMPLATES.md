@@ -15,7 +15,7 @@ Tiempo de aprobacion: 24-72h típicamente. Categoria UTILITY aprueba mas rapido 
 | Punto | Archivo | Tipo de envio | Templates necesarios |
 |---|---|---|---|
 | Reminders de cita | `dispatch-lifestyle-notifications` | Proactivo (horas/dias despues) | reminder_24h, reminder_2h, reminder_1h |
-| Follow-up post-cita | `dispatch-lifestyle-notifications` | Proactivo (dia siguiente) | follow_up |
+| ~~Follow-up post-cita~~ | — | **no ocurre**: nadie encola `follow_up` | follow_up (reservado) |
 | Solicitud de resena | `dispatch-lifestyle-notifications` | Proactivo (24h despues) | review_request |
 | Slot en lista de espera | `dispatch-lifestyle-notifications` handleWaitlistExpiry | Proactivo | waitlist_slot_available |
 | Slot en lista de espera | `notifyWaitlistOnCancel.ts` | Proactivo | waitlist_slot_available |
@@ -118,7 +118,11 @@ Hola {{1}}, te recordamos tu cita de {{2}} con {{3}} hoy a las {{4}} en {{5}}.
 
 - **Categoria:** UTILITY
 - **Idioma:** es_MX
-- **Usado por:** `dispatch-lifestyle-notifications` (tipo `follow_up`)
+- **Usado por:** NADIE hoy. El tipo `follow_up` no tiene un solo escritor en el
+  repo, asi que el despachador nunca lo ve en la cola. Se conserva como pista de
+  aterrizaje del **recibo post-cobro** (`docs/planes/capa-de-dinero.md`). **No
+  hay prisa por someterlo**: aprobar una plantilla que nadie manda no destraba
+  nada — ver el encabezado de `dispatch-lifestyle-notifications/index.ts`.
 
 **Body:**
 ```
@@ -263,7 +267,7 @@ Para cada template:
 4. `waitlist_slot_available` — alto impacto
 5. `appointment_reminder_2h`
 6. `appointment_reminder_24h`
-7. `appointment_follow_up`
+7. `appointment_follow_up` — ultimo: reservado, sin escritor (nadie lo manda hoy)
 8. `appointment_review_request` — MARKETING tarda mas
 
 ---

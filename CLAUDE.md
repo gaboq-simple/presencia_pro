@@ -245,7 +245,7 @@ Cola de notificaciones diferidas (recordatorios, reactivación, waitlist).
 | business_id | uuid FK → businesses.id | |
 | appointment_id | uuid nullable FK → appointments.id | |
 | customer_id | uuid nullable FK → customers.id | |
-| type | text | CHECK: reminder_24h / reminder_2h / reminder_1h / follow_up / review_request / waitlist_expiry / reactivation / reschedule_notice / cancellation_notice |
+| type | text | CHECK: reminder_24h / reminder_2h / reminder_1h / follow_up / review_request / waitlist_expiry / reactivation / reschedule_notice / cancellation_notice. **`follow_up` no tiene escritor**: el valor existe en el CHECK y en el despachador, pero nadie encola ese tipo — está reservado como pista del recibo post-cobro (`docs/planes/capa-de-dinero.md`) |
 | scheduled_for | timestamptz | cuándo debe enviarse |
 | sent_at, failed_at | timestamptz nullable | |
 | metadata | jsonb nullable | datos auxiliares por tipo (ej. `{ waitlist_id }`) |
@@ -403,7 +403,7 @@ Desplegadas en Supabase. Ambas tienen `verify_jwt: false` (autenticadas por secr
 ### `dispatch-lifestyle-notifications`
 - **Trigger**: cron cada minuto (configurar en Supabase Dashboard → Edge Functions → Schedules)
 - **Lógica**: busca registros en `scheduled_notifications` donde `scheduled_for <= NOW()` y `sent_at IS NULL` y `failed_at IS NULL`; envía vía Meta Cloud API; marca `sent_at` o `failed_at`
-- **Tipos despachados**: reminder_24h, reminder_2h, reminder_1h, follow_up, review_request, reactivation, waitlist_expiry, reschedule_notice, cancellation_notice
+- **Tipos despachados**: reminder_24h, reminder_2h, reminder_1h, ~~follow_up~~, review_request, reactivation, waitlist_expiry, reschedule_notice, cancellation_notice. `follow_up` sabe despacharse pero **nadie lo encola** (reservado, no roto — ver el encabezado de la función)
 
 ### `dispatch-auto-cancel`
 - **Trigger**: cron cada minuto (configurar en Supabase Dashboard → Edge Functions → Schedules)

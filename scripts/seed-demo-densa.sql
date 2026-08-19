@@ -9,6 +9,9 @@
 -- atrás y ~1 semana hacia adelante, con no-shows (3 reincidentes en el mes),
 -- walk-ins, cancelaciones, ~12 clientes "enfriándose" (sin visitas recientes,
 -- alimentan "Para recuperar"), días libres y bloqueos aprobados.
+-- Y las CONVERSACIONES del bot (8c/8d): sin ellas la ventana al bot de Análisis
+-- leía "0 conversaciones" al lado de las decenas de citas que el propio seed le
+-- atribuye al bot — el diferenciador de venta, leyéndose roto.
 -- Y la CAJA (D1b): riel de cobro en las citas cobradas, ~30 días de movimientos
 -- fuera de agenda y ~4 semanas de cortes con descuadres chicos de signo MIXTO.
 -- Sin esa capa, la pieza que más diferencia —el cuadre— se ve vacía justo en las
@@ -54,14 +57,17 @@
 --   · SIN RUIDO DE AUDIT: todo entra por INSERT con valores finales (cero
 --     UPDATEs sobre appointments) y al final limpia las filas viejas de
 --     appointment_audit con actor desconocido ("Acción sin identificar").
---   · NO TOCA: bot_conversations, conversation_messages, bot_logs,
---     appointment_tips, ni los horarios ya cargados de barberos existentes.
+--   · NO TOCA: bot_logs, appointment_tips, ni los horarios ya cargados de
+--     barberos existentes. De `bot_conversations` y `conversation_messages`
+--     toca SOLO lo que él mismo sembró —marcado con `context->>'seed'`— y
+--     jamás las conversaciones reales de los smokes por WhatsApp (bloque 8c).
 --     ÚNICA excepción en businesses: `caja_fondo` (config numérica del fondo de
 --     cambio, idempotente — la capa de dinero la necesita para que el descuadre
 --     de efectivo no cargue un offset sistemático).
 --
 -- ⚠️ DESTRUCTIVO para el negocio objetivo: borra TODAS sus citas, waitlist,
 --    scheduled_notifications y su appointment_audit. Solo para la BD demo.
+--    (De conversaciones y mensajes borra solo LAS SUYAS — ver 8c.)
 --
 -- Uso (psql, con el session pooler como en scripts/backup-supabase.sh):
 --   psql "$SUPABASE_DB_URL" -f scripts/seed-demo-densa.sql
@@ -552,6 +558,221 @@ where a.business_id = b.id
   and a.customer_id in (select id from seed_altas_mes)
   and (a.starts_at at time zone b.timezone)::date < date_trunc('month', b.hoy)::date;
 
+-- ─── 8c. La ventana al bot: conversaciones y su hilo ──────────────────────────
+-- El seed ya atribuía ~600 citas al bot, pero `bot_conversations` quedaba vacía:
+-- la ventana al bot de Análisis leía "0 conversaciones / 34 citas del bot". Un
+-- dato REAL que se lee roto, y justo encima del diferenciador que se vende.
+--
+-- Regla: una conversación por PERSONA. La tabla es UNIQUE por
+-- (business_id, customer_phone) porque guarda el ESTADO ACTUAL de la charla, no
+-- un log; `last_message` es el instante en que se cerró su ÚLTIMA reserva por
+-- bot. Consecuencia que NO es un bug y no hay que "arreglar" igualando números:
+-- el conteo semanal de conversaciones no tiene por qué empatar con el de citas
+-- del bot — quien agendó dos veces en la semana es UNA conversación, y una cita
+-- del viernes se conversó el miércoles (el seed reserva 2 días antes).
+--
+-- Se siembran también las que NO convirtieron: gente que preguntó y se fue. Sin
+-- ellas la ventana diría que el bot cierra el 100% de lo que toca, que es la
+-- clase de número de teatro que el propio plan vigila.
+--
+-- Determinismo (mismas escalas que declara el encabezado): las de (b) dependen
+-- de la FECHA de corrida; las de (a) heredan la escala del DÍA — cuáles reservas
+-- "ya ocurrieron" (`created_at <= now()`) avanza con la hora de corrida.
+--
+-- ⚠️ SOLO se tocan las filas que este seed creó, marcadas con `context->>'seed'`.
+-- Las conversaciones REALES de los smokes por WhatsApp (teléfonos de verdad, con
+-- su hilo de mensajes) sobreviven a la purga y al INSERT: son la única traza que
+-- queda de esas pruebas y borrarlas no se recupera.
+
+-- Purga de lo sembrado antes (los mensajes primero: se identifican por el
+-- teléfono de la conversación que se va a borrar).
+create temp table seed_conv_purge as
+select customer_phone from bot_conversations
+where business_id = (select id from seed_biz) and context->>'seed' = 'true';
+
+delete from conversation_messages
+where business_id = (select id from seed_biz)
+  and customer_phone in (select customer_phone from seed_conv_purge);
+
+delete from bot_conversations
+where business_id = (select id from seed_biz) and context->>'seed' = 'true';
+
+-- La última reserva por bot de cada persona, y solo si YA ocurrió: una cita del
+-- futuro se reservó en el futuro (el seed le pone created_at = starts_at − 2d),
+-- y una conversación con `last_message` por venir contaría en la semana sin
+-- haber pasado.
+create temp table seed_conv_last as
+select distinct on (a.customer_id)
+       a.customer_id, a.id as appt_id, a.starts_at, a.created_at,
+       a.service_id, a.staff_id
+from appointments a
+where a.business_id = (select id from seed_biz)
+  and a.source = 'bot' and a.customer_id is not null
+  and a.created_at <= now()
+order by a.customer_id, a.created_at desc;
+
+-- Quién atiende cuando el bot ya no alcanza: el asistente si existe, si no el
+-- primer barbero. Es el `taken_by` de las conversaciones tomadas.
+create temp table seed_conv_staff as
+select s.id from staff s
+where s.business_id = (select id from seed_biz) and s.active
+order by (s.role = 'assistant') desc, s.name
+limit 1;
+
+create temp table seed_conv as
+-- (a) quien agendó: la charla se cerró cuando quedó la cita, unos minutos después.
+select
+  c.id as customer_id, c.phone, split_part(c.name, ' ', 1) as nombre,
+  'CONFIRMED'::text as state,
+  k.appt_id, k.service_id, k.staff_id, k.starts_at,
+  k.created_at + make_interval(mins => 3 + (pg_temp.h(c.id::text || ':conv:cierre') * 6)::int) as last_msg,
+  pg_temp.h(c.id::text || ':conv') as r
+from seed_conv_last k
+join customers c on c.id = k.customer_id
+-- sin teléfono no hay WhatsApp, y sin WhatsApp no hay conversación: 35 de los
+-- 125 clientes de la demo vienen de seeds viejos y no tienen número.
+where c.phone is not null
+union all
+-- (b) quien preguntó y no agendó: HASTA 14 personas sin reserva por bot, con el
+--     último mensaje entre 1 y 4 días atrás. La charla murió en la pregunta del
+--     bot — por eso el estado es el del bot esperando respuesta, no uno terminal.
+--     Medido el 2026-08-19: el cupo casi no se llena (4 de 14). No es una falla
+--     de este bloque: con ~620 citas del bot repartidas entre los clientes, casi
+--     todo el que tiene teléfono ya reservó alguna vez. Si algún día se quiere
+--     una tasa de conversión más creíble, se toca el reparto de `source` del
+--     bloque 5, no este cupo.
+select * from (
+  select
+    c.id, c.phone, split_part(c.name, ' ', 1),
+    case when pg_temp.h(c.id::text || ':conv:st') < 0.5
+         then 'SHOWING_SLOTS' else 'QUALIFYING_SERVICE' end,
+    null::uuid, null::uuid, null::uuid, null::timestamptz,
+    -- entre 1 y 4 días atrás, en horario de tienda (09:00–18:00 local). Anclado
+    -- al DÍA del negocio y no a `now()`: así dos corridas del mismo día dan lo
+    -- mismo, que es la escala de determinismo que declara el encabezado.
+    ((b2.hoy - (1 + (pg_temp.h(c.id::text || ':conv:d') * 4)::int))::timestamp
+      + make_interval(hours => 9, mins => (pg_temp.h(c.id::text || ':conv:hh') * 540)::int))
+      at time zone b2.timezone,
+    pg_temp.h(c.id::text || ':conv')
+  from customers c
+  cross join seed_biz b2
+  where c.business_id = (select id from seed_biz)
+    and c.phone is not null
+    and c.id not in (select customer_id from seed_conv_last)
+    -- nunca pisar una conversación real (los smokes por WhatsApp)
+    and not exists (select 1 from bot_conversations bc
+                    where bc.business_id = c.business_id and bc.customer_phone = c.phone)
+  order by pg_temp.h(c.id::text || ':conv:pick')
+  limit 14
+) sin_cita;
+
+-- Dos conversaciones tomadas por una persona y todavía en sus manos. `taken_at`
+-- se limpia al devolverlas al bot (releaseConversation), así que "tomadas" en la
+-- ventana significa EN CURSO: las dos más recientes, no dos cualesquiera.
+create temp table seed_conv_human as
+select phone from seed_conv where state = 'CONFIRMED' order by last_msg desc limit 2;
+
+insert into bot_conversations (business_id, customer_phone, state, context, last_message,
+                               created_at, last_message_id, session_mode, taken_by, taken_at)
+select
+  (select id from seed_biz), v.phone, v.state,
+  jsonb_strip_nulls(jsonb_build_object(
+    'seed',              true,
+    'customerId',        v.customer_id,
+    'serviceId',         v.service_id,
+    'staffId',           v.staff_id,
+    'appointmentId',     v.appt_id,
+    -- lo mismo que escribe confirmed.ts al cerrar una reserva (el nombre engaña:
+    -- es el recordatorio de 1h, no el follow_up post-visita — ver la nota de
+    -- `follow_up` en supabase/functions/dispatch-lifestyle-notifications/index.ts)
+    'followUpScheduled', case when v.appt_id is not null then true end,
+    'pendingSlots',      case when v.appt_id is not null then '[]'::jsonb end
+  )),
+  v.last_msg,
+  v.last_msg - interval '12 minutes',
+  'seed:' || left(md5(v.phone), 16),
+  case when h.phone is not null then 'human' else 'bot' end,
+  case when h.phone is not null then (select id from seed_conv_staff) end,
+  case when h.phone is not null then v.last_msg - interval '2 minutes' end
+from seed_conv v
+left join seed_conv_human h on h.phone = v.phone
+on conflict (business_id, customer_phone) do nothing;
+
+-- ─── 8d. El hilo de esas conversaciones ───────────────────────────────────────
+-- Una conversación en la lista que al abrirla no tiene mensajes es el MISMO
+-- defecto que este bloque vino a matar, movido de pestaña. Se siembra el hilo de
+-- las 60 más recientes: `getActiveConversations` lista 50, así que ninguna que
+-- la mesa de control alcance a abrir queda vacía. Las más viejas que eso no se
+-- pueden abrir desde la app.
+create temp table seed_conv_hilo as
+select
+  v.phone, v.nombre, v.state, v.last_msg, v.r,
+  (h.phone is not null) as tomada,
+  coalesce(sv.name,
+           (select s2.name from services s2
+            where s2.business_id = (select id from seed_biz) and s2.active
+            order by pg_temp.h(v.phone || ':svc:' || s2.id) limit 1)) as svc_name,
+  st.name as staff_name,
+  (v.starts_at at time zone (select timezone from seed_biz)) as inicio_local,
+  case when h.phone is not null then 8
+       when v.state = 'CONFIRMED' then 6
+       when v.state = 'SHOWING_SLOTS' then 4
+       else 2 end as turnos
+from seed_conv v
+left join seed_conv_human h on h.phone = v.phone
+left join services sv on sv.id = v.service_id
+left join staff st on st.id = v.staff_id
+where exists (select 1 from bot_conversations bc
+              where bc.business_id = (select id from seed_biz)
+                and bc.customer_phone = v.phone and bc.context->>'seed' = 'true')
+order by v.last_msg desc
+limit 60;
+
+insert into conversation_messages (business_id, customer_phone, direction, body, sent_by,
+                                   staff_id, created_at)
+select
+  (select id from seed_biz), t.phone, m.direction, m.body, m.sent_by,
+  case when m.sent_by = 'human' then (select id from seed_conv_staff) end,
+  t.last_msg - make_interval(secs => (t.turnos - m.idx) * 90)
+from seed_conv_hilo t
+join seed_biz b on true
+cross join lateral (
+  values
+    (1, 'inbound',  'customer',
+        case when t.r < 0.34 then 'Hola, buenas. ¿Me pueden dar una cita?'
+             when t.r < 0.67 then 'Hola! quiero agendar un corte'
+             else 'Buenas, ¿tienen espacio esta semana?' end),
+    (2, 'outbound', 'bot',
+        '¡Hola ' || t.nombre || '! Soy ' || (select bot_name from businesses where id = b.id)
+        || ' de ' || (select name from businesses where id = b.id)
+        || '. ¿Qué servicio te interesa?'),
+    (3, 'inbound',  'customer', 'Quiero ' || lower(t.svc_name)),
+    (4, 'outbound', 'bot',
+        case when t.inicio_local is null
+             then 'Va, ' || lower(t.svc_name) || '. Mañana tengo 11:00, 13:00 y 17:00. ¿Cuál te acomoda?'
+             -- la hora real PRIMERO y luego las dos siguientes: ofrecer la hora
+             -- anterior metía opciones antes de que el barbero abriera
+             else 'Va, ' || lower(t.svc_name) || '. El '
+                  || (array['domingo','lunes','martes','miércoles','jueves','viernes','sábado'])[extract(dow from t.inicio_local)::int + 1]
+                  || ' ' || extract(day from t.inicio_local)::int || ' tengo '
+                  || to_char(t.inicio_local, 'HH24:MI') || ', '
+                  || to_char(t.inicio_local + interval '1 hour', 'HH24:MI') || ' y '
+                  || to_char(t.inicio_local + interval '2 hours', 'HH24:MI')
+                  || '. ¿Cuál te acomoda?' end),
+    (5, 'inbound',  'customer', 'La de las ' || to_char(t.inicio_local, 'HH24:MI')),
+    (6, 'outbound', 'bot',
+        'Listo, ' || t.nombre || '. Te esperamos el '
+        || (array['domingo','lunes','martes','miércoles','jueves','viernes','sábado'])[extract(dow from t.inicio_local)::int + 1]
+        || ' ' || extract(day from t.inicio_local)::int || ' de '
+        || (array['enero','febrero','marzo','abril','mayo','junio','julio','agosto',
+                  'septiembre','octubre','noviembre','diciembre'])[extract(month from t.inicio_local)::int]
+        || ' a las ' || to_char(t.inicio_local, 'HH24:MI') || ' con ' || t.staff_name
+        || '. Si necesitas moverla, escríbeme.'),
+    (7, 'inbound',  'customer', 'Oye, ¿hay problema si llego 15 minutos tarde?'),
+    (8, 'outbound', 'human',    'Para nada, ' || t.nombre || '. Ahí te esperamos.')
+) as m(idx, direction, sent_by, body)
+where m.idx <= t.turnos;
+
 -- ─── 9. Stats de clientes (el trigger solo corre en UPDATE, no en el seed) ────
 with agg as (
   select a.customer_id,
@@ -622,4 +843,12 @@ select
      join seed_biz b on c.business_id = b.id)                                                                  as suma_descuadres,
   -- El "+N este mes" del héroe de Clientela (8b). En 0 el crecimiento se ve muerto.
   (select count(*) from customers c join seed_biz b on c.business_id = b.id
-    where c.created_at >= date_trunc('month', b.hoy))                                                          as altas_del_mes;
+    where c.created_at >= date_trunc('month', b.hoy))                                                          as altas_del_mes,
+  -- La ventana al bot (8c). `conversaciones_semana` es el número que se leía 0.
+  (select count(*) from bot_conversations c join seed_biz b on c.business_id = b.id)                            as conversaciones,
+  (select count(*) from bot_conversations c join seed_biz b on c.business_id = b.id
+    where c.last_message >= (date_trunc('week', b.hoy::timestamp)::date::timestamp
+                             at time zone b.timezone))                                                          as conversaciones_semana,
+  (select count(*) from bot_conversations c join seed_biz b on c.business_id = b.id
+    where c.session_mode = 'human')                                                                             as tomadas_por_humano,
+  (select count(*) from conversation_messages m join seed_biz b on m.business_id = b.id)                         as mensajes;

@@ -33,9 +33,30 @@
 //   reminder_1h     — recordatorio 1h antes de la cita
 //   reminder_2h     — recordatorio 2h antes
 //   reminder_24h    — recordatorio 24h antes
-//   follow_up       — seguimiento post-cita
+//   follow_up       — RESERVADO, sin escritor (ver el bloque de abajo)
 //   review_request  — solicitud de resena 24h despues de la visita
 //   waitlist_expiry — expiracion de notificacion de lista de espera (30 min)
+//
+// ─── `follow_up`: pista de aterrizaje reservada, NO un tipo que funcione ─────
+// Nadie en el repo inserta una fila con `type = 'follow_up'`. Ni el bot, ni las
+// server actions, ni las rutas de API: cero escritores, verificado por grep. Este
+// despachador nunca lo va a ver en la cola, y la lista de arriba —leida sin esta
+// nota— dice lo contrario. Lo que si existe es toda la infraestructura: el valor
+// en el CHECK de la tabla (migracion 004), la plantilla `appointment_follow_up`
+// (WHATSAPP-TEMPLATES.md), el helper `sendFollowUp` y las dos ramas de mas abajo.
+//
+// Se deja EN PIE a proposito. Es la pista donde va a aterrizar el **recibo
+// post-cobro** —decirle al cliente que pago, cuanto y por que, despues de
+// cobrarle— cuando se construya; ver docs/planes/capa-de-dinero.md. Borrar el
+// tipo costaria una migracion del CHECK y una plantilla nueva por aprobar en Meta
+// para recuperar lo mismo: la infraestructura es barata de guardar y cara de
+// rehacer. Lo que no se puede seguir pagando es que se lea como que ya funciona.
+//
+// Si alguien lo cablea: decidir ANTES que dice el mensaje y a que nivel de
+// permiso pertenece (docs/planes/permiso.md). Un recibo de algo que el cliente
+// acaba de pagar es `appointment_utility` —no se suprime— pero un "como te fue"
+// con intencion de traerlo de vuelta es marketing y si se suprime.
+// ─────────────────────────────────────────────────────────────────────────────
 //
 // Envio: Meta WhatsApp Business Cloud API.
 // Usa Message Templates aprobados para envios proactivos fuera de la ventana
@@ -189,6 +210,8 @@ function buildTemplateComponents(
       return { templateName, components: [params(customerName, serviceName, staffName, timeStr, businessName)] };
 
     case 'follow_up':
+      // RESERVADO: nadie encola este tipo (ver el encabezado). La rama se
+      // mantiene lista para el recibo post-cobro, no porque hoy corra.
       // Template: Hola {{1}}, gracias por tu visita a {{2}}. ...
       if (!customerName || !businessName) return null;
       return { templateName, components: [params(customerName, businessName)] };
@@ -215,6 +238,7 @@ function buildFallbackMessage(
     case 'reminder_24h':
       return `Hola, te recordamos tu proxima cita${businessName ? ` en ${businessName}` : ''}. Te esperamos!`;
     case 'follow_up':
+      // RESERVADO, sin escritor — ver el encabezado.
       return `Hola, gracias por tu visita. Como te fue?`;
     case 'review_request':
       return `Hola, nos regalas tu opinion sobre tu cita?`;

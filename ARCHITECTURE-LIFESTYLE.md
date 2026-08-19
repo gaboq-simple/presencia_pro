@@ -233,7 +233,7 @@ Idempotencia: `sent_at IS NULL AND failed_at IS NULL` antes de procesar.
 | `id` | UUID PK | |
 | `business_id` | UUID FK → businesses | |
 | `appointment_id` | UUID FK → appointments? | ON DELETE CASCADE |
-| `type` | TEXT | `reminder_24h \| reminder_2h \| reminder_1h \| follow_up \| review_request \| waitlist_expiry` |
+| `type` | TEXT | `reminder_24h \| reminder_2h \| reminder_1h \| follow_up \| review_request \| waitlist_expiry` — `follow_up` está reservado y sin escritor (`docs/planes/capa-de-dinero.md`) |
 | `scheduled_for` | TIMESTAMPTZ | |
 | `sent_at` | TIMESTAMPTZ? | NULL si no enviado |
 | `failed_at` | TIMESTAMPTZ? | NULL si sin error |

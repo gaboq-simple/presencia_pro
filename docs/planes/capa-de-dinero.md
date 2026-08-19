@@ -682,6 +682,38 @@ con autor.
 
 ---
 
+## El recibo post-cobro — pista de aterrizaje reservada (NO es un paso de este plan)
+
+Cobrar y no decir nada deja al cliente sin comprobante y al negocio sin la
+prueba de que cobró lo que dice. El recibo post-cobro —cuánto pagó, por qué
+servicio, con quién, en qué riel— es la utilidad que se apoya de forma natural
+sobre D2 (`price_charged` + `payment_method` + `completed_at`): el dato ya
+está sellado, falta el mensaje.
+
+**No se construye aquí, y por eso hay que decir dónde va a aterrizar.** El tipo
+`follow_up` de `scheduled_notifications` existe completo —valor en el CHECK
+(migración 004), plantilla `appointment_follow_up`, helper `sendFollowUp`, dos
+ramas en el despachador— y **no tiene un solo escritor**: nadie encola ese tipo,
+así que el seguimiento post-cita no ocurre por más que el código lo sugiera.
+
+**Decisión (2026-08-19):** no se borra ni se cablea. Se documenta como
+reservado, en el código y acá.
+
+- **Por qué no se borra:** recuperarlo cuesta una migración del CHECK y una
+  plantilla nueva por aprobar en Meta (24–72 h). La infraestructura es barata de
+  guardar y cara de rehacer.
+- **Por qué no se cablea todavía:** un recibo sin decidir su texto ni su nivel
+  de permiso es peor que no mandarlo. Lo que pagó el cliente es
+  `appointment_utility` —no se suprime, `docs/planes/permiso.md`— pero un "¿cómo
+  te fue?" con intención de traerlo de vuelta es marketing y sí se suprime; son
+  dos mensajes distintos y hoy comparten una sola plantilla, escrita como lo
+  segundo.
+- **Precondición dura:** nada de esto sale hasta que
+  `dispatch-lifestyle-notifications` esté desplegada (**S7-NOTIF-01**). Encolar
+  hacia un despachador que no existe es escribir en una cola que nadie lee.
+
+---
+
 ## Qué cambia de dueno-v3.md
 
 - **Se conservan tal cual:** Pasos 1, 2, 5 y 6.

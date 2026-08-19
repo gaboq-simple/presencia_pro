@@ -47,7 +47,7 @@ export const TEMPLATE_NAMES = {
   reminder24h:          'appointment_reminder_24h',
   reminder2h:           'appointment_reminder_2h',
   reminder1h:           'appointment_reminder_1h',
-  followUp:             'appointment_follow_up',
+  followUp:             'appointment_follow_up',   // reservado, sin escritor — ver sendFollowUp
   reviewRequest:        'appointment_review_request',
   waitlistSlotAvailable: 'waitlist_slot_available',
   cancellationNotice:   'appointment_cancellation_notice',
@@ -267,6 +267,16 @@ export async function sendReminder1h(
 
 /**
  * follow_up — "Hola {{1}}, gracias por tu visita a {{2}}. ¿Como te fue?"
+ *
+ * ⚠️ RESERVADO — SIN LLAMADORES, A PROPÓSITO. Nadie encola `type='follow_up'` en
+ * `scheduled_notifications` y nadie llama a esta función: el seguimiento
+ * post-cita NO existe como comportamiento del producto, por más que el tipo, la
+ * plantilla y esta función estén completos. Se conserva como **pista de
+ * aterrizaje del recibo post-cobro** (docs/planes/capa-de-dinero.md); borrarlo
+ * costaría una migración del CHECK y una plantilla nueva aprobada por Meta.
+ * Antes de cablearlo: definir el mensaje y su nivel de permiso
+ * (docs/planes/permiso.md). Ver el encabezado de
+ * `supabase/functions/dispatch-lifestyle-notifications/index.ts`.
  */
 export async function sendFollowUp(
   config:        MetaConfig,
