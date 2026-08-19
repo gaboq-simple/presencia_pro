@@ -27,6 +27,7 @@ import { rateLimit } from '@/lib/rate-limit';
 import { tenantDb } from '@/lib/tenantDb';
 import { bufferAndProcess } from '@/lib/message-buffer';
 import { isTestResetCommand, TEST_RESET_CONFIRMATION } from '@/lib/test-reset';
+import { isOptOutCommand, OPT_OUT_CONFIRMATION } from '@/lib/opt-out';
 
 // ─── Supabase admin client ────────────────────────────────────────────────────
 
@@ -475,6 +476,12 @@ async function getTwilioResponseText(
       return TEST_RESET_CONFIRMATION;
     }
 
+    // ── Baja (S8-PER-01 · P2) — nunca pasa por el clasificador ──────────────
+    if (isOptOutCommand(messageBody)) {
+      await performOptOut(supabase, business.id, customerPhone);
+      return OPT_OUT_CONFIRMATION;
+    }
+
     const anthropicKey = process.env['ANTHROPIC_API_KEY'] ?? '';
     const msg = buildTwilioMessage(
       { customerPhone, toNumber, body: messageBody, customerName, messageId: null },
@@ -527,6 +534,15 @@ async function processTwilioMessage(
     await performTestReset(supabase, business.id, customerPhone);
     try {
       await sendMessage({ to: customerPhone, message: TEST_RESET_CONFIRMATION });
+    } catch { /* best-effort */ }
+    return;
+  }
+
+  // ── Baja (S8-PER-01 · P2) — ANTES del handoffGate y del matcher ARCO ──────
+  if (isOptOutCommand(messageBody)) {
+    await performOptOut(supabase, business.id, customerPhone);
+    try {
+      await sendMessage({ to: customerPhone, message: OPT_OUT_CONFIRMATION });
     } catch { /* best-effort */ }
     return;
   }
@@ -756,6 +772,57 @@ async function performTestReset(
   }));
 }
 
+// ─── Baja (opt-out) ───────────────────────────────────────────────────────────
+// S8-PER-01 · P2. Un helper y no tres copias: el opt-out se intercepta en los
+// TRES puntos donde ya se intercepta el comando de test reset (la rama síncrona
+// de Twilio y las dos de Meta), y tres copias de una baja es exactamente el tipo
+// de cosa que se desincroniza en la primera corrección.
+//
+// Va ANTES del handoffGate por la misma razón que el test reset, y acá pesa más:
+// si la conversación quedó en modo `human`, el gate guarda el mensaje en
+// `conversation_messages` y detiene el FSM — la baja quedaría ESCRITA y nadie la
+// vería como baja. Y antes del matcher ARCO, porque una baja de mensajería no es
+// una solicitud ARCO: responderle con un formulario de 20 días hábiles a quien
+// pidió dejar de recibir mensajes es no haberlo escuchado.
+//
+// Marca por TELÉFONO dentro del negocio. Si no existe la fila del cliente no se
+// crea ninguna: alguien que nunca dio datos y escribe "BAJA" no necesita que le
+// abramos un registro para respetarlo — no le vamos a escribir de todos modos,
+// porque todo lo proactivo sale de `customers`.
+
+/**
+ * Registra la baja del cliente. Idempotente: si ya estaba dado de baja no pisa
+ * la fecha original, que es la que vale como evidencia.
+ *
+ * Falla RUIDOSO a propósito (no `catch {}`): una baja que no se pudo escribir y
+ * nadie reportó es el peor resultado posible de este paso — el cliente cree que
+ * se dio de baja y el sistema le sigue escribiendo.
+ */
+async function performOptOut(
+  supabase: ReturnType<typeof getServiceClient>,
+  businessId: string,
+  customerPhone: string,
+): Promise<void> {
+  const { data, error } = await tenantDb(supabase, businessId)
+    .table('customers')
+    .update({ opted_out_at: new Date().toISOString(), opted_out_via: 'whatsapp_keyword' })
+    .eq('phone', customerPhone)
+    .is('opted_out_at', null)
+    .select('id');
+
+  console.log(JSON.stringify({
+    ts:             new Date().toISOString(),
+    service:        'bot',
+    event:          error ? 'opt_out_failed' : 'opt_out_registered',
+    business_id:    businessId,
+    customer_phone: maskPhone(customerPhone),
+    rows:           (data as unknown[] | null)?.length ?? 0,
+    ...(error ? { error: error.message } : {}),
+  }));
+
+  if (error) throw new Error(`performOptOut failed: ${error.message}`);
+}
+
 // ─── Handoff gate ─────────────────────────────────────────────────────────────
 // Verifica si la conversación está bajo control humano o pausada.
 // Retorna true  → el FSM debe procesar el mensaje (modo 'bot' o auto-released).
@@ -918,6 +985,19 @@ async function processMetaMessage(
       await sendMessage({
         to:      customerPhone,
         message: TEST_RESET_CONFIRMATION,
+        from:    business.whatsappPhoneNumberId,
+      });
+    } catch { /* best-effort */ }
+    return;
+  }
+
+  // ── Baja (S8-PER-01 · P2) — ANTES del handoffGate y del matcher ARCO ──────
+  if (isOptOutCommand(messageBody)) {
+    await performOptOut(supabase, business.id, customerPhone);
+    try {
+      await sendMessage({
+        to:      customerPhone,
+        message: OPT_OUT_CONFIRMATION,
         from:    business.whatsappPhoneNumberId,
       });
     } catch { /* best-effort */ }
