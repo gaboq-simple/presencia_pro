@@ -106,6 +106,30 @@ export function computeCanal(conteos: Record<CanalKey, number>): Canal {
   };
 }
 
+// ─── La ventana al bot: cuántas conversaciones atendió una persona ────────────
+
+/** Un mensaje que una persona del equipo mandó desde el panel. */
+export type MensajeHumano = { customer_phone: string };
+
+/**
+ * Conversaciones DISTINTAS en las que respondió una persona del equipo.
+ *
+ * Distintas, no mensajes: la etiqueta habla de conversaciones, y un asistente
+ * que manda cinco mensajes en una charla atendió UNA, no cinco. Contar filas
+ * inflaría el número justo en el caso más común —una charla con varias
+ * respuestas— y lo volvería a desacoplar de lo que promete.
+ *
+ * La fuente es `conversation_messages` y no `bot_conversations.taken_at` porque
+ * `taken_at` se BORRA al devolver la conversación al bot (`releaseConversation`):
+ * medido ahí, una conversación atendida y devuelta —el caso sano, el que se
+ * quiere ver— desaparecía del conteo, y el número iba a vivir cerca de cero
+ * haciendo parecer que nadie usa el handoff. Un mensaje enviado, en cambio, es
+ * historia: no se puede des-enviar.
+ */
+export function contarAtendidasPorEquipo(mensajes: readonly MensajeHumano[]): number {
+  return new Set(mensajes.map((m) => m.customer_phone)).size;
+}
+
 function redondear(n: number): number {
   return Math.round(n * 100) / 100;
 }

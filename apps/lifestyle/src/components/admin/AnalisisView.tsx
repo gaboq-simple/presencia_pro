@@ -236,9 +236,12 @@ function CanalYBot({ canal, bot, mesLabel }: {
       {/* La ventana al bot: el diferenciador, visible por primera vez para el dueño. */}
       <div className="mt-4 flex border-t border-line pt-3">
         {[
-          { n: bot.conversaciones,   l: <>conversaciones<br />esta semana</> },
-          { n: bot.citasDelBot,      l: <>citas del bot<br />esta semana</> },
-          { n: bot.tomadasPorHumano, l: <>tomadas por<br />tu equipo</> },
+          { n: bot.conversaciones,     l: <>conversaciones<br />esta semana</> },
+          { n: bot.citasDelBot,        l: <>citas del bot<br />esta semana</> },
+          // "atendidas", no "tomadas": el número cuenta las conversaciones en
+          // las que alguien del equipo RESPONDIÓ esta semana, las haya devuelto
+          // al bot o no. "Tomadas" prometía un estado que no se está midiendo.
+          { n: bot.atendidasPorEquipo, l: <>atendidas por<br />tu equipo</> },
         ].map((x, i) => (
           <div key={i} className="min-w-0 flex-1">
             <p className="text-[15px] font-semibold tabular-nums text-ink">{x.n}</p>

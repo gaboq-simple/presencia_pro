@@ -18,8 +18,8 @@ import { tenantDb } from '@/lib/tenantDb';
 import { getPeriodRange } from '@/lib/dashboard.types';
 import { todayStrInTz } from '@/lib/dayWindow';
 import {
-  computeMezclaServicios, computeCanal,
-  type ServicioMes, type MezclaServicios, type Canal, type CanalKey,
+  computeMezclaServicios, computeCanal, contarAtendidasPorEquipo,
+  type ServicioMes, type MezclaServicios, type Canal, type CanalKey, type MensajeHumano,
 } from '@/lib/analisis';
 
 function getServiceClient() {
@@ -34,7 +34,8 @@ function getServiceClient() {
 export type VentanaBot = {
   conversaciones: number;
   citasDelBot:    number;
-  tomadasPorHumano: number;
+  /** Conversaciones DISTINTAS en las que respondió alguien del equipo esta semana. */
+  atendidasPorEquipo: number;
 };
 
 export type AnalisisData = {
@@ -58,7 +59,7 @@ export async function getAnalisis(businessId: string, timezone: string): Promise
   const mes    = getPeriodRange('month', hoy, timezone);
   const semana = getPeriodRange('week',  hoy, timezone);
 
-  const [svc, src, convs, citasBot, tomadas] = await Promise.all([
+  const [svc, src, convs, citasBot, atendidas] = await Promise.all([
     // 1. Mezcla por servicio del mes — mismo ingreso sellado que el resto de la app.
     db.table('appointments')
       .select('service_id, price_charged, service:service_id(name, price)')
@@ -79,13 +80,23 @@ export async function getAnalisis(businessId: string, timezone: string): Promise
       .select('id', { count: 'exact', head: true })
       .eq('source', 'bot')
       .gte('starts_at', semana.start).lt('starts_at', semana.end),  // ← starts_at, ver 🔴
-    db.table('bot_conversations')
-      .select('id', { count: 'exact', head: true })
-      .gte('taken_at', semana.start),
+    // Atendidas por el equipo: se cuenta sobre los MENSAJES humanos, no sobre
+    // `bot_conversations.taken_at`. `releaseConversation` pone `taken_at` en NULL,
+    // así que ese conteo solo veía las conversaciones tomadas y TODAVÍA en manos
+    // de una persona: devolverla al bot —el desenlace sano— la borraba del
+    // número. Un mensaje enviado no se puede des-enviar; es el mismo patrón que
+    // ya usa el reporte de uso (`api/reports/usage`, human_takeovers).
+    // Se traen las filas y se deduplica en memoria (no hay COUNT DISTINCT en
+    // PostgREST): son los mensajes humanos de UNA semana, decenas como mucho.
+    db.table('conversation_messages')
+      .select('customer_phone')
+      .eq('sent_by', 'human')
+      .gte('created_at', semana.start).lt('created_at', semana.end),
   ]);
 
   if (svc.error) throw new Error(`getAnalisis servicios: ${svc.error.message}`);
   if (src.error) throw new Error(`getAnalisis canal: ${src.error.message}`);
+  if (atendidas.error) throw new Error(`getAnalisis atendidas: ${atendidas.error.message}`);
 
   // Agrupar por servicio. Sin embed no hay nombre ni precio de lista al que caer:
   // esa fila se omite en vez de inventarle un servicio "(sin nombre)".
@@ -113,9 +124,9 @@ export async function getAnalisis(businessId: string, timezone: string): Promise
     servicios: computeMezclaServicios([...porServicio.values()]),
     canal:     computeCanal(conteos),
     bot: {
-      conversaciones:   convs.count ?? 0,
-      citasDelBot:      citasBot.count ?? 0,
-      tomadasPorHumano: tomadas.count ?? 0,
+      conversaciones:     convs.count ?? 0,
+      citasDelBot:        citasBot.count ?? 0,
+      atendidasPorEquipo: contarAtendidasPorEquipo((atendidas.data ?? []) as MensajeHumano[]),
     },
     mesLabel: MESES[Number(hoy.slice(5, 7)) - 1] ?? '',
   };
