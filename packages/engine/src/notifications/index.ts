@@ -11,6 +11,8 @@ export type {
   WhatsAppCredentials,
   MetaWhatsAppCredentials,
   WhatsAppSendResult,
+  SendPurpose,
+  OptOutLookup,
   EmailMessage,
   ResendCredentials,
   EmailSendResult,

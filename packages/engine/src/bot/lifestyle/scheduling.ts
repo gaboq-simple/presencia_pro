@@ -318,6 +318,10 @@ export async function notifyWaitlist(
     await sendWhatsAppMeta(
       { to: customer.phone, body: message },
       { accessToken, phoneNumberId },
+      // El cliente PIDIÓ estar en la lista de espera; el aviso de que se liberó
+      // un lugar es el servicio que solicitó, no marketing. Mismo criterio que
+      // el recordatorio de una cita propia (regla de niveles, S8-PER-01).
+      { purpose: 'appointment_utility' },
     );
   } catch {
     // best-effort — no relanzar

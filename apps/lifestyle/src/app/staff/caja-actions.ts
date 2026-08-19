@@ -380,6 +380,7 @@ export async function createCorte(input: CorteCapturado): Promise<{ error?: stri
           accessToken: process.env['WHATSAPP_ACCESS_TOKEN']!,
           phoneNumberId: biz.whatsapp_phone_number_id,
         },
+        { purpose: 'internal_ops' },   // el aviso del corte va al DUEÑO, no a un cliente
       );
       if (!res.success) avisoError = res.error ?? 'No se pudo enviar';
     } catch (e) {

@@ -121,6 +121,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     const { data: custData, error: custError } = await db
       .table('customers')
       .select('id, name, phone, visit_count, last_visit')
+      // S8-PER-01 · P3 — la exclusión POR CONSTRUCCIÓN: quien pidió la baja no
+      // entra a la lista, no se filtra después (índice parcial de P1).
+      .is('opted_out_at', null)
       .not('last_visit', 'is', null)
       .lt('last_visit', cutoffIso)
       .order('last_visit', { ascending: true });   // más antiguos primero

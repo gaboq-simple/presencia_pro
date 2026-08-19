@@ -116,7 +116,49 @@ export interface WhatsAppSendResult {
   readonly success: boolean;
   readonly messageSid?: string;
   readonly error?: string;
+  /** El envío se DETUVO por decisión del sistema, no por un fallo (S8-PER-01 P3).
+   *  Se distingue de `error` a propósito: un fallo hay que reintentarlo, una
+   *  supresión hay que respetarla. Confundirlos haría que un reintento burlara
+   *  la baja del cliente. */
+  readonly suppressed?: boolean;
+  /** Por qué se suprimió, para el log. Nunca se rinde al cliente. */
+  readonly suppressedReason?: string;
 }
+
+// ─── Propósito del envío (S8-PER-01 · P3) ────────────────────────────────────
+// La "regla de niveles" del plan de permiso, escrita como TIPO y no como
+// comentario: la baja bloquea lo proactivo y no bloquea ni las respuestas del
+// bot ni los recordatorios de las citas que el propio cliente agende después.
+//
+// El discriminante hace dos cosas a la vez, y la segunda es la que importa:
+//   1. sin `purpose` no compila — nadie puede agregar un envío nuevo "sin darse
+//      cuenta" de que tiene que declarar para qué es;
+//   2. `proactive` EXIGE el lookup de bajas. No se puede declarar un envío
+//      proactivo y "olvidarse" de pasar con qué comprobar la baja: el tipo no
+//      deja. Es la diferencia entre una regla y una intención.
+
+/** Cómo preguntar si un titular se dio de baja. Interfaz mínima a propósito:
+ *  el engine no conoce supabase-js y no va a empezar acá. */
+export interface OptOutLookup {
+  /** `true` = ese teléfono NO debe recibir mensajes proactivos de ese negocio. */
+  isOptedOut(businessId: string, phone: string): Promise<boolean>;
+}
+
+export type SendPurpose =
+  /** El cliente escribió y el bot le responde. Servicio solicitado, dentro de la
+   *  ventana de 24 h. NUNCA se suprime: suprimirlo convertiría la baja en un
+   *  castigo — el cliente pregunta a qué hora abren y el sistema lo ignora. */
+  | { readonly purpose: 'session_reply' }
+  /** Recordatorio, reagenda o cancelación de una cita CONCRETA. No se suprime:
+   *  quien agenda espera su recordatorio, y no dárselo es peor servicio, no más
+   *  privacidad. */
+  | { readonly purpose: 'appointment_utility' }
+  /** Mensaje al DUEÑO o al staff (reporte semanal, aviso del corte, solicitud de
+   *  bloqueo). No hay `customers` que consultar: el destinatario no es uno. */
+  | { readonly purpose: 'internal_ops' }
+  /** Marketing, reactivación, solicitud de reseña. **Lo único que la baja
+   *  bloquea**, y por eso es el único que exige con qué comprobarla. */
+  | { readonly purpose: 'proactive'; readonly db: OptOutLookup; readonly businessId: string };
 
 // ─── Email ───────────────────────────────────────────────────────────────────
 

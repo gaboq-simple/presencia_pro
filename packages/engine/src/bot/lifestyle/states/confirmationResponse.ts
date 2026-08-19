@@ -234,6 +234,7 @@ export async function handleConfirmationResponse(
             accessToken:   process.env['WHATSAPP_ACCESS_TOKEN'] ?? '',
             phoneNumberId: business.whatsappPhoneNumberId,
           },
+          { purpose: 'internal_ops' },   // va al BARBERO (retraso), no al cliente
         );
       }
     } catch {
@@ -357,6 +358,7 @@ export async function handleConfirmationResponse(
             accessToken:   whatsappToken,
             phoneNumberId: business.whatsappPhoneNumberId,
           },
+          { purpose: 'internal_ops' },   // va al BARBERO (cancelación), no al cliente
         );
       }
     } catch {

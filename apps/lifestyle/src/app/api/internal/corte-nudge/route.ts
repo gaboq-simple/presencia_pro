@@ -119,6 +119,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       const res = await sendWhatsAppMeta(
         { to: raw.report_whatsapp, body: buildNudge(raw.slug) },
         { accessToken, phoneNumberId: raw.whatsapp_phone_number_id },
+        { purpose: 'internal_ops' },   // va al DUEÑO (report_whatsapp), no a un cliente
       );
       resultados.push({
         slug: raw.slug, dia, aplicaba: true,

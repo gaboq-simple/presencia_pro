@@ -3,7 +3,7 @@
 // Sin lógica de negocio — sin ReminderType, sin templates, sin Supabase.
 // Retry: 3 intentos, backoff exponencial (1s → 2s → 4s).
 
-import type { MetaWhatsAppCredentials, WhatsAppCredentials, WhatsAppMessage, WhatsAppSendResult } from './types';
+import type { MetaWhatsAppCredentials, WhatsAppCredentials, WhatsAppMessage, WhatsAppSendResult, SendPurpose } from './types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -91,13 +91,46 @@ interface MetaMessagesResponse {
  * Reintenta hasta MAX_RETRIES veces con backoff exponencial.
  * Nunca lanza — siempre devuelve WhatsAppSendResult.
  *
+ * 🔴 **El guard de la baja vive acá (S8-PER-01 · P3), y no en el despachador.**
+ *    Un filtro en la cola de `scheduled_notifications` dejaría afuera la
+ *    reactivación —que manda INLINE y registra después— y todo lo que se
+ *    escriba de acá en adelante. Este es el cuello de botella real: 14 llamadas
+ *    en 12 archivos, y todo lo que sale pasa por una de ellas.
+ *
+ *    Un envío `proactive` a alguien con baja **no se envía** y devuelve
+ *    `{ suppressed: true }`, que es distinto de `{ success: false }`: un fallo
+ *    se reintenta, una supresión se respeta. Confundirlos haría que un reintento
+ *    burlara la baja.
+ *
  * @param message  Mensaje a enviar (to + body)
  * @param creds    Credenciales Meta inyectadas por el caller
+ * @param intent   Para qué es este mensaje. Sin él no compila — ver `SendPurpose`.
  */
 export async function sendWhatsAppMeta(
   message: WhatsAppMessage,
   creds: MetaWhatsAppCredentials,
+  intent: SendPurpose,
 ): Promise<WhatsAppSendResult> {
+  if (intent.purpose === 'proactive') {
+    // Falla CERRADO: si la consulta de baja revienta, NO se manda. Es la única
+    // dirección segura — mandarle a alguien que quizá se dio de baja es el daño
+    // que este paso vino a evitar, y no mandarle a alguien que no se dio de baja
+    // se arregla reintentando.
+    let optedOut: boolean;
+    try {
+      optedOut = await intent.db.isOptedOut(intent.businessId, message.to);
+    } catch (err) {
+      return {
+        success: false,
+        suppressed: true,
+        suppressedReason: `no se pudo verificar la baja: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    if (optedOut) {
+      return { success: false, suppressed: true, suppressedReason: 'el titular se dio de baja' };
+    }
+  }
+
   const url = `${META_API_BASE}/${creds.phoneNumberId}/messages`;
 
   let lastError = '';

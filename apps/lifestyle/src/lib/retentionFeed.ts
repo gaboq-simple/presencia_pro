@@ -68,6 +68,10 @@ export async function getRetentionFeed(
   const { data: custData } = await db
     .table('customers')
     .select('id, name, visit_count, is_flagged, noshow_count, created_at')
+    // S8-PER-01 · P3 — quien pidió la baja no entra al feed: es la lista desde
+    // la que el dueño manda mensajes, así que la exclusión va acá y no en el
+    // botón (índice parcial de P1).
+    .is('opted_out_at', null)
     .in('id', eligibleIds);
 
   const inputs: CustomerCadenceInput[] = ((custData ?? []) as CustomerRow[]).map((c) => {

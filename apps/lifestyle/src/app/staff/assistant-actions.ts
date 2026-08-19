@@ -1065,6 +1065,8 @@ export async function takeoverConversation(customerPhone: string): Promise<void>
         await sendWhatsAppMeta(
           { to: customerPhone, body: TAKEOVER_MSG },
           { accessToken, phoneNumberId },
+          // El cliente escribió y el equipo le contesta: servicio solicitado.
+          { purpose: 'session_reply' },
         );
         await db
           .table('conversation_messages')
@@ -1117,6 +1119,7 @@ export async function releaseConversation(customerPhone: string): Promise<void> 
       await sendWhatsAppMeta(
         { to: customerPhone, body: 'Listo — te atiende de nuevo nuestro asistente virtual. ¿En qué más te puedo ayudar?' },
         { accessToken, phoneNumberId },
+        { purpose: 'session_reply' },   // cierre del handoff, dentro de la misma conversación
       );
     }
   } catch { /* best-effort */ }
@@ -1177,6 +1180,9 @@ export async function sendMessageFromPanel(
     const result = await sendWhatsAppMeta(
       { to: customerPhone, body: message },
       { accessToken, phoneNumberId },
+      // El asistente responde EN la conversación que el cliente abrió (el envío
+      // exige session_mode='human', o sea que el cliente está del otro lado).
+      { purpose: 'session_reply' },
     );
     sent = result.success;
   } catch {

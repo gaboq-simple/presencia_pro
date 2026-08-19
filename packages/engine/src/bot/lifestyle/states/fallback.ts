@@ -63,6 +63,7 @@ export async function notifyAdminOfEscalation(
         accessToken:   process.env['WHATSAPP_ACCESS_TOKEN'] ?? '',
         phoneNumberId: business.whatsappPhoneNumberId,
       },
+      { purpose: 'internal_ops' },   // escalamiento al ADMIN, no al cliente
     );
   } catch (err) {
     console.error(JSON.stringify({

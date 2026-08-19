@@ -325,6 +325,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       const result = await sendWhatsAppMeta(
         { to: business.report_whatsapp, body: buildReportMessage(data, business.slug) },
         { accessToken, phoneNumberId: business.whatsapp_phone_number_id },
+        { purpose: 'internal_ops' },   // va al DUEÑO (report_whatsapp), no a un cliente
       );
       sent = result.success;
     } catch {

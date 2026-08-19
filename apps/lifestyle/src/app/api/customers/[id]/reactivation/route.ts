@@ -19,6 +19,7 @@ import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
+import { optOutLookup } from '@/lib/optOutLookup';
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -119,6 +120,8 @@ export async function POST(
 
   // 7. Enviar WhatsApp — best-effort
   let sent = false;
+  let suppressed = false;
+  let suppressedReason: string | null = null;
   try {
     const accessToken = process.env['WHATSAPP_ACCESS_TOKEN'];
     if (!accessToken) throw new Error('WHATSAPP_ACCESS_TOKEN not set');
@@ -126,10 +129,31 @@ export async function POST(
     const result = await sendWhatsAppMeta(
       { to: customer.phone, body: message },
       { accessToken, phoneNumberId: business.whatsapp_phone_number_id },
+      // El ÚNICO proactivo del sistema hoy: marketing puro. Lo que la baja bloquea.
+      { purpose: 'proactive', db: optOutLookup, businessId },
     );
     sent = result.success;
-  } catch {
-    // best-effort — no interrumpir
+    suppressed = result.suppressed === true;
+    suppressedReason = result.suppressedReason ?? null;
+  } catch (err) {
+    // 🔴 El `catch {}` vacío que había acá es el anti-ejemplo canónico del plan
+    //    de permiso: un envío que Meta rechazaba devolvía HTTP 200 con
+    //    `{ sent: false }` y nadie se enteraba nunca. Sigue siendo best-effort
+    //    —el fallo no rompe la request— pero deja de ser MUDO.
+    suppressedReason = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({
+      ts: new Date().toISOString(), service: 'reactivation',
+      event: 'send_failed', business_id: businessId, customer_id: customerId,
+      error: suppressedReason,
+    }));
+  }
+
+  if (suppressed) {
+    console.warn(JSON.stringify({
+      ts: new Date().toISOString(), service: 'reactivation',
+      event: 'send_suppressed', business_id: businessId, customer_id: customerId,
+      reason: suppressedReason,
+    }));
   }
 
   // 8. Registrar en scheduled_notifications — best-effort
@@ -137,6 +161,10 @@ export async function POST(
   // la pestaña Hoy pueda atribuir la reactivación — sin esto la fila queda huérfana.
   // customer_phone y message_body ya están en scope (evidencia de a quién y qué se
   // envió); las 3 columnas existen. business_id sigue scopeado por la sesión (Ola 1).
+  // Una supresión NO se registra como envío: `sent_at` afirma que el mensaje
+  // salió, y el pulso "contactados" del dueño cuenta esas filas. Marcar una baja
+  // respetada como "contactado" le mentiría dos veces — al conteo y al historial
+  // que un día tiene que probar que NO se le escribió.
   try {
     const now = new Date().toISOString();
     await db.table('scheduled_notifications').insert({
@@ -146,11 +174,13 @@ export async function POST(
       type:           'reactivation',
       message_body:   message,
       scheduled_for:  now,
-      sent_at:        now,
+      ...(sent ? { sent_at: now } : { failed_at: now }),
     });
   } catch {
     // best-effort — historial no crítico
   }
 
-  return NextResponse.json({ sent });
+  // `suppressed` viaja al cliente: la UI tiene que poder decir "no se envió
+  // porque este cliente pidió no recibir mensajes", que es distinto de un fallo.
+  return NextResponse.json({ sent, ...(suppressed ? { suppressed, reason: suppressedReason } : {}) });
 }

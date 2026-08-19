@@ -129,7 +129,7 @@ async function notifyAdminUrgent(
     accessToken,
     phoneNumberId: biz.whatsapp_phone_number_id,
   };
-  await sendWhatsAppMeta({ to: adminStaff.whatsapp_id, body }, creds);
+  await sendWhatsAppMeta({ to: adminStaff.whatsapp_id, body }, creds, { purpose: 'internal_ops' });
 }
 
 // ─── POST ─────────────────────────────────────────────────────────────────────

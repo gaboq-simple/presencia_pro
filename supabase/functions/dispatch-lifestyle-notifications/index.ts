@@ -1,4 +1,28 @@
 // ─── dispatch-lifestyle-notifications ────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔴 PENDIENTE AL DESPLEGARLA (S8-PER-01 · P3 + S7-NOTIF-01)
+//
+// Esta función tiene su PROPIA copia de `sendWhatsAppMeta` (Deno no comparte el
+// paquete del engine), así que el guard de la baja que P3 puso en el engine NO
+// la cubre. Hoy no hay daño: la función **nunca se desplegó** y la cola está
+// vacía. Pero el día que S7-NOTIF-01 la despliegue, dos de los nueve tipos que
+// despacha son PROACTIVOS y tienen que respetar `customers.opted_out_at`:
+//
+//   · `review_request` — pedir una reseña es marketing.
+//   · `reactivation`   — idem, y es el caso central del plan.
+//
+// Los otros siete (los tres recordatorios, follow_up, waitlist_expiry,
+// reschedule_notice y cancellation_notice) son `appointment_utility`: NO se
+// suprimen, porque son de una cita que el propio cliente agendó y no dárselos es
+// peor servicio, no más privacidad (regla de niveles, docs/planes/permiso.md).
+//
+// La forma de hacerlo, para que no haya que re-decidirla: filtrar el SELECT de
+// la cola con un join a `customers` —`opted_out_at IS NULL`— solo para esos dos
+// tipos, y marcar `failed_at` con razón, nunca `sent_at`: registrar como enviado
+// algo que se suprimió le miente al historial que un día tiene que probar que NO
+// se le escribió.
+// ═══════════════════════════════════════════════════════════════════════════════
 // Edge Function (Deno). Despacha recordatorios pendientes de la tabla
 // scheduled_notifications de lifestyle.
 //

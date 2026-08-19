@@ -329,6 +329,7 @@ export async function handleConfirmed(
           accessToken,
           phoneNumberId: business.whatsappPhoneNumberId,
         },
+        { purpose: 'internal_ops' },   // avisa al BARBERO de su cita nueva
       );
     }
   } catch {

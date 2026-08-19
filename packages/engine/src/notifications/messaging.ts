@@ -70,6 +70,10 @@ class MetaProvider implements MessagingProvider {
     const result = await sendWhatsAppMeta(
       { to: params.to, body: params.message },
       { accessToken, phoneNumberId },
+      // Este proveedor es el que usa el BOT para contestarle a quien le escribió:
+      // servicio solicitado, dentro de la ventana. Nunca se suprime — suprimirlo
+      // convertiría la baja en un castigo (el cliente pregunta y nadie contesta).
+      { purpose: 'session_reply' },
     );
 
     if (!result.success) {
