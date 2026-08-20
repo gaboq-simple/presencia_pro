@@ -411,6 +411,21 @@ Desplegadas en Supabase. Ambas tienen `verify_jwt: false` (autenticadas por secr
 
 > **⚠️ Estado real de los crons (verificado 2026-08-18).** Desde D3 los schedules son **código versionado** (`supabase/migrations/20260813000000_crons_versionados.sql`, pg_cron + pg_net + Vault), no configuración del Dashboard. Pero solo `dispatch-auto-cancel` está **desplegada y agendada**: `dispatch-lifestyle-notifications` **nunca se desplegó** —el proyecto tiene una sola edge function— y su `cron.schedule` está comentado a propósito en esa migración para no dejar un job dando 404 cada minuto. Con ella sin desplegar, **toda la cola de `scheduled_notifications` se encola y nadie la despacha** (hoy sin daño: la tabla está vacía). Ver SPRINT.md → **S7-NOTIF-01**, con disparador antes del primer cliente real que agende por el bot.
 
+> **El riel de invocación se verifica solo (A1, 2026-08-20).** `invoke_app` e
+> `invoke_edge` devuelven el ID de la petición que ENCOLARON, no su resultado, así
+> que pg_cron marcaba `succeeded` sobre cualquier cosa — incluidos los 401 de siete
+> corridas del nudge y la única del digest. **No se arregla dentro del job**: pg_net
+> despacha después del COMMIT (medido), así que esperar el status en la misma
+> transacción espera para siempre y un `RAISE` cancelaría la propia petición. Hay
+> tres piezas, en `supabase/migrations/20260820000000_meta_aviso_cron.sql`:
+> **`cron_invocaciones`** (una fila por invocación, escrita al encolar — existe
+> porque `net._http_response` retiene 6 h y su TTL no se puede cambiar en Supabase);
+> **`verificar-invocaciones`** (cada 5 min, copia el status real; no hace RAISE
+> porque revertiría lo que acaba de guardar); y **`alarma-invocaciones`** (cada 15
+> min, hace RAISE si la ÚLTIMA invocación de algún destino fue no-2xx; no escribe
+> nada y se pone verde sola cuando la siguiente corrida sale bien). Para saber si un
+> cron entregó de verdad, la fuente es `cron_invocaciones`, no `job_run_details`.
+
 ---
 
 ## Server Actions
