@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>G2 · Río</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="piel.css?v=2">
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  GRAMÁTICA 2 · RÍO — el tiempo es el eje, y todo cuelga de dónde nació.
+  Principio organizador: LA POSICIÓN ES EL DATO. Nada está donde está por el
+  orden en que se me ocurrió: está en la hora que lo originó.
+  · El cauce corre en diagonal y su ANCHO es el dinero de esa hora. Donde se
+    adelgaza, hay hueco: el problema se VE antes de leerse.
+  · Río arriba = semanas pasadas. La línea de luz = ahora. Río abajo = mañana.
+  · Los hallazgos no se apilan: cuelgan con un hilo del tramo que los produjo.
+  · Aprobar suelta una BOYA río abajo, en la hora exacta en que va a salir.
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+body{overflow:hidden}
+/* Horizonte + rejilla en fuga (retrowave, pero es fondo: nunca compite) */
+.horizonte{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.horizonte .sol{position:absolute;left:50%;top:8%;width:250px;height:250px;transform:translateX(-50%);
+  border-radius:50%;background:radial-gradient(circle,rgba(255,77,157,.32),rgba(155,123,255,.12) 55%,transparent 72%)}
+.horizonte .rejilla{position:absolute;left:-50%;right:-50%;bottom:0;height:46%;
+  background-image:linear-gradient(rgba(155,123,255,.22) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(155,123,255,.16) 1px,transparent 1px);
+  background-size:100% 42px,42px 100%;
+  transform:perspective(300px) rotateX(72deg);transform-origin:bottom center;
+  mask-image:linear-gradient(transparent,#000 55%);-webkit-mask-image:linear-gradient(transparent,#000 55%)}
+
+/* Cabecera fija: el dinero siempre a la vista mientras se navega el río */
+.cab{position:fixed;top:0;left:0;right:0;z-index:6;padding:38px 18px 14px;
+  background:linear-gradient(180deg,rgba(7,4,15,.96),rgba(7,4,15,.86) 55%,transparent);
+  display:flex;align-items:flex-end;gap:12px}
+.cab .m{font-size:30px;margin:1px 0 3px}
+.cab .l{flex:1;min-width:0}
+.cab .pedir{border:1px solid rgba(255,77,157,.45);background:rgba(255,77,157,.1);
+  color:var(--ink);font:500 12px Inter,sans-serif;padding:9px 12px;border-radius:11px;cursor:pointer;
+  display:flex;align-items:center;gap:7px;white-space:nowrap}
+.cab .pedir i{width:7px;height:7px;border-radius:50%;background:var(--magenta);
+  box-shadow:0 0 12px var(--magenta);animation:latir 3s var(--e-entra) infinite alternate}
+@keyframes latir{to{transform:scale(1.35)}}
+.cab .pedir.listo{border-color:rgba(255,255,255,.16);background:var(--vidrio);color:var(--ink-3)}
+.cab .pedir.listo i{background:var(--ink-3);box-shadow:none;animation:none}
+
+/* El cauce: lienzo alto con scroll. SVG dibuja río + hilos; los nodos van encima */
+.cauce{position:absolute;inset:0;z-index:2;overflow-y:auto;overscroll-behavior:contain}
+.lienzo{position:relative;width:100%}
+.lienzo svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.hora{position:absolute;left:8px;font:400 10px 'Space Grotesk',Inter,sans-serif;
+  color:var(--ink-3);font-variant-numeric:tabular-nums;transform:translateY(-50%)}
+.rotulo{position:absolute;left:8px;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);transform:translateY(-50%)}
+.ahora{position:absolute;left:0;right:0;height:1px;background:linear-gradient(90deg,var(--cian),transparent 78%);
+  box-shadow:0 0 12px var(--cian)}
+.ahora b{position:absolute;left:8px;top:-16px;font:500 9.5px Inter,sans-serif;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--cian)}
+
+/* Nodo colgado del cauce */
+.nodo{position:absolute;transform:translateY(-50%);width:min(238px,60vw);
+  background:rgba(21,16,48,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(255,77,157,.34);border-radius:13px;padding:11px 13px;cursor:pointer;
+  transition:border-color var(--t-rapido) linear,transform var(--t-rapido) var(--e-sale)}
+.nodo:active{transform:translateY(-50%) scale(.98)}
+.nodo .eyebrow{margin-bottom:5px}
+.nodo h3{font:400 14px/1.25 'Space Grotesk',Inter,sans-serif;letter-spacing:-.01em}
+.nodo .pista-abrir{margin-top:7px;font-size:11px;color:var(--ojo)}
+.nodo.resuelto{border-color:rgba(124,245,176,.34)}
+.nodo.resuelto .pista-abrir{color:var(--ok)}
+.nodo.aplaz{border-color:rgba(255,255,255,.14);opacity:.62}
+
+/* Boya: lo aprobado, río abajo, en su hora */
+.boya{position:absolute;transform:translateY(-50%);width:min(232px,58vw);
+  background:rgba(124,245,176,.09);border:1px solid rgba(124,245,176,.3);
+  border-radius:13px;padding:10px 12px;animation:sube var(--t-lento) var(--e-sale)}
+.boya .tx{font-size:12px;line-height:1.3;color:var(--ink-2)}
+.boya .tx b{color:var(--ok);font-weight:500}
+.boya button{margin-top:6px;background:none;border:0;color:var(--ink-3);
+  font:400 11.5px Inter,sans-serif;text-decoration:underline;cursor:pointer;padding:0}
+
+/* Panel del hallazgo: se abre anclado a su nodo, con el hilo a la vista */
+.panel{position:absolute;left:14px;right:14px;z-index:5;
+  background:rgba(13,8,32,.95);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid rgba(255,77,157,.3);border-radius:16px;padding:16px;
+  box-shadow:0 22px 60px rgba(0,0,0,.6);animation:sube var(--t-lento) var(--e-sale)}
+.panel .cerrar{position:absolute;top:10px;right:12px;background:none;border:0;color:var(--ink-3);
+  font-size:19px;cursor:pointer;line-height:1}
+.panel h2{font:400 18px/1.2 'Space Grotesk',Inter,sans-serif;letter-spacing:-.02em;
+  margin-bottom:6px;padding-right:22px}
+.panel .sub{margin-bottom:12px}
+.panel .burbuja{margin-top:12px}
+.panel .amarre{position:absolute;left:-1px;top:20px;width:14px;height:1px;background:var(--ojo);
+  box-shadow:0 0 8px var(--ojo)}
+
+.vacio-lectura{position:absolute;left:50%;transform:translate(-50%,-50%);width:min(250px,68vw);
+  text-align:center;font-size:12.5px;color:var(--ink-3);line-height:1.45;
+  border:1px dashed var(--hair);border-radius:14px;padding:14px}
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i></div>
+<div class="horizonte"><div class="sol"></div><div class="rejilla"></div></div>
+<div class="grano"></div>
+
+<div class="tester">
+  <button id="tSano">estado sano</button>
+  <button id="tReset">reiniciar</button>
+</div>
+
+<div class="cab">
+  <div class="l">
+    <div class="eyebrow" id="cabFecha"></div>
+    <div class="display cromo m" id="cabMonto"></div>
+    <div class="fine" id="cabSub"></div>
+  </div>
+  <button class="pedir" id="pedir"><i></i><span>Analizar</span></button>
+</div>
+
+<div class="cauce" id="cauce"><div class="lienzo" id="lienzo"></div></div>
+<div class="sello">G2 · río — datos inventados, no salen de la BD</div>
+
+<script src="datos.js"></script>
+<script>
+const D=window.DEMO, cauce=document.getElementById('cauce'), lienzo=document.getElementById('lienzo');
+const mx=n=>'$'+n.toLocaleString('es-MX');
+let analizado=false, sano=false, abierto=null;
+const estado={}; D.hallazgos.forEach(h=>estado[h.id]='abierto');
+
+/* ── Geometría del cauce ────────────────────────────────────────────────
+   y = tiempo. cx(y) = serpenteo diagonal. w(y) = dinero de esa hora.     */
+const H=1600, Y_PASADO=330, Y_DIA0=450, Y_DIA1=1250, Y_MANANA=1520;
+const paso=(Y_DIA1-Y_DIA0)/D.tramos.length;
+const cx=y=>{ const W=lienzo.clientWidth||390; return W*.35 + Math.sin((y-Y_DIA0)/210)*W*.15; };
+const ancho=t=>t.estado==='hueco' ? 7 : 12 + (t.monto/700)*30;
+
+function yDeHora(hh){ const k=D.tramos.findIndex(t=>t.h===hh); return Y_DIA0+paso*(k+.5); }
+
+function dibujar(){
+  const W=lienzo.clientWidth||390;
+  let quads='';
+  // tramo del pasado (afluente que trae menos agua)
+  quads += `<path d="M ${cx(Y_PASADO)-6} ${Y_PASADO-150} L ${cx(Y_PASADO)+6} ${Y_PASADO-150}
+      L ${cx(Y_DIA0)+ancho(D.tramos[0])/2} ${Y_DIA0} L ${cx(Y_DIA0)-ancho(D.tramos[0])/2} ${Y_DIA0} Z"
+      fill="rgba(155,123,255,.16)"/>`;
+  D.tramos.forEach((t,k)=>{
+    const y0=Y_DIA0+paso*k, y1=y0+paso;
+    const t2=D.tramos[k+1]||t;
+    const w0=ancho(t), w1=ancho(t2);
+    const col = t.estado==='hecho' ? 'rgba(59,232,224,.62)'
+              : t.estado==='agenda' ? 'rgba(155,123,255,.5)'
+              : 'rgba(255,184,107,.34)';
+    quads += `<path d="M ${cx(y0)-w0/2} ${y0} L ${cx(y0)+w0/2} ${y0}
+        L ${cx(y1)+w1/2} ${y1} L ${cx(y1)-w1/2} ${y1} Z" fill="${col}"/>`;
+  });
+  // mañana
+  quads += `<path d="M ${cx(Y_DIA1)-12} ${Y_DIA1} L ${cx(Y_DIA1)+12} ${Y_DIA1}
+      L ${cx(Y_MANANA)+9} ${Y_MANANA} L ${cx(Y_MANANA)-9} ${Y_MANANA} Z"
+      fill="rgba(155,123,255,.13)" stroke="rgba(155,123,255,.24)" stroke-dasharray="3 5"/>`;
+  lienzo.style.height=H+'px';
+  lienzo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    ${quads}<g id="hilos"></g></svg>`;
+  // gutter de horas
+  lienzo.insertAdjacentHTML('beforeend',
+    `<div class="rotulo" style="top:${Y_PASADO-86}px">semanas pasadas</div>` +
+    D.tramos.map(t=>`<div class="hora" style="top:${yDeHora(t.h)}px">${t.h}:00</div>`).join('') +
+    `<div class="rotulo" style="top:${Y_MANANA-30}px">mañana</div>`);
+  // línea de ahora (15:40 → entre 15 y 16)
+  const yAhora=(yDeHora('15')+yDeHora('16'))/2;
+  lienzo.insertAdjacentHTML('beforeend',
+    `<div class="ahora" style="top:${yAhora}px"><b>ahora · ${D.hoy.ahora}</b></div>`);
+  pintarNodos();
+}
+
+function anclaY(h){
+  if(h.ancla.tipo==='franja') return (yDeHora('16')+yDeHora('18'))/2;
+  if(h.ancla.tipo==='pasado') return Y_PASADO+14;
+  return Y_MANANA-120;
+}
+function hilo(x1,y1,x2,y2,col){
+  const g=lienzo.querySelector('#hilos'); if(!g) return;
+  g.insertAdjacentHTML('beforeend',
+    `<path d="M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}"
+      stroke="${col}" stroke-width="1" fill="none" opacity=".75"/>`);
+}
+
+function pintarNodos(){
+  lienzo.querySelectorAll('.nodo,.boya,.panel,.vacio-lectura').forEach(n=>n.remove());
+  const g=lienzo.querySelector('#hilos'); if(g) g.innerHTML='';
+  const W=lienzo.clientWidth||390;
+
+  if(!analizado){
+    lienzo.insertAdjacentHTML('beforeend',
+      `<div class="vacio-lectura" style="top:${(yDeHora('17'))}px;left:${W*.62}px">
+        Aquí el río se adelgaza.<br>Toca <b style="color:var(--ojo);font-weight:500">Analizar</b> arriba y te digo por qué.</div>`);
+    return;
+  }
+  D.hallazgos.forEach(h=>{
+    const y=anclaY(h), xr=cx(y), izq = xr > W*.42;
+    const nx = izq ? 12 : Math.min(xr+34, W-12-Math.min(238,W*.6));
+    const st=estado[h.id];
+    const d=document.createElement('div');
+    d.className='nodo'+(st==='va'?' resuelto':st==='no'?' aplaz':'');
+    d.style.top=y+'px'; d.style.left=nx+'px';
+    d.innerHTML=`<div class="eyebrow">${h.ancla.etiqueta}</div>
+      <h3>${h.titulo}</h3>
+      <div class="pista-abrir">${st==='va'?'✓ ya lo mandaste a la cola':st==='no'?'aplazado':'ver qué propongo →'}</div>`;
+    d.onclick=()=>abrir(h,y);
+    lienzo.appendChild(d);
+    hilo(xr, y, izq ? nx+Math.min(238,W*.6) : nx, y,
+      st==='va'?'rgba(124,245,176,.6)':st==='no'?'rgba(255,255,255,.2)':'rgba(255,77,157,.6)');
+    // boya río abajo por cada aprobado
+    if(st==='va'){
+      const yb=Y_MANANA-46, xb=cx(yb);
+      const b=document.createElement('div'); b.className='boya';
+      b.style.top=yb+'px'; b.style.left=Math.min(xb+26,W-12-Math.min(232,W*.58))+'px';
+      b.innerHTML=`<div class="tx"><b>Sale ${h.accion.sale}</b><br>${h.accion.verbo}</div>
+        <button>deshacer</button>`;
+      b.querySelector('button').onclick=e=>{e.stopPropagation();estado[h.id]='abierto';pintarNodos();};
+      lienzo.appendChild(b);
+      hilo(xb, yb, Math.min(xb+26,W-12-Math.min(232,W*.58)), yb, 'rgba(124,245,176,.5)');
+    }
+  });
+}
+
+function abrir(h,y){
+  lienzo.querySelectorAll('.panel').forEach(p=>p.remove());
+  const st=estado[h.id];
+  const p=document.createElement('div'); p.className='panel'; p.style.top=(y-40)+'px';
+  p.innerHTML=`<div class="amarre"></div><button class="cerrar">✕</button>
+    <div class="eyebrow" style="margin-bottom:7px">Nace en ${h.ancla.etiqueta}</div>
+    <h2>${h.titulo}</h2><p class="sub">${h.bajada}</p>
+    <p class="fine" style="margin:-6px 0 8px">${h.evidencia.resumen}</p>
+    <button class="evid-btn" aria-expanded="false">¿De dónde lo saco?</button>
+    <div class="evid"><ul>${h.evidencia.citas.map(c=>`<li>${c}</li>`).join('')}</ul></div>
+    <div data-pie style="margin-top:14px"></div>`;
+  const eb=p.querySelector('.evid-btn'), ev=p.querySelector('.evid');
+  eb.onclick=()=>{const a=ev.classList.toggle('abierta');eb.setAttribute('aria-expanded',a)};
+  p.querySelector('.cerrar').onclick=()=>{p.remove();abierto=null};
+  pie(p.querySelector('[data-pie]'),h);
+  lienzo.appendChild(p); abierto=h.id;
+  cauce.scrollTo({top:Math.max(0,y-190),behavior:'smooth'});
+}
+function pie(c,h){
+  const st=estado[h.id];
+  if(st==='va'){
+    c.innerHTML=`<div class="tarea"><i class="pt"></i>
+      <div class="tx"><b>Sale ${h.accion.sale}</b> · ya está río abajo, lo ves en el cauce</div>
+      <button>deshacer</button></div>
+      <div class="hueco-res"><b>$&nbsp;___</b><i>lo llena el corte · ${h.accion.medicion.toLowerCase()}</i></div>`;
+    c.querySelector('button').onclick=()=>{estado[h.id]='abierto';pie(c,h);pintarNodos()};
+    return;
+  }
+  if(st==='no'){
+    c.innerHTML=`<div class="aplazado">Lo dejo así. No te lo vuelvo a sacar hasta que el dato cambie.</div>`;
+    return;
+  }
+  c.innerHTML=`<div class="burbuja">${h.accion.mensaje.replace(/\{(\w+)\}/g,'<b>{$1}</b>')}</div>
+    <div class="ficha">
+      <div><span>A quién</span>${h.accion.aQuien}</div>
+      <div><span>Cuesta</span>${h.accion.costo}</div>
+      <div><span>Se mide</span>${h.accion.medicion}</div>
+    </div>
+    <div class="botones"><button class="btn btn-va">Va</button><button class="btn btn-no">Hoy no</button></div>`;
+  c.querySelector('.btn-va').onclick=()=>{estado[h.id]='va';pie(c,h);pintarNodos()};
+  c.querySelector('.btn-no').onclick=()=>{estado[h.id]='no';pie(c,h);pintarNodos()};
+}
+
+/* ── Cabecera + estados ─────────────────────────────────────────────────── */
+function cabecera(){
+  document.getElementById('cabFecha').textContent=D.hoy.fecha;
+  document.getElementById('cabMonto').textContent=mx(D.hoy.cobrado);
+  document.getElementById('cabSub').innerHTML= sano
+    ? 'nada que mover hoy'
+    : `cobrado · ${mx(D.hoy.agendado)} agendado · ${mx(D.hoy.hueco)} de hueco`;
+}
+function sanoVista(){
+  lienzo.style.height='100%';
+  lienzo.innerHTML=`<div class="sano" style="height:100%;min-height:70vh">
+    <div class="anillo-ok"><b>✓</b></div>
+    <h2 class="h1">Nada que mover hoy</h2>
+    <p class="sub">El río viene parejo. Ninguna hora se adelgazó lo suficiente<br>como para gastarte un mensaje.</p>
+    <div class="fine">Vuelvo a mirar mañana.</div></div>`;
+}
+document.getElementById('pedir').onclick=function(){
+  if(sano) return;
+  analizado=true; this.classList.add('listo');
+  this.querySelector('span').textContent='Ya lo leí';
+  pintarNodos();
+  cauce.scrollTo({top:yDeHora('16')-300,behavior:'smooth'});
+};
+document.getElementById('tSano').onclick=function(){
+  sano=!sano; this.classList.toggle('on',sano);
+  cabecera(); sano?sanoVista():dibujar();
+};
+document.getElementById('tReset').onclick=()=>{
+  D.hallazgos.forEach(h=>estado[h.id]='abierto'); analizado=false;
+  const b=document.getElementById('pedir'); b.classList.remove('listo');
+  b.querySelector('span').textContent='Analizar';
+  dibujar(); cauce.scrollTo({top:0});
+};
+cabecera(); dibujar();
+addEventListener('resize',()=>{ if(!sano) { dibujar(); } });
+</script>
+</body>
+</html>

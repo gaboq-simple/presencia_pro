@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>G3 · Anillo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="piel.css?v=2">
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  GRAMÁTICA 3 · ANILLO — el día entero cabe en una sola forma, siempre visible.
+  Principio organizador: CENTRO Y PERIFERIA. El dinero vive en el centro; el
+  día es el aro que lo rodea; lo que el sistema señala son MUESCAS en el aro.
+  · Nunca se pierde el todo: al abrir un hallazgo el aro se encoge, no se va.
+    Se ve de dónde salió porque el sector queda encendido y hay un hilo.
+  · Lo que no tiene hora (los que dejaron de venir) va en el aro exterior
+    punteado — sigue teniendo lugar propio, no flota.
+  · Aprobar CLAVA una marca en la cinta de mañana. El compromiso queda inscrito
+    en el mismo reloj donde se va a cumplir.
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+body{overflow:hidden}
+.escena{padding:0}
+.zona-dial{flex:1;display:grid;place-items:center;position:relative;padding-bottom:8%;
+  transition:transform var(--t-lento) var(--e-sale),opacity var(--t-lento) linear}
+.zona-dial.encogido{transform:translateY(-11%) scale(.62)}
+.dial{position:relative;width:min(92vw,352px);aspect-ratio:1}
+.dial svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+
+/* Centro: el dinero. Es el corazón, no un widget más */
+.centro{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;gap:2px;pointer-events:none}
+.centro .monto{font-size:44px}
+.centro .eyebrow{margin-bottom:4px}
+.centro .fine{max-width:64%}
+
+/* Gesto de análisis: un botón que rodea el centro, abajo del monto */
+.pedir{pointer-events:auto;margin-top:12px;border:1px solid rgba(255,77,157,.45);
+  background:rgba(255,77,157,.1);color:var(--ink);font:500 12.5px Inter,sans-serif;
+  padding:9px 15px;border-radius:20px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.pedir i{width:7px;height:7px;border-radius:50%;background:var(--magenta);
+  box-shadow:0 0 12px var(--magenta);animation:latir 3s var(--e-entra) infinite alternate}
+@keyframes latir{to{transform:scale(1.4)}}
+
+/* Muescas: los hallazgos, inscritos en el aro */
+.muesca{position:absolute;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:50%;
+  display:grid;place-items:center;cursor:pointer;
+  background:rgba(255,77,157,.16);border:1px solid rgba(255,77,157,.6);
+  box-shadow:0 0 18px rgba(255,77,157,.35);
+  font:500 12px 'Space Grotesk',Inter,sans-serif;color:#FFD9E8;
+  animation:brota var(--t-lento) var(--e-sale) backwards;
+  transition:transform var(--t-rapido) var(--e-sale)}
+.muesca:active{transform:translate(-50%,-50%) scale(.9)}
+.muesca.va{background:rgba(124,245,176,.16);border-color:rgba(124,245,176,.6);
+  box-shadow:0 0 18px rgba(124,245,176,.3);color:#D6FFE9}
+.muesca.no{background:var(--vidrio);border-color:var(--hair);box-shadow:none;color:var(--ink-3)}
+.muesca.sel{transform:translate(-50%,-50%) scale(1.18)}
+@keyframes brota{from{opacity:0;transform:translate(-50%,-50%) scale(.4)}}
+.etq{position:absolute;transform:translate(-50%,-50%);font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);white-space:nowrap;pointer-events:none}
+
+/* Pétalo: el detalle sale del punto tocado, no de una pila */
+.petalo{position:absolute;left:0;right:0;bottom:0;z-index:5;max-height:70%;
+  background:rgba(13,8,32,.96);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border-top:1px solid rgba(255,77,157,.34);border-radius:22px 22px 0 0;
+  padding:18px var(--s5) var(--s6);overflow-y:auto;
+  transform:translateY(101%);transition:transform var(--t-lento) var(--e-sale);
+  box-shadow:0 -20px 60px rgba(0,0,0,.55)}
+.petalo.on{transform:none}
+.petalo .asa{width:34px;height:3px;border-radius:2px;background:var(--hair);margin:0 auto 14px}
+.petalo h2{font:400 19px/1.18 'Space Grotesk',Inter,sans-serif;letter-spacing:-.02em;margin-bottom:6px}
+.petalo .sub{margin-bottom:13px}
+.petalo .burbuja{margin-top:12px}
+.petalo .cerrar{position:absolute;top:14px;right:16px;background:none;border:0;
+  color:var(--ink-3);font-size:19px;cursor:pointer;line-height:1}
+
+/* Cinta de mañana: donde se clavan los compromisos */
+.cinta-etq{position:absolute;left:50%;transform:translateX(-50%);bottom:-26px;
+  font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.clavo{position:absolute;transform:translate(-50%,-50%);width:9px;height:9px;border-radius:50%;
+  background:var(--ok);box-shadow:0 0 12px var(--ok);animation:brota var(--t-lento) var(--e-sale)}
+
+/* Pie: solo cuando hay cola. Nunca es una lista de tarjetas: es un renglón. */
+.cola{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:12px var(--s5) 18px;
+  background:linear-gradient(0deg,rgba(7,4,15,.92),transparent);
+  display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-2)}
+.cola i{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok);flex:0 0 auto}
+.cola b{color:var(--ok);font-weight:500}
+.cola button{margin-left:auto;background:none;border:0;color:var(--ink-3);
+  font:400 11.5px Inter,sans-serif;text-decoration:underline;cursor:pointer}
+.pista-txt{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+  font-size:11.5px;color:var(--ink-3);text-align:center;width:80%}
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i></div><div class="grano"></div>
+
+<div class="tester">
+  <button id="tSano">estado sano</button>
+  <button id="tReset">reiniciar</button>
+</div>
+
+<div class="escena" id="escena">
+  <div class="zona-dial" id="zona">
+    <div class="dial" id="dial"></div>
+  </div>
+  <div class="pista-txt" id="pistaTxt"></div>
+  <div class="cola" id="cola" style="display:none"></div>
+</div>
+<div class="petalo" id="petalo"></div>
+<div class="sello">G3 · anillo — datos inventados, no salen de la BD</div>
+
+<script src="datos.js"></script>
+<script>
+const D=window.DEMO, dial=document.getElementById('dial'), zona=document.getElementById('zona'),
+      petalo=document.getElementById('petalo'), cola=document.getElementById('cola'),
+      pistaTxt=document.getElementById('pistaTxt');
+const mx=n=>'$'+n.toLocaleString('es-MX');
+let analizado=false, sano=false, sel=null;
+const estado={}; D.hallazgos.forEach(h=>estado[h.id]='abierto');
+
+/* ── Geometría polar. 0° = arriba, crece en sentido del reloj. ──────────
+   El día (9→21 h) barre 300°; los 60° de abajo son la cinta de MAÑANA.  */
+const A0=-150, A1=150, R=39, R_CINTA=48, R_PASADO=48.5;
+const pol=(a,r)=>{const t=(a-90)*Math.PI/180;return[50+r*Math.cos(t),50+r*Math.sin(t)]};
+const arco=(a0,a1,r)=>{
+  const[x0,y0]=pol(a0,r),[x1,y1]=pol(a1,r);
+  return `M ${x0} ${y0} A ${r} ${r} 0 ${(a1-a0)>180?1:0} 1 ${x1} ${y1}`;
+};
+const angHora=hh=>{const k=D.tramos.findIndex(t=>t.h===hh);return A0+(A1-A0)*((k+.5)/D.tramos.length)};
+
+function dibujar(){
+  const n=D.tramos.length, paso=(A1-A0)/n;
+  let s='';
+  // pista del aro
+  s+=`<path d="${arco(A0,A1,R)}" stroke="rgba(255,255,255,.07)" stroke-width="9" fill="none" stroke-linecap="round"/>`;
+  D.tramos.forEach((t,k)=>{
+    const a0=A0+paso*k+.9, a1=a0+paso-1.8;
+    const col=t.estado==='hecho'?'rgba(59,232,224,.8)':t.estado==='agenda'?'rgba(155,123,255,.62)':'rgba(255,184,107,.3)';
+    const w=t.estado==='hueco'?3.5:9;
+    s+=`<path d="${arco(a0,a1,R)}" stroke="${col}" stroke-width="${w}" fill="none" stroke-linecap="butt"/>`;
+    if(t.estado==='hecho') s+=`<path d="${arco(a0,a1,R)}" stroke="rgba(59,232,224,.5)" stroke-width="13"
+        fill="none" filter="url(#g)" stroke-linecap="butt"/>`;
+  });
+  // marcas de hora cada 3 h
+  D.tramos.forEach((t,k)=>{ if(k%3) return;
+    const a=A0+paso*k, [x1,y1]=pol(a,R+7), [x2,y2]=pol(a,R+9.5);
+    s+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(255,255,255,.22)" stroke-width=".7"/>`;
+  });
+  // cinta de mañana (los 60° de abajo)
+  s+=`<path d="${arco(A1+4,A0+356,R_CINTA)}" stroke="rgba(155,123,255,.3)" stroke-width="2.2"
+      fill="none" stroke-dasharray="1.6 2.6" stroke-linecap="round"/>`;
+  // aro exterior del pasado (arriba-izquierda), lo que ya no tiene hora
+  s+=`<path d="${arco(-188,-152,R_PASADO)}" stroke="rgba(255,255,255,.16)" stroke-width="1.2"
+      fill="none" stroke-dasharray="1 3"/>`;
+  // línea de ahora
+  const aNow=(angHora('15')+angHora('16'))/2;
+  const[nx1,ny1]=pol(aNow,R-7),[nx2,ny2]=pol(aNow,R+7);
+  s+=`<line x1="${nx1}" y1="${ny1}" x2="${nx2}" y2="${ny2}" stroke="var(--cian)" stroke-width="1.1"/>`;
+
+  dial.innerHTML=`<svg viewBox="0 0 100 100">
+      <defs><filter id="g" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>
+      ${s}<g id="hilos"></g></svg>`;
+  // rótulos de hora
+  [['09',A0],['21',A1]].forEach(([hh,a])=>{
+    const[x,y]=pol(a,R-13);
+    dial.insertAdjacentHTML('beforeend',`<div class="etq" style="left:${x}%;top:${y}%">${hh}:00</div>`);
+  });
+  const[cx,cy]=pol(aNow,R+12);
+  dial.insertAdjacentHTML('beforeend',
+    `<div class="etq" style="left:${cx}%;top:${cy}%;color:var(--cian)">ahora</div>`);
+  dial.insertAdjacentHTML('beforeend','<div class="cinta-etq">mañana</div>');
+  centro(); marcas();
+}
+
+function centro(){
+  const h=D.hoy;
+  dial.insertAdjacentHTML('beforeend',`<div class="centro">
+    <div class="eyebrow">${h.fecha}</div>
+    <div class="display cromo monto">${mx(h.cobrado)}</div>
+    <div class="fine">${mx(h.agendado)} agendado · ${mx(h.hueco)} de hueco</div>
+    ${analizado?'':'<button class="pedir" id="pedir"><i></i>Analizar mi negocio</button>'}
+  </div>`);
+  const p=document.getElementById('pedir');
+  if(p) p.onclick=()=>{analizado=true;dibujar();
+    pistaTxt.textContent='Tres muescas en el aro. Cada una está en la hora que la produjo.';};
+}
+
+function angDe(h){
+  if(h.ancla.tipo==='franja') return (angHora('16')+angHora('18'))/2;
+  if(h.ancla.tipo==='pasado') return -170;
+  return A1+22;
+}
+function radioDe(h){ return h.ancla.tipo==='pasado' ? R_PASADO : R; }
+
+function marcas(){
+  if(!analizado){ pistaTxt.textContent='El aro es tu día. Lo delgado en durazno es hueco.'; cola.style.display='none'; return; }
+  D.hallazgos.forEach((h,k)=>{
+    const a=angDe(h), r=radioDe(h), [x,y]=pol(a,r), st=estado[h.id];
+    const d=document.createElement('div');
+    d.className='muesca'+(st==='va'?' va':st==='no'?' no':'')+(sel===h.id?' sel':'');
+    d.style.cssText=`left:${x}%;top:${y}%;animation-delay:${k*90}ms`;
+    d.textContent=st==='va'?'✓':st==='no'?'–':(k+1);
+    d.onclick=()=>abrir(h);
+    dial.appendChild(d);
+    if(h.ancla.tipo==='pasado'){
+      const[lx,ly]=pol(a,r+12);
+      dial.insertAdjacentHTML('beforeend',
+        `<div class="etq" style="left:${lx}%;top:${ly}%">sin hora · ${h.ancla.etiqueta}</div>`);
+    }
+    // clavo en la cinta de mañana por cada aprobado
+    if(st==='va'){
+      const ac=A1+14+k*10, [px,py]=pol(ac,R_CINTA);
+      dial.insertAdjacentHTML('beforeend',`<div class="clavo" style="left:${px}%;top:${py}%"></div>`);
+    }
+  });
+  const vas=D.hallazgos.filter(h=>estado[h.id]==='va');
+  if(vas.length){
+    cola.style.display='flex';
+    cola.innerHTML=`<i></i><span><b>${vas.length} ${vas.length===1?'tarea clavada':'tareas clavadas'}</b> en mañana · ${vas.map(v=>v.accion.sale.replace('mañana ','')).join(' y ')}</span>
+      <button>deshacer todo</button>`;
+    cola.querySelector('button').onclick=()=>{vas.forEach(v=>estado[v.id]='abierto');dibujar()};
+    pistaTxt.textContent='';
+  } else { cola.style.display='none'; }
+}
+
+function hilo(h){
+  const g=dial.querySelector('#hilos'); if(!g) return;
+  g.innerHTML='';
+  const[x,y]=pol(angDe(h),radioDe(h));
+  g.insertAdjacentHTML('beforeend',
+    `<line x1="${x}" y1="${y}" x2="50" y2="103" stroke="rgba(255,77,157,.45)" stroke-width=".6" stroke-dasharray="1.5 2"/>`);
+}
+
+function abrir(h){
+  sel=h.id; zona.classList.add('encogido'); marcasRefrescar(); hilo(h);
+  petalo.innerHTML=`<div class="asa"></div><button class="cerrar">✕</button>
+    <div class="eyebrow" style="margin-bottom:7px">${h.ancla.etiqueta}</div>
+    <h2>${h.titulo}</h2><p class="sub">${h.bajada}</p>
+    <p class="fine" style="margin:-6px 0 8px">${h.evidencia.resumen}</p>
+    <button class="evid-btn" aria-expanded="false">¿De dónde lo saco?</button>
+    <div class="evid"><ul>${h.evidencia.citas.map(c=>`<li>${c}</li>`).join('')}</ul></div>
+    <div data-pie style="margin-top:15px"></div>`;
+  const eb=petalo.querySelector('.evid-btn'), ev=petalo.querySelector('.evid');
+  eb.onclick=()=>{const a=ev.classList.toggle('abierta');eb.setAttribute('aria-expanded',a)};
+  petalo.querySelector('.cerrar').onclick=cerrar;
+  pie(petalo.querySelector('[data-pie]'),h);
+  petalo.classList.add('on');
+}
+function cerrar(){
+  petalo.classList.remove('on'); sel=null; zona.classList.remove('encogido');
+  const g=dial.querySelector('#hilos'); if(g) g.innerHTML='';
+  marcasRefrescar();
+}
+function marcasRefrescar(){
+  dial.querySelectorAll('.muesca,.clavo,.etq,.centro,.cinta-etq').forEach(n=>n.remove());
+  const aNow=(angHora('15')+angHora('16'))/2;
+  [['09',A0],['21',A1]].forEach(([hh,a])=>{const[x,y]=pol(a,R-13);
+    dial.insertAdjacentHTML('beforeend',`<div class="etq" style="left:${x}%;top:${y}%">${hh}:00</div>`)});
+  const[cx,cy]=pol(aNow,R+12);
+  dial.insertAdjacentHTML('beforeend',`<div class="etq" style="left:${cx}%;top:${cy}%;color:var(--cian)">ahora</div>`);
+  dial.insertAdjacentHTML('beforeend','<div class="cinta-etq">mañana</div>');
+  centro(); marcas();
+}
+function pie(c,h){
+  const st=estado[h.id];
+  if(st==='va'){
+    c.innerHTML=`<div class="tarea"><i class="pt"></i>
+      <div class="tx"><b>Sale ${h.accion.sale}</b> · quedó clavada en la cinta de mañana</div>
+      <button>deshacer</button></div>
+      <div class="hueco-res"><b>$&nbsp;___</b><i>lo llena el corte · ${h.accion.medicion.toLowerCase()}</i></div>`;
+    c.querySelector('button').onclick=()=>{estado[h.id]='abierto';pie(c,h);marcasRefrescar();hilo(h)};
+    return;
+  }
+  if(st==='no'){
+    c.innerHTML=`<div class="aplazado">Lo dejo así. No te lo vuelvo a sacar hasta que el dato cambie.</div>`;
+    return;
+  }
+  c.innerHTML=`<div class="burbuja">${h.accion.mensaje.replace(/\{(\w+)\}/g,'<b>{$1}</b>')}</div>
+    <div class="ficha">
+      <div><span>A quién</span>${h.accion.aQuien}</div>
+      <div><span>Cuesta</span>${h.accion.costo}</div>
+      <div><span>Se mide</span>${h.accion.medicion}</div>
+    </div>
+    <div class="botones"><button class="btn btn-va">Va</button><button class="btn btn-no">Hoy no</button></div>`;
+  c.querySelector('.btn-va').onclick=()=>{estado[h.id]='va';pie(c,h);marcasRefrescar();hilo(h)};
+  c.querySelector('.btn-no').onclick=()=>{estado[h.id]='no';pie(c,h);marcasRefrescar();hilo(h)};
+}
+
+function sanoVista(){
+  dial.innerHTML=''; cola.style.display='none'; pistaTxt.textContent='';
+  zona.innerHTML=`<div class="sano">
+    <div class="anillo-ok"><b>✓</b></div>
+    <h2 class="h1">Nada que mover hoy</h2>
+    <p class="sub">El aro viene parejo. Ninguna franja se abrió lo suficiente<br>como para gastarte un mensaje.</p>
+    <div class="fine">Vuelvo a mirar mañana.</div></div>`;
+}
+document.getElementById('tSano').onclick=function(){
+  sano=!sano; this.classList.toggle('on',sano); petalo.classList.remove('on');
+  if(sano) sanoVista();
+  else { zona.innerHTML='<div class="dial" id="dial"></div>'; location.reload(); }
+};
+document.getElementById('tReset').onclick=()=>location.reload();
+dibujar();
+</script>
+</body>
+</html>

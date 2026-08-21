@@ -1,0 +1,160 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PIEL COMPARTIDA — ciclo 2
+   Base RETROWAVE (noche violeta, horizonte, cromo), detalles AURORA (cintas
+   difusas que se mueven lento), aire ETÉREO (transparencia, hairlines de luz).
+   ⚠️ Esta piel es IDÉNTICA en las 3 gramáticas a propósito: la variable de
+   esta iteración es la ESTRUCTURA. El color se afina hasta el final.
+   prefers-reduced-motion apaga TODO el movimiento (regla dura).
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root{
+  /* Noche */
+  --n0:#07040F; --n1:#0D0820; --n2:#151030; --n3:#1E1743;
+  /* Tinta */
+  --ink:#F2EEFF; --ink-2:#B9B0DC; --ink-3:#7D74A4;
+  /* Luz (retrowave) */
+  --cian:#3BE8E0; --magenta:#FF4D9D; --violeta:#9B7BFF; --durazno:#FFB86B;
+  --lima:#7CF5B0;
+  /* Roles semánticos — el color NUNCA es decoración suelta */
+  --hecho:var(--cian);        /* dinero ya cobrado */
+  --agenda:var(--violeta);    /* dinero agendado, todavía no en la mano */
+  --hueco:var(--durazno);     /* capacidad sin usar — es espacio, no alarma */
+  --ojo:var(--magenta);       /* lo que el sistema señala */
+  --ok:var(--lima);           /* confirmado / sano */
+  /* Superficies etéreas */
+  --vidrio:rgba(255,255,255,.045);
+  --vidrio-2:rgba(255,255,255,.075);
+  --hair:rgba(255,255,255,.14);
+  --hair-luz:rgba(59,232,224,.35);
+  /* Ritmo */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px;
+  --r:14px;
+  /* Movimiento: 2 duraciones, 2 curvas. Nada más. */
+  --t-rapido:180ms; --t-lento:520ms;
+  --e-sale:cubic-bezier(.2,.8,.2,1); --e-entra:cubic-bezier(.4,0,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  background:var(--n0); color:var(--ink);
+  font:400 15px/1.45 Inter,-apple-system,system-ui,sans-serif;
+  font-feature-settings:"cv11","ss01"; -webkit-font-smoothing:antialiased;
+  overflow:hidden; position:relative;
+}
+/* ── AURORA: dos cintas difusas, lentas, detrás de todo ───────────────────── */
+.aurora{position:fixed;inset:-20%;z-index:0;pointer-events:none;filter:blur(70px);opacity:.55}
+.aurora i{position:absolute;display:block;border-radius:50%}
+.aurora i:nth-child(1){width:70%;height:45%;left:-10%;top:2%;
+  background:radial-gradient(circle,rgba(155,123,255,.75),transparent 68%);
+  animation:der 26s var(--e-entra) infinite alternate}
+.aurora i:nth-child(2){width:65%;height:42%;right:-12%;top:22%;
+  background:radial-gradient(circle,rgba(255,77,157,.55),transparent 68%);
+  animation:izq 31s var(--e-entra) infinite alternate}
+.aurora i:nth-child(3){width:80%;height:38%;left:0;bottom:-6%;
+  background:radial-gradient(circle,rgba(59,232,224,.42),transparent 70%);
+  animation:der 37s var(--e-entra) infinite alternate}
+@keyframes der{to{transform:translate(14%,7%) scale(1.15)}}
+@keyframes izq{to{transform:translate(-13%,-6%) scale(1.1)}}
+/* Grano etéreo, mata el banding de los degradados */
+.grano{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+.escena{position:relative;z-index:2;height:100%;display:flex;flex-direction:column}
+
+/* ── Tipografía ───────────────────────────────────────────────────────────── */
+.display{font-family:'Space Grotesk',Inter,sans-serif;font-weight:300;
+  letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:.95}
+.cromo{background:linear-gradient(178deg,#fff 12%,var(--cian) 46%,var(--violeta) 78%,var(--magenta));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 18px rgba(59,232,224,.28))}
+.eyebrow{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
+.h1{font-family:'Space Grotesk',Inter,sans-serif;font-weight:400;font-size:25px;line-height:1.12;letter-spacing:-.02em}
+.sub{font-size:13.5px;color:var(--ink-2);line-height:1.4}
+.fine{font-size:11.5px;color:var(--ink-3);line-height:1.4}
+.num{font-variant-numeric:tabular-nums}
+
+/* ── Moléculas compartidas: las INVARIANTES viven aquí ─────────────────────
+   Idénticas en las 3 gramáticas. Lo que cambia entre gramáticas es DÓNDE se
+   colocan y CÓMO se llega a ellas — no qué dicen.                          */
+
+/* Evidencia consultable */
+.evid-btn{display:inline-flex;align-items:center;gap:6px;text-align:left;background:none;border:0;
+  color:var(--cian);font:500 12.5px Inter,sans-serif;cursor:pointer;padding:6px 0;
+  border-bottom:1px dashed rgba(59,232,224,.4)}
+.evid-btn::after{content:'▾';font-size:9px;transition:transform var(--t-rapido) var(--e-sale)}
+.evid-btn[aria-expanded=true]::after{transform:rotate(180deg)}
+.evid{display:none;margin-top:var(--s3);padding:var(--s3) var(--s4);border-radius:12px;
+  background:rgba(59,232,224,.07);border:1px solid rgba(59,232,224,.2)}
+.evid.abierta{display:block;animation:sube var(--t-lento) var(--e-sale)}
+.evid ul{list-style:none;display:grid;gap:9px}
+.evid li{font-size:12.5px;color:var(--ink-2);padding-left:16px;position:relative;line-height:1.35}
+.evid li::before{content:'';position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;
+  background:var(--cian);box-shadow:0 0 8px var(--cian)}
+@keyframes sube{from{opacity:0;transform:translateY(8px)}}
+
+/* Preview del mensaje que va a salir */
+.burbuja{position:relative;padding:11px 13px;border-radius:4px 14px 14px 14px;
+  background:var(--vidrio-2);border:1px solid var(--hair);font-size:13px;color:var(--ink);line-height:1.4}
+.burbuja b{color:var(--cian);font-weight:500}
+
+/* Costo + medición: siempre juntos, siempre antes de aprobar */
+.ficha{display:grid;gap:7px;margin-top:var(--s3)}
+.ficha div{display:flex;gap:9px;font-size:12px;color:var(--ink-2);line-height:1.35}
+.ficha span{flex:0 0 68px;color:var(--ink-3);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding-top:1px}
+
+/* El resultado futuro: hueco, JAMÁS una estimación */
+.hueco-res{display:flex;align-items:baseline;gap:10px;margin-top:var(--s3);
+  padding:8px 13px;border-radius:10px;border:1px dashed rgba(255,184,107,.45);
+  background:rgba(255,184,107,.06)}
+.hueco-res b{flex:0 0 auto;white-space:nowrap;font-family:'Space Grotesk',Inter,sans-serif;
+  font-weight:300;font-size:21px;color:var(--hueco);letter-spacing:.06em}
+.hueco-res i{flex:1;font-style:normal;font-size:11px;color:var(--ink-3);line-height:1.35}
+
+/* Los dos botones. "Hoy no" pesa lo mismo visualmente: no se empuja. */
+.botones{display:flex;gap:var(--s2);margin-top:var(--s4)}
+.btn{flex:1;padding:13px;border-radius:12px;border:1px solid var(--hair);
+  background:var(--vidrio);color:var(--ink);font:500 14px Inter,sans-serif;cursor:pointer;
+  transition:transform var(--t-rapido) var(--e-sale),background var(--t-rapido) linear}
+.btn:active{transform:scale(.97)}
+.btn-va{border-color:rgba(59,232,224,.55);background:rgba(59,232,224,.13);color:#DFFFFC;
+  box-shadow:0 0 22px rgba(59,232,224,.18) inset}
+.btn-no{flex:0 0 38%}
+
+/* Tarea creada */
+.tarea{display:flex;align-items:center;gap:10px;padding:11px 13px;border-radius:12px;
+  background:rgba(124,245,176,.09);border:1px solid rgba(124,245,176,.28)}
+.tarea .pt{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok);flex:0 0 auto}
+.tarea .tx{flex:1;font-size:12.5px;line-height:1.3}
+.tarea .tx b{font-weight:500;color:var(--ok)}
+.tarea button{background:none;border:0;color:var(--ink-3);font:400 12px Inter,sans-serif;
+  text-decoration:underline;cursor:pointer;flex:0 0 auto}
+
+/* "Hoy no" digno */
+.aplazado{padding:11px 13px;border-radius:12px;border:1px dashed var(--hair);
+  font-size:12px;color:var(--ink-3);line-height:1.35}
+
+/* Sello de datos inventados */
+.sello{position:fixed;z-index:9;left:50%;transform:translateX(-50%);bottom:6px;
+  font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.28);
+  pointer-events:none;white-space:nowrap}
+
+/* Cambiador de estado sano (herramienta de maqueta, no del producto) */
+.tester{position:fixed;z-index:10;top:8px;right:8px;display:flex;gap:4px}
+.tester button{background:rgba(0,0,0,.5);border:1px solid var(--hair);color:var(--ink-3);
+  font:500 9.5px Inter,sans-serif;letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:7px;cursor:pointer}
+.tester button.on{color:var(--n0);background:var(--cian);border-color:var(--cian)}
+
+/* Estado sano: el lector a veces dice "todo bien" */
+.sano{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:var(--s8);gap:var(--s4)}
+.sano .anillo-ok{width:120px;height:120px;border-radius:50%;border:1px solid rgba(124,245,176,.3);
+  display:grid;place-items:center;box-shadow:0 0 60px rgba(124,245,176,.14) inset;
+  animation:respira 5.5s var(--e-entra) infinite alternate}
+.sano .anillo-ok b{font-size:34px;color:var(--ok);font-weight:300;filter:drop-shadow(0 0 14px rgba(124,245,176,.6))}
+@keyframes respira{to{transform:scale(1.06);box-shadow:0 0 80px rgba(124,245,176,.22) inset}}
+
+::-webkit-scrollbar{width:0;height:0}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}

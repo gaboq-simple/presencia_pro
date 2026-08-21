@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ciclo 2 · tres gramáticas de layout</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{--n0:#07040F;--ink:#F2EEFF;--ink-2:#B9B0DC;--ink-3:#7D74A4;--cian:#3BE8E0;--magenta:#FF4D9D}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--n0);color:var(--ink);font:400 15px/1.5 Inter,system-ui,sans-serif;
+  padding:36px 28px 70px;-webkit-font-smoothing:antialiased}
+h1{font:400 27px 'Space Grotesk',Inter,sans-serif;letter-spacing:-.02em;margin-bottom:8px}
+.intro{max-width:760px;color:var(--ink-2);font-size:14px;margin-bottom:8px}
+.intro b{color:var(--ink);font-weight:500}
+.aviso{max-width:760px;font-size:12.5px;color:var(--ink-3);border-left:2px solid rgba(255,77,157,.5);
+  padding-left:12px;margin:18px 0 34px}
+.fila{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+.col{width:392px}
+.tel{width:392px;height:812px;border-radius:34px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+  box-shadow:0 30px 80px rgba(0,0,0,.6);background:#07040F}
+.tel iframe{width:100%;height:100%;border:0;display:block}
+.tit{display:flex;align-items:baseline;gap:9px;margin-bottom:5px}
+.tit b{font:500 16px 'Space Grotesk',Inter,sans-serif}
+.tit i{font-style:normal;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--magenta)}
+.pri{font-size:12.5px;color:var(--ink-2);margin-bottom:4px}
+.pri em{font-style:normal;color:var(--cian)}
+.mata{font-size:12px;color:var(--ink-3);margin-bottom:14px}
+.abrir{display:inline-block;margin-top:12px;font-size:12px;color:var(--cian);text-decoration:none;
+  border-bottom:1px dashed rgba(59,232,224,.4)}
+.preg{max-width:760px;margin-top:52px;border-top:1px solid rgba(255,255,255,.1);padding-top:24px}
+.preg h2{font:400 19px 'Space Grotesk',Inter,sans-serif;margin-bottom:12px}
+.preg ol{padding-left:20px;color:var(--ink-2);font-size:13.5px}
+.preg li{margin-bottom:9px}
+.preg li b{color:var(--ink);font-weight:500}
+</style>
+</head>
+<body>
+<h1>Ciclo 2 · tres gramáticas de layout</h1>
+<p class="intro">Una pantalla cada una: <b>“Analizar mi negocio”</b> — el dinero de hoy, pedir la lectura,
+3 hallazgos con evidencia, una acción por hallazgo con su preview/costo/medición, aprobar y ver la tarea.</p>
+<p class="intro"><b>Misma piel, mismos datos, mismo texto en las tres.</b> Lo único que cambia es el
+esqueleto. Es a propósito: esta iteración decide la <b>estructura</b>; el color y el movimiento se afinan después.</p>
+<div class="aviso">Las tres son interactivas. Toca <b>Analizar</b>, abre <b>“¿De dónde lo saco?”</b>, dale
+<b>Va</b> a alguna y mira dónde aparece la tarea. Arriba a la derecha de cada teléfono hay un botón
+<b>estado sano</b> (el lector diciendo “nada que mover hoy”) y otro para reiniciar.
+Todos los números son <b>inventados</b>: no salen de la base.</div>
+
+<div class="fila">
+  <div class="col">
+    <div class="tit"><b>Escenas</b><i>G1</i></div>
+    <p class="pri">Organiza por <em>tiempo de atención</em>: una cosa por pantalla, se avanza, no se hace scroll.</p>
+    <p class="mata">La evidencia es una capa que tapa la escena. Lo aprobado se junta al final.</p>
+    <div class="tel"><iframe src="g1-escenas.html"></iframe></div>
+    <a class="abrir" href="g1-escenas.html" target="_blank">abrir sola →</a>
+  </div>
+  <div class="col">
+    <div class="tit"><b>Río</b><i>G2</i></div>
+    <p class="pri">Organiza por <em>posición en el tiempo</em>: el ancho del cauce es el dinero de esa hora.</p>
+    <p class="mata">Los hallazgos cuelgan con un hilo del tramo que los produjo. Lo aprobado es una boya río abajo.</p>
+    <div class="tel"><iframe src="g2-rio.html"></iframe></div>
+    <a class="abrir" href="g2-rio.html" target="_blank">abrir sola →</a>
+  </div>
+  <div class="col">
+    <div class="tit"><b>Anillo</b><i>G3</i></div>
+    <p class="pri">Organiza por <em>centro y periferia</em>: el día entero cabe en una forma que nunca se pierde.</p>
+    <p class="mata">Los hallazgos son muescas en el aro; el detalle sale como pétalo. Lo aprobado se clava en la cinta de mañana.</p>
+    <div class="tel"><iframe src="g3-anillo.html"></iframe></div>
+    <a class="abrir" href="g3-anillo.html" target="_blank">abrir sola →</a>
+  </div>
+</div>
+
+<div class="preg">
+  <h2>Lo que necesito que me digas (por elemento, no en global)</h2>
+  <ol>
+    <li><b>El gesto de pedir la lectura</b> — en G1 es un ojo grande al centro, en G2 un botón en la barra fija,
+      en G3 un botón dentro del aro. ¿Cuál se siente como “mándale, léeme”?</li>
+    <li><b>Dónde vive el dinero</b> — G1 lo pone en su propia escena, G2 lo fija arriba siempre, G3 lo mete
+      al centro del reloj. ¿Cuál te deja tranquilo mientras haces lo demás?</li>
+    <li><b>Cómo llega el hallazgo</b> — pantalla completa (G1), colgado de su hora (G2), muesca en el aro (G3).
+      ¿Cuál te hace creerle que el sistema sabe de dónde salió?</li>
+    <li><b>Dónde cae lo que aprobaste</b> — juntado al final (G1), boya río abajo (G2), clavo en mañana (G3).</li>
+    <li><b>Qué te sobra</b> de cada una. Eso es tan útil como lo que te gusta.</li>
+  </ol>
+</div>
+</body>
+</html>

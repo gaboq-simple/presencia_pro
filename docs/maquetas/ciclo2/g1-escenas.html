@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>G1 · Escenas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="piel.css?v=2">
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  GRAMÁTICA 1 · ESCENAS — secuencia cinemática, navegación tipo historias.
+  Principio organizador: EL TIEMPO DE ATENCIÓN. Una cosa por pantalla, nunca
+  dos. No hay scroll: hay avance. El dueño no elige entre tarjetas — recorre.
+  · Cero pila vertical: cada hallazgo es una pantalla completa con su propia
+    composición (título arriba, evidencia como FORMA en medio, acción abajo).
+  · La evidencia no es un acordeón dentro de una tarjeta: es una CAPA que sube
+    sobre la escena y la tapa. Consultarla es un lugar, no un desplegable.
+  · Lo aprobado se acumula y se ve junto al final (escena "lo que sale").
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+/* ── Barra de progreso: dónde voy del recorrido ──────────────────────────── */
+.progreso{position:absolute;top:0;left:0;right:0;z-index:6;display:flex;gap:3px;padding:10px 12px 0}
+.progreso i{flex:1;height:2px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden}
+.progreso i b{display:block;height:100%;width:0;background:var(--cian);
+  box-shadow:0 0 8px var(--cian);transition:width var(--t-lento) var(--e-sale)}
+.progreso i.visto b{width:100%}
+
+/* ── El escenario: una escena visible, las demás fuera de cuadro ─────────── */
+.pista{position:relative;flex:1;overflow:hidden}
+.sc{position:absolute;inset:0;display:flex;flex-direction:column;
+  padding:52px var(--s5) 40px;opacity:0;pointer-events:none;
+  transform:translateX(28px) scale(.985);
+  transition:opacity var(--t-lento) var(--e-sale),transform var(--t-lento) var(--e-sale)}
+.sc.on{opacity:1;pointer-events:auto;transform:none}
+.sc.fue{transform:translateX(-28px) scale(.985)}
+
+/* Zonas de toque: mitad izquierda atrás, mitad derecha adelante */
+.tocar{position:absolute;inset:0;z-index:3;display:flex}
+.tocar span{flex:1}
+.sc > *{position:relative;z-index:4}
+
+/* ── Escena 0 · el dinero ─────────────────────────────────────────────────── */
+.dinero{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+.dinero .monto{font-size:78px;margin:10px 0 4px}
+.capas{width:100%;max-width:290px;margin-top:26px}
+.capas .barra{display:flex;height:7px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,.08)}
+.capas .barra u{display:block;height:100%}
+.capas .leyenda{display:flex;justify-content:space-between;margin-top:11px;font-size:11px;color:var(--ink-3)}
+.capas .leyenda b{display:block;font-size:14px;font-weight:400;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;margin-bottom:2px}
+.capas .leyenda i{display:inline-block;width:6px;height:6px;border-radius:2px;margin-right:5px;vertical-align:1px}
+
+/* El gesto: pedir la lectura. Grande, no un botón de barra. */
+.pedir{margin-top:40px;display:flex;flex-direction:column;align-items:center;gap:12px;
+  background:none;border:0;cursor:pointer;color:inherit}
+.pedir .ojo{width:74px;height:74px;border-radius:50%;display:grid;place-items:center;
+  border:1px solid rgba(255,77,157,.4);background:rgba(255,77,157,.08);
+  box-shadow:0 0 44px rgba(255,77,157,.18) inset;
+  animation:latir 3.4s var(--e-entra) infinite alternate}
+.pedir .ojo::before{content:'';width:12px;height:12px;border-radius:50%;background:var(--magenta);
+  box-shadow:0 0 18px var(--magenta)}
+.pedir span{font:500 14px Inter,sans-serif;color:var(--ink)}
+@keyframes latir{to{transform:scale(1.07);box-shadow:0 0 62px rgba(255,77,157,.3) inset}}
+
+/* ── Escena de lectura ────────────────────────────────────────────────────── */
+.leyendo{flex:1;display:flex;flex-direction:column;justify-content:center;gap:18px}
+.leyendo .linea{display:flex;gap:11px;align-items:flex-start;opacity:0;
+  animation:aparece var(--t-lento) var(--e-sale) forwards}
+.leyendo .linea:nth-child(1){animation-delay:.15s}
+.leyendo .linea:nth-child(2){animation-delay:.85s}
+.leyendo .linea:nth-child(3){animation-delay:1.55s}
+.leyendo .linea i{width:6px;height:6px;border-radius:50%;background:var(--cian);
+  box-shadow:0 0 10px var(--cian);margin-top:7px;flex:0 0 auto}
+.leyendo .linea p{font-size:15px;color:var(--ink-2);line-height:1.35}
+@keyframes aparece{to{opacity:1}}
+/* barrido del escáner */
+.barrido{position:absolute;left:0;right:0;height:120px;z-index:2;
+  background:linear-gradient(180deg,transparent,rgba(59,232,224,.13),transparent);
+  animation:barre 2.4s var(--e-entra) infinite}
+@keyframes barre{from{top:-120px}to{top:100%}}
+
+/* ── Escenas de hallazgo ──────────────────────────────────────────────────── */
+.hz{flex:1;display:flex;flex-direction:column}
+.hz .cab{flex:0 0 auto}
+.hz .marca{display:inline-flex;align-items:center;gap:7px;margin-bottom:14px}
+.hz .marca i{width:5px;height:5px;border-radius:50%;background:var(--ojo);box-shadow:0 0 10px var(--ojo)}
+.hz .h1{margin-bottom:9px}
+.hz .forma{flex:1;display:flex;flex-direction:column;justify-content:center;padding:14px 0;max-height:34%}
+.hz .pie{flex:0 0 auto}
+
+/* Formas de evidencia — cada hallazgo se gana la suya, no todas son iguales */
+.semana{display:grid;grid-template-columns:22px repeat(5,1fr);gap:4px;align-items:center}
+.semana .hh{font-size:9.5px;color:var(--ink-3);text-align:right;padding-right:3px}
+.semana .dd{font-size:9.5px;color:var(--ink-3);text-align:center;padding-bottom:3px}
+.semana .cl{height:17px;border-radius:3px;background:rgba(255,255,255,.05)}
+.semana .cl.v{background:rgba(255,184,107,.62);box-shadow:0 0 12px rgba(255,184,107,.35)}
+.semana .cl.l{background:rgba(59,232,224,.2)}
+.puntos{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;padding:0 10px}
+.puntos i{width:15px;height:15px;border-radius:50%;border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.05)}
+.puntos i.val{border-color:var(--ojo);background:rgba(255,77,157,.28);
+  box-shadow:0 0 14px rgba(255,77,157,.4)}
+.faltas{display:grid;gap:10px}
+.faltas .fr{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-2)}
+.faltas .fr b{flex:1;font-weight:400;color:var(--ink)}
+.faltas .fr u{text-decoration:none;display:flex;gap:4px}
+.faltas .fr u s{text-decoration:none;width:6px;height:6px;border-radius:50%;
+  background:var(--magenta);box-shadow:0 0 8px var(--magenta)}
+.leyenda-forma{margin-top:14px;font-size:11.5px;color:var(--ink-3);text-align:center}
+
+/* La evidencia como CAPA que sube y tapa la escena */
+.capa{position:absolute;inset:0;z-index:7;background:rgba(7,4,15,.9);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  padding:60px var(--s5) var(--s6);display:flex;flex-direction:column;
+  transform:translateY(100%);transition:transform var(--t-lento) var(--e-sale)}
+.capa.on{transform:none}
+.capa .cerrar{position:absolute;top:16px;right:16px;background:none;border:0;
+  color:var(--ink-3);font:400 22px Inter,sans-serif;cursor:pointer;line-height:1}
+.capa h3{font:400 17px 'Space Grotesk',Inter,sans-serif;margin-bottom:6px}
+.capa .evid{display:block;margin-top:18px}
+
+/* ── Escena final · lo que sale ───────────────────────────────────────────── */
+.salidas{flex:1;display:flex;flex-direction:column;gap:11px;overflow-y:auto;padding-top:6px}
+.salidas .vacio{flex:1;display:grid;place-items:center;text-align:center;color:var(--ink-3);font-size:13px;padding:0 20px}
+</style>
+</head>
+<body>
+<div class="aurora"><i></i><i></i><i></i></div><div class="grano"></div>
+
+<div class="tester">
+  <button id="tSano">estado sano</button>
+  <button id="tReset">reiniciar</button>
+</div>
+
+<div class="escena">
+  <div class="progreso" id="prog"></div>
+  <div class="pista" id="pista"></div>
+</div>
+
+<div class="sello">G1 · escenas — datos inventados, no salen de la BD</div>
+
+<script src="datos.js"></script>
+<script>
+const D = window.DEMO, pista = document.getElementById('pista'), prog = document.getElementById('prog');
+let i = 0, escenas = [], sano = false;
+const mx = n => '$' + n.toLocaleString('es-MX');
+
+/* Estado de cada hallazgo: 'abierto' | 'va' | 'no' */
+const estado = {}; D.hallazgos.forEach(h => estado[h.id] = 'abierto');
+
+/* ── Formas de evidencia, una por hallazgo ─────────────────────────────── */
+function forma(h){
+  if (h.evidencia.forma === 'franjas'){
+    // Rejilla semana × franja: dónde caen los huecos (demo)
+    const dias = ['L','M','X','J','V'], horas = ['16','17','18'];
+    // patrón inventado: martes y miércoles vacíos en las 3 horas
+    const vac = {'M':['16','17','18'],'X':['16','17','18'],'L':['18'],'J':['17'],'V':[]};
+    let g = '<div class="semana"><div></div>' + dias.map(d=>`<div class="dd">${d}</div>`).join('');
+    horas.forEach(hh => {
+      g += `<div class="hh">${hh}</div>`;
+      dias.forEach(d => g += `<div class="cl ${vac[d].includes(hh)?'v':'l'}"></div>`);
+    });
+    g += '</div><div class="leyenda-forma">Cada cuadro es una hora. <b style="color:var(--hueco);font-weight:400">Durazno</b> = se quedó vacía.</div>';
+    return g;
+  }
+  if (h.evidencia.forma === 'puntos'){
+    let g = '<div class="puntos">';
+    for (let k=0;k<14;k++) g += `<i class="${k<6?'val':''}"></i>`;
+    g += '</div><div class="leyenda-forma">14 que no vuelven. Los 6 marcados son los de más visitas.</div>';
+    return g;
+  }
+  const gente = [['Cliente A',3],['Cliente B',2],['Cliente C',2]];
+  return '<div class="faltas">' + gente.map(([n,c]) =>
+    `<div class="fr"><b>${n}</b><u>${'<s></s>'.repeat(c)}</u><span class="fine">${c} faltas</span></div>`
+  ).join('') + '</div><div class="leyenda-forma">Un punto por falta. Nombres ocultos en la maqueta.</div>';
+}
+
+/* ── Construcción de escenas ───────────────────────────────────────────── */
+function build(){
+  pista.innerHTML=''; escenas=[];
+  if (sano){ pista.appendChild(scSano()); prog.innerHTML=''; pintar(); return; }
+  pista.appendChild(scDinero());
+  pista.appendChild(scLeyendo());
+  D.hallazgos.forEach(h => pista.appendChild(scHallazgo(h)));
+  pista.appendChild(scSalidas());
+  escenas = [...pista.querySelectorAll('.sc')];
+  prog.innerHTML = escenas.map(()=>'<i><b></b></i>').join('');
+  pintar();
+}
+function sc(cls){
+  const e = document.createElement('div'); e.className = 'sc ' + cls;
+  const t = document.createElement('div'); t.className='tocar';
+  t.innerHTML='<span data-n="-1"></span><span data-n="1"></span>';
+  e.appendChild(t); return e;
+}
+function scDinero(){
+  const e = sc('e-dinero'), h = D.hoy, tot = h.cobrado + h.agendado + h.hueco;
+  const d = document.createElement('div'); d.className='dinero';
+  d.innerHTML = `
+    <div class="eyebrow">${h.fecha} · ${h.ahora}</div>
+    <div class="display cromo monto">${mx(h.cobrado)}</div>
+    <div class="sub">ya está en la caja</div>
+    <div class="capas">
+      <div class="barra">
+        <u style="width:${h.cobrado/tot*100}%;background:var(--hecho)"></u>
+        <u style="width:${h.agendado/tot*100}%;background:var(--agenda)"></u>
+        <u style="width:${h.hueco/tot*100}%;background:rgba(255,184,107,.28)"></u>
+      </div>
+      <div class="leyenda">
+        <div><b>${mx(h.cobrado)}</b><i style="background:var(--hecho)"></i>cobrado</div>
+        <div><b>${mx(h.agendado)}</b><i style="background:var(--agenda)"></i>agendado</div>
+        <div><b>${mx(h.hueco)}</b><i style="background:rgba(255,184,107,.5)"></i>hueco</div>
+      </div>
+    </div>`;
+  const b = document.createElement('button'); b.className='pedir';
+  b.innerHTML = '<div class="ojo"></div><span>Analizar mi negocio</span>';
+  b.onclick = ev => { ev.stopPropagation(); ir(1); };
+  d.appendChild(b); e.appendChild(d); return e;
+}
+function scLeyendo(){
+  const e = sc('e-leyendo');
+  e.insertAdjacentHTML('beforeend', '<div class="barrido"></div>');
+  e.insertAdjacentHTML('beforeend',
+    '<div class="leyendo">' + D.lectura.map(l=>`<div class="linea"><i></i><p>${l}</p></div>`).join('') +
+    '<div class="fine" style="margin-top:18px">Encontré 3 cosas que puedes mover. Tú decides cuáles.</div></div>');
+  return e;
+}
+function scHallazgo(h){
+  const e = sc('e-hallazgo'); e.dataset.id = h.id;
+  const w = document.createElement('div'); w.className='hz';
+  w.innerHTML = `
+    <div class="cab">
+      <div class="marca"><i></i><span class="eyebrow">Hallazgo · ${h.ancla.etiqueta}</span></div>
+      <h2 class="h1">${h.titulo}</h2>
+      <p class="sub">${h.bajada}</p>
+    </div>
+    <div class="forma">${forma(h)}</div>
+    <div class="pie" data-pie></div>`;
+  e.appendChild(w);
+  const capa = document.createElement('div'); capa.className='capa';
+  capa.innerHTML = `
+    <button class="cerrar">✕</button>
+    <h3>¿De dónde lo saco?</h3>
+    <p class="sub">${h.evidencia.resumen}</p>
+    <div class="evid abierta"><ul>${h.evidencia.citas.map(c=>`<li>${c}</li>`).join('')}</ul></div>
+    <div class="fine" style="margin-top:auto">Estos son los números que miré. Si algo no cuadra, dímelo y no lo vuelvo a proponer.</div>`;
+  capa.querySelector('.cerrar').onclick = ev => { ev.stopPropagation(); capa.classList.remove('on'); };
+  e.appendChild(capa);
+  pintarPie(w.querySelector('[data-pie]'), h, capa);
+  return e;
+}
+function pintarPie(pie, h, capa){
+  const st = estado[h.id];
+  if (st === 'va'){
+    pie.innerHTML = `<div class="tarea"><i class="pt"></i>
+      <div class="tx"><b>Sale ${h.accion.sale}</b> · ${h.accion.verbo.toLowerCase()}</div>
+      <button>deshacer</button></div>
+      <div class="hueco-res"><b>$&nbsp;___</b><i>lo llena el corte · ${h.accion.medicion.toLowerCase()}</i></div>`;
+    pie.querySelector('button').onclick = ev => { ev.stopPropagation(); estado[h.id]='abierto'; pintarPie(pie,h,capa); };
+    return;
+  }
+  if (st === 'no'){
+    pie.innerHTML = `<div class="aplazado">Lo dejo así. No te lo vuelvo a sacar hasta que el dato cambie.</div>`;
+    return;
+  }
+  pie.innerHTML = `
+    <button class="evid-btn" data-ev>¿De dónde lo saco?</button>
+    <div style="margin-top:12px"><div class="burbuja">${h.accion.mensaje.replace(/\{(\w+)\}/g,'<b>{$1}</b>')}</div></div>
+    <div class="ficha">
+      <div><span>A quién</span>${h.accion.aQuien}</div>
+      <div><span>Cuesta</span>${h.accion.costo}</div>
+      <div><span>Se mide</span>${h.accion.medicion}</div>
+    </div>
+    <div class="botones">
+      <button class="btn btn-va">Va</button>
+      <button class="btn btn-no">Hoy no</button>
+    </div>`;
+  pie.querySelector('[data-ev]').onclick = ev => { ev.stopPropagation(); capa.classList.add('on'); };
+  pie.querySelector('.btn-va').onclick = ev => { ev.stopPropagation(); estado[h.id]='va'; pintarPie(pie,h,capa); };
+  pie.querySelector('.btn-no').onclick = ev => { ev.stopPropagation(); estado[h.id]='no'; pintarPie(pie,h,capa); };
+}
+function scSalidas(){
+  const e = sc('e-salidas');
+  const w = document.createElement('div');
+  w.innerHTML = '<div class="eyebrow" style="margin-bottom:14px">Lo que sale de aquí</div><div class="salidas" data-s></div>';
+  e.appendChild(w); return e;
+}
+function pintarSalidas(){
+  const cont = pista.querySelector('[data-s]'); if(!cont) return;
+  const vas = D.hallazgos.filter(h=>estado[h.id]==='va');
+  const nos = D.hallazgos.filter(h=>estado[h.id]==='no');
+  if (!vas.length && !nos.length){
+    cont.innerHTML = '<div class="vacio">Todavía no aprobaste nada.<br>Regresa con la flecha y decide.</div>'; return;
+  }
+  cont.innerHTML =
+    vas.map(h=>`<div class="tarea"><i class="pt"></i>
+        <div class="tx"><b>${h.accion.sale}</b> · ${h.accion.verbo}<br>
+        <span class="fine">Se mide en: ${h.accion.medicion.toLowerCase()}</span></div>
+        <button data-u="${h.id}">deshacer</button></div>`).join('') +
+    (vas.length ? `<div class="hueco-res"><b>$&nbsp;___</b><i>lo que esto trajo — lo llena el corte, no lo invento</i></div>` : '') +
+    nos.map(h=>`<div class="aplazado">Aplazado: ${h.titulo.toLowerCase()}. Vuelvo si el dato cambia.</div>`).join('');
+  cont.querySelectorAll('[data-u]').forEach(b => b.onclick = ev => {
+    ev.stopPropagation(); estado[b.dataset.u]='abierto'; build(); ir(escenas.length-1);
+  });
+}
+function scSano(){
+  const e = document.createElement('div'); e.className='sc on';
+  e.innerHTML = `<div class="sano">
+      <div class="anillo-ok"><b>✓</b></div>
+      <h2 class="h1">Nada que mover hoy</h2>
+      <p class="sub">Miré los mismos números de siempre y no encontré nada que valga un mensaje.<br>
+      Tu agenda de esta semana va como suele ir.</p>
+      <div class="fine" style="margin-top:8px">Vuelvo a mirar mañana. Si algo cambia, te aviso.</div>
+    </div>`;
+  return e;
+}
+
+/* ── Navegación ────────────────────────────────────────────────────────── */
+function ir(n){ i = Math.max(0, Math.min(escenas.length-1, n)); pintar(); }
+function pintar(){
+  escenas.forEach((e,k)=>{
+    e.classList.toggle('on', k===i);
+    e.classList.toggle('fue', k<i);
+    if (k!==i) e.querySelector('.capa')?.classList.remove('on');
+  });
+  [...prog.children].forEach((p,k)=>p.classList.toggle('visto', k<=i));
+  if (escenas[i]?.classList.contains('e-salidas')) pintarSalidas();
+  // la escena de lectura avanza sola
+  if (escenas[i]?.classList.contains('e-leyendo')){
+    clearTimeout(window.__t); window.__t = setTimeout(()=>{ if(escenas[i]?.classList.contains('e-leyendo')) ir(i+1); }, 2600);
+  }
+}
+pista.addEventListener('click', ev => {
+  const z = ev.target.closest('[data-n]'); if(!z) return;
+  ir(i + Number(z.dataset.n));
+});
+addEventListener('keydown', ev => {
+  if (ev.key==='ArrowRight') ir(i+1);
+  if (ev.key==='ArrowLeft') ir(i-1);
+});
+let x0=null;
+pista.addEventListener('touchstart', e=>x0=e.touches[0].clientX,{passive:true});
+pista.addEventListener('touchend', e=>{
+  if(x0===null) return; const dx = e.changedTouches[0].clientX - x0;
+  if (Math.abs(dx)>44) ir(i + (dx<0?1:-1)); x0=null;
+},{passive:true});
+
+document.getElementById('tSano').onclick = function(){
+  sano = !sano; this.classList.toggle('on', sano); i=0; build();
+};
+document.getElementById('tReset').onclick = ()=>{
+  D.hallazgos.forEach(h=>estado[h.id]='abierto'); i=0; build();
+};
+build();
+</script>
+</body>
+</html>
