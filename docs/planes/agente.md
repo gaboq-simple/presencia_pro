@@ -59,8 +59,11 @@ todas verificadas.
    tiene **0 filas**; `appointment_audit` tiene **669**, de las cuales **9** son
    `actor_type='unknown'` (5 de ellas `deleted`) y **todas** provienen de SQL
    directo (seed / ops), no de la app — el último residuo de código se cerró en la
-   migración `056`. La **caja no tiene tabla de auditoría**: su historial es la
-   propia tabla, que es append-only. Y **nada audita lecturas**.
+   migración `056`. **La caja no necesita tabla de auditoría: la tabla ES su
+   rastro** — append-only por trigger, sin UPDATE ni DELETE, y anular es una
+   contraentrada firmada con `reverses_id` (`20260812000000_capa_dinero.sql:184-185`).
+   Lo auditable que sí falta es otra cosa: `management_audit` **vacía** y
+   **nada audita lecturas**.
 
 ---
 
