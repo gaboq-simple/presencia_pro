@@ -593,12 +593,20 @@ export default function AssistantControlDesk({
     const tempId = `temp-walkin-${startIso}`;
 
     // Optimista: cita sintética (se reconcilia con router.refresh tras el create).
+    //
+    // Espeja EXACTAMENTE lo que escribe `createAssistantAppointment`: `confirmed`
+    // (no `'walkin'`, que era un status que ningún escritor produce y que hacía que
+    // la fila optimista se leyera distinto de la real durante el parpadeo) y la
+    // llegada estampada bajo la misma condición del server —el walk-in de HOY nace
+    // llegado; el parado en otro día, no—. Quien discrimina el walk-in es `source`,
+    // que es lo único que la BD guarda.
     const optimistic = {
       id: tempId,
       starts_at: startIso,
       ends_at: endIso,
-      status: 'walkin',
+      status: 'confirmed',
       source: 'walkin',
+      arrived_at: today ? new Date().toISOString() : null,
       notes: null,
       staff: { id: newStaffId, name: newStaffName },
       service: { id: move.serviceId, name: move.service, duration_minutes: move.dur, price: 0, currency: 'MXN' },
@@ -681,15 +689,27 @@ export default function AssistantControlDesk({
 
   const staffNameById = new Map(workingStaff.map((s) => [s.id, s.name]));
 
-  // Señal "atrasado" anclada en schema: status='confirmed' cuya hora EFECTIVA
-  // (adjusted_starts_at ?? starts_at) ya pasó por más de `maxLateMinutes`. Comparación
-  // por INSTANTE (tz-independiente). Techo natural: dispatch-auto-cancel la vuelve
-  // no_show y sale sola. Solo HOY (la cola es "ahora"); walk-ins quedan fuera (modo B).
+  // Señal "atrasado" anclada en schema: status='confirmed' **sin llegada registrada**
+  // cuya hora EFECTIVA (adjusted_starts_at ?? starts_at) ya pasó por más de
+  // `maxLateMinutes`. Comparación por INSTANTE (tz-independiente). Techo natural:
+  // dispatch-auto-cancel la vuelve no_show y sale sola. Solo HOY (la cola es "ahora").
+  //
+  // 🔴 El filtro de `arrived_at` es la mitad que faltaba (S9-OPS-03). "Atrasado" acá
+  //    significa **el cliente no aparece**, y las dos jugadas que la cola ofrece —mover
+  //    el lugar, marcar que no llegó— solo tienen sentido con esa lectura. A quien ya
+  //    cruzó la puerta no se le marca "no llegó": si además va tarde, eso es
+  //    corrimiento del día y lo dice `dayDrift`, no esta cola. Sin este filtro,
+  //    cualquiera con "Llegó" tocado —y todo walk-in, que ahora nace con su llegada—
+  //    caía acá a los `maxLateMinutes` con un botón que lo declaraba ausente estando
+  //    sentado enfrente. `status` NO lo cubría: un walk-in es `confirmed` como
+  //    cualquier otra cita, que es justo lo que el comentario viejo de esta línea
+  //    ("walk-ins quedan fuera (modo B)") daba por hecho sin que el código lo hiciera.
   const lateItems: LateItem[] =
     today && nowMs !== null && nowMin !== null
       ? appointments
           .filter((a) => {
             if (a.status !== 'confirmed') return false;
+            if (a.arrived_at) return false;
             const effStart = Date.parse(a.adjusted_starts_at ?? a.starts_at);
             return nowMs >= effStart + maxLateMinutes * 60_000;
           })

@@ -147,7 +147,10 @@ function stateFor(
 ): BlockState {
   if (a.status === 'completed') return 'done';
   if (a.status === 'no_show') return 'noshow';
-  if (a.status === 'walkin' || a.source === 'walkin') return 'walk';
+  // `source` y nada más: el status `'walkin'` está en el CHECK de la tabla pero
+  // ningún escritor lo produce (0 filas en prod), así que preguntarlo sugería una
+  // discriminación que no existe. Ver S9-OPS-03 en SPRINT.md.
+  if (a.source === 'walkin') return 'walk';
   if (nowM !== null && startM <= nowM && nowM < endM) return 'curso';
   if (nowM !== null && nowM >= endM) return 'late'; // ventana pasó, sin cerrar
   if (a.status === 'pending') return 'pending';
@@ -248,11 +251,27 @@ function RowIcon({ k }: { k: 'clock' | 'phone' | 'note' }) {
 /**
  * Set de acciones según estado + momento (visual; el cableado a server actions es
  * Paso 3B). Ventana anticipada: Llegó/No-llegó desde inicio − 10min ≤ ahora.
+ *
+ * `arrived` = la cita ya tiene `arrived_at`. Solo cambia al walk-in, y solo en el
+ * caso raro: el de HOY nace llegado (lo estampa `createAssistantAppointment`) y
+ * conserva su set de siempre —**"Terminó" primero, que es para lo que se abre esta
+ * ficha**—; el parado en otro día nace sin llegada, y ahí "Llegó" es la única
+ * puerta que tiene, porque el walk-in no la ofrecía en ningún estado (S9-OPS-03).
+ *
+ * El set son cuatro acciones, así que en ese caso raro "Llegó" entra en lugar de
+ * "Mover". Es el intercambio correcto: sin "Llegó" ese walk-in no tiene forma de
+ * protegerse del auto-cancel, y sin "Mover" solo pierde un atajo que el gesto de
+ * arrastre del calendario ya ofrece. En el walk-in de hoy —el 100% de los reales—
+ * no se pierde nada.
  */
-function actionsFor(state: BlockState, apptStart: number, nowM: number | null): ActionKey[] {
+function actionsFor(
+  state: BlockState, apptStart: number, nowM: number | null, arrived: boolean,
+): ActionKey[] {
   if (state === 'done')    return ['reagendar', 'mensaje', 'llamar'];
   if (state === 'noshow')  return ['reagendar', 'mensaje', 'llamar'];
-  if (state === 'walk')    return ['termino', 'mensaje', 'mover', 'cancelar'];
+  if (state === 'walk')    return arrived
+    ? ['termino', 'mensaje', 'mover', 'cancelar']
+    : ['termino', 'llego', 'mensaje', 'cancelar'];
   if (state === 'pending') return ['confirmar', 'mensaje', 'mover', 'cancelar'];
   // conf / curso / late — ventana anticipada de 10 min activa Llegó/No-llegó.
   const inWindow = nowM !== null && nowM >= apptStart - 10;
@@ -310,13 +329,13 @@ function DetailCard({
   const st = STATE_STYLE[state];
   const apptStart = isoToLocalMinutes(appt.starts_at, timezone);
   const apptEnd   = isoToLocalMinutes(appt.ends_at,   timezone);
-  const isWalk = appt.status === 'walkin' || appt.source === 'walkin';
+  const isWalk = appt.source === 'walkin';   // `source` manda: el status 'walkin' no lo escribe nadie
   // `||` (no `??`) para tratar nombre vacío/espacios como ausente (fix del "III":
   // customer con name '' caía en `'' ?? …` y renderizaba vacío/basura).
   const custName = appt.customer?.name?.trim();
   const name = custName || (isWalk ? 'Walk-in (sin nombre)' : 'Sin cliente');
   const dur = Math.max(0, apptEnd - apptStart);
-  const actions = actionsFor(state, apptStart, nowMinutes);
+  const actions = actionsFor(state, apptStart, nowMinutes, appt.arrived_at !== null);
 
   // Cancelar captura un motivo (se escribe a notes en cancelAppointment).
   const [cancelMode, setCancelMode] = useState(false);
@@ -1199,7 +1218,7 @@ export default function AssistantVerticalCalendar({
 
                   const state = stateFor(appt, apptStart, apptEnd, nowMinutes);
                   const st    = STATE_STYLE[state];
-                  const isWalk = appt.status === 'walkin' || appt.source === 'walkin';
+                  const isWalk = appt.source === 'walkin';   // `source` manda: el status 'walkin' no lo escribe nadie
                   const name = appt.customer?.name ?? (isWalk ? 'Walk-in' : 'Sin cliente');
                   const word = STATE_WORD[state];
                   const time = minutesToLabel(apptStart);

@@ -583,6 +583,34 @@ export async function createAssistantAppointment(
     }
   }
 
+  // ── Llegada del walk-in: el gesto ES la evidencia (S9-OPS-03) ────────────
+  // Un walk-in se registra con la persona parada enfrente. `arrived_at` no es
+  // una promesa ni un default optimista: es el instante en que alguien del
+  // mostrador dijo "está acá" al crear la fila, que es exactamente lo que
+  // `arrived_at` significa en el resto del sistema.
+  //
+  // 🔴 Por qué acá y NO filtrando por `source` en cada lector: la fila nace
+  //    `confirmed` con `arrived_at` NULL, y NULL quiere decir "no sé si llegó".
+  //    Los tres lectores que se apoyan en eso —el cron `dispatch-auto-cancel`,
+  //    el RPC `mark_appointment_no_show` y la cola de atrasados— tienen razón
+  //    en su lectura; el que mentía era el origen. Un `source <> 'walkin'` en
+  //    cada lector sería tres parches sobre el mismo dato falso, y el cuarto
+  //    lector que aparezca nacería roto otra vez.
+  //
+  // La condición del MISMO DÍA local no es una precaución de más: la mesa deja
+  // navegar a otra fecha y crear ahí. Esa persona está en el mostrador HOY,
+  // pero no ha llegado a la cita de mañana — estampar su llegada sería la
+  // misma clase de mentira que este paso vino a borrar. Cuando el slot cae en
+  // otro día, `arrived_at` queda NULL (no sé) y la ficha ofrece "Llegó".
+  const tzNegocio = bizCfg?.timezone ?? 'America/Mexico_City';
+  const diaDelSlot = new Intl.DateTimeFormat('en-CA', { timeZone: tzNegocio }).format(
+    new Date(input.startsAt),
+  );
+  const llegadaDelWalkIn =
+    input.source === 'walkin' && diaDelSlot === todayStrInTz(tzNegocio)
+      ? new Date().toISOString()
+      : null;
+
   // ── Insertar cita ─────────────────────────────────────────────────────────
   const { data, error } = await db
     .table('appointments')
@@ -593,6 +621,7 @@ export async function createAssistantAppointment(
       starts_at:            input.startsAt,
       ends_at:              input.endsAt,
       status:               'confirmed',
+      arrived_at:           llegadaDelWalkIn,
       source:               input.source,
       notes:                input.notes?.trim() || null,
       created_by_staff_id:  session.staff_id,

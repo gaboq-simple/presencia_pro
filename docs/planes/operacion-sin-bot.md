@@ -18,6 +18,26 @@ falta: es si el mostrador se sostiene solo mientras tanto.
 desde `main` en `c9d9aa8`). Verificaciones contra prod (`hdqazbuxtpavtioufrsv`)
 del mismo día, marcadas donde aparecen.
 
+> **Estado posterior — S9-OPS-03 (2026-08-25).** Este documento es una FOTO del
+> repo al 2026-08-25 y **no se reescribe**: corregir el cuerpo falsearía lo que se
+> observó. Lo que cambió después se anota acá y nada más.
+>
+> **Corregido:** el hallazgo mayor (el auto-cancel comiéndose los walk-ins) y su
+> familia. El arreglo NO fue filtrar por `source` en los lectores —eso habrían
+> sido tres parches sobre el mismo dato falso— sino en el ORIGEN: el walk-in de
+> hoy nace con `arrived_at` puesto, porque el gesto de registrarlo con la persona
+> enfrente **es** la evidencia. Con eso, los tres lectores quedan correctos sin
+> tocarlos… salvo la cola de atrasados, que **no** miraba `arrived_at` y se
+> arregló aparte. También se corrigieron las dos anotaciones del final (el valor
+> muerto `status='walkin'` y el comentario "modo B"), y apareció un hallazgo
+> nuevo de la misma familia: el contador **"N walk-ins"** del Panorama del dueño
+> contaba por `status` y por lo tanto decía **0 siempre**.
+>
+> **Sigue en pie, sin tocar:** los otros cuatro de la lista corta (el fondo de
+> caja sin escritor · el cobro de la cita agendada escondido en el acordeón · el
+> retraso sin puerta manual · el aviso de cancelación que se registra como
+> enviado) y todo el bloque "después".
+
 ---
 
 ## La sospecha, contra el repo: mitad cierta, y la mitad falsa es la que importa

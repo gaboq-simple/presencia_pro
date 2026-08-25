@@ -34,6 +34,40 @@ Si Gabriel pide algo claramente fuera del sprint (ej: "ayúdame a entender X con
 
 ---
 
+## Regla dura: presente no es ausente
+
+**Ningún campo que afirme un hecho del mundo se escribe sin evidencia de ese
+hecho.** `arrived_at` dice que una persona cruzó la puerta. `sent_at` dice que un
+mensaje salió. `no_show` dice que alguien no vino. Escribir cualquiera de los tres
+"porque probablemente sí" es fabricar evidencia, y el sistema entero se apoya
+después en ella: el cron auto-cancela contra `arrived_at`, el cuadre atribuye
+dinero contra `completed_at`, la auditoría responde contra `sent_at`.
+
+**`NULL` es desconocimiento, no ausencia.** "No sé si llegó" y "no llegó" son
+cosas distintas y se escriben distinto: la primera es `NULL`, la segunda es un
+hecho registrado con su instante y su actor. Un lector que trate `NULL` como "no"
+está inventando; uno que lo trate como "todavía no sé" está leyendo bien. Por eso
+`dispatch-auto-cancel` pregunta `arrived_at IS NULL` y **tiene razón**: lo que
+falla cuando esa lectura da un resultado absurdo es el ORIGEN que dejó el `NULL`,
+no el lector.
+
+**Corolario operativo — se arregla en el origen.** Si un lector concluye algo
+falso a partir de un campo, la corrección va donde el dato se escribe, no en cada
+consumidor. Un `AND source <> 'walkin'` repetido en el cron, en el RPC y en la
+cola serían tres parches sobre la misma mentira, y el cuarto lector que aparezca
+nacería roto. Cuando el gesto humano ES la evidencia (registrar un walk-in con la
+persona enfrente, tocar "Llegó", firmar un corte), el campo se escribe en ese
+mismo gesto y con su instante real.
+
+**Y si no hay evidencia, no se escribe.** Preferir el `NULL` visible al valor
+plausible: un dato ausente se nota y alguien lo resuelve; uno inventado se
+propaga. El caso testigo es el aviso de cancelación, que hoy inserta
+`sent_at: now` sin mirar si el envío salió (`assistant-actions.ts`, registrado en
+`docs/planes/operacion-sin-bot.md`) — el corte hace lo contrario y guarda
+`notify_error`, que es la forma correcta.
+
+---
+
 ## Database Schema (verificado contra la BD 2026-08-18)
 
 Schema del proyecto **presenciapro / apps/lifestyle**. Todas las tablas están en `public`, todas tienen RLS habilitado.

@@ -21,6 +21,9 @@ const BOOKED_STATUSES = ['completed', 'confirmed', 'pending', 'walkin', 'no_show
 type ApptRow = {
   staff_id: string;
   status: string;
+  // El walk-in se discrimina por `source`, JAMÁS por `status`: el status `'walkin'`
+  // existe en el CHECK de la tabla y ningún escritor lo produce (S9-OPS-03).
+  source: string;
   starts_at: string;
   price_charged: number | null;
   service: { price: number } | null;
@@ -66,7 +69,7 @@ async function fetchDayAppts(businessId: string, dateStr: string, tz: string): P
   const { start, end } = localDayRangeUtc(dateStr, tz);
   const { data } = await tenantDb(supabase, businessId)
     .table('appointments')
-    .select('staff_id, status, starts_at, price_charged, service:service_id(price)')
+    .select('staff_id, status, source, starts_at, price_charged, service:service_id(price)')
     .gte('starts_at', start)
     .lt('starts_at', end);
   return (data ?? []) as unknown as ApptRow[];
@@ -83,6 +86,10 @@ function bookedByStaff(rows: ApptRow[]): Map<string, number> {
 }
 
 const countStatus = (rows: ApptRow[], status: string): number => rows.filter((r) => r.status === status).length;
+// Los walk-ins se cuentan por `source`. Contarlos por `status === 'walkin'` daba
+// SIEMPRE 0 —nadie escribe ese status— y el dueño leía "0 walk-ins" en un día que
+// había tenido varios: un cero que parece un dato (S9-OPS-03).
+const countWalkIns = (rows: ApptRow[]): number => rows.filter((r) => r.source === 'walkin').length;
 const priceOf = (r: ApptRow): number => Number(r.price_charged ?? r.service?.price ?? 0);
 
 export async function getPulsoHoy(businessId: string, now: Date = new Date()): Promise<PulsoHoy> {
@@ -145,7 +152,7 @@ export async function getPulsoHoy(businessId: string, now: Date = new Date()): P
     projection,
     citas: { today: occToday.booked, lastWeek: occLastWeek.capacity > 0 ? occLastWeek.booked : null },
     noShows: { today: countStatus(todayRows, 'no_show'), lastWeek: countStatus(lastWeekRows, 'no_show') },
-    walkIns: { today: countStatus(todayRows, 'walkin'), lastWeek: countStatus(lastWeekRows, 'walkin') },
+    walkIns: { today: countWalkIns(todayRows), lastWeek: countWalkIns(lastWeekRows) },
     noShowRate30d,
     barberos,
     cobrado,
