@@ -25,7 +25,7 @@ import type { DriftProjection } from '@/lib/dayDrift';
 import { isTodayInTz } from '@/lib/dayWindow';
 import { completeAppointment, noShowAppointment } from '@/app/staff/assistant-actions';
 import { cobroResumen } from './CobroFields';
-import { DEFAULT_RAIL, type Rail } from '@/lib/cobro';
+import type { Rail } from '@/lib/cobro';
 import AppointmentSheet, { type StaffOption } from './AppointmentSheet';
 import { fmtTip } from './TipSheet';
 
@@ -94,6 +94,9 @@ type Props = {
   staffOptions: StaffOption[];
   heroAppointmentId?: string | null;
   onMutated: () => void;
+  /** "Terminó" desde la FICHA → el shell abre la hoja de cobro (S9-OPS-06). El
+      swipe no la usa: tiene su propio chip, que ahora arranca sin riel. */
+  onPedirCobro?: (appt: BarberDayAppointment) => void;
   /** Terminó COMMITEADO (post-ventana de Deshacer) → el shell abre la hoja de
       propina (Paso 7). En el swipe esto corre al expirar el Deshacer: el gate de
       setAppointmentTip exige status 'completed', que recién existe al commitear. */
@@ -114,13 +117,13 @@ type PendingAction = {
   kind:   'completed' | 'no_show';
   label:  string;
   timer:  ReturnType<typeof setTimeout>;
-  amount: string;   // '' = no lo editaron → lo sella el trigger con la lista
-  method: Rail;
+  amount: string;        // '' = no lo editaron → lo sella el trigger con la lista
+  method: Rail | null;   // null = nadie lo declaró → la action no escribe el riel
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function AppointmentThread({ appointments, date, timezone, staffOptions, heroAppointmentId, onMutated, onCompleted, onOpenTip, projections }: Props) {
+export default function AppointmentThread({ appointments, date, timezone, staffOptions, heroAppointmentId, onMutated, onCompleted, onOpenTip, onPedirCobro, projections }: Props) {
   const [nowMin, setNowMin] = useState<number | null>(() => (isTodayInTz(date, timezone) ? nowLocalMinutes(timezone) : null));
   const [prevKey, setPrevKey] = useState(`${date}|${timezone}`);
   const key = `${date}|${timezone}`;
@@ -174,7 +177,9 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
   function triggerSwipe(appt: BarberDayAppointment, kind: 'completed' | 'no_show') {
     flushPending(); // si había otro pendiente, commitealo antes de encolar el nuevo
     const label = kind === 'completed' ? 'Terminó' : 'No vino';
-    setPending({ appt, kind, label, timer: armar(), amount: '', method: DEFAULT_RAIL });
+    // Arranca SIN riel (S9-OPS-06): si nadie toca el chip, el cobro queda sin
+    // declarar y el corte lo cuenta aparte — antes se commiteaba `efectivo`.
+    setPending({ appt, kind, label, timer: armar(), amount: '', method: null });
   }
 
   // Editar el cobro PAUSA la cuenta regresiva (si no, la ventana se consumiría
@@ -345,6 +350,7 @@ export default function AppointmentThread({ appointments, date, timezone, staffO
           onMutated={() => { setSheetAppt(null); onMutated(); }}
           onCompleted={(a) => { setSheetAppt(null); onCompleted?.(a); }}
           onOpenTip={(a) => { setSheetAppt(null); onOpenTip?.(a); }}
+          onPedirCobro={(a) => { setSheetAppt(null); onPedirCobro?.(a); }}
         />
       )}
     </div>

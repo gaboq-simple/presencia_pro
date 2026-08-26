@@ -346,6 +346,11 @@ export async function createCorte(input: CorteCapturado): Promise<{ error?: stri
       expected_cash:  esperado.efectivo,
       expected_card:  esperado.tarjeta,
       fondo_snapshot: fondo,
+      // Lo cobrado sin riel declarado se CONGELA como los dos esperados
+      // (S9-OPS-06). Antes viajaba sólo en la respuesta y se evaporaba al
+      // recargar; ahora es parte del registro del corte, con su nombre y fuera
+      // de la comparación —no hay artefacto físico contra el cual contarlo—.
+      sin_riel_snapshot: esperado.sinRiel,
       replaces_id:    input.replacesId ?? null,
     })
     .select('id, created_at')

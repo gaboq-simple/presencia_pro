@@ -148,6 +148,16 @@ export function resolveMovimiento(input: MovimientoInput): MovimientoResuelto | 
   if (cobro.amount === undefined) {
     return { error: 'Falta el monto' };
   }
+  // Acá el riel es OBLIGATORIO, y la asimetría con la cita es deliberada
+  // (S9-OPS-06): `caja_movimientos.method` es NOT NULL y un movimiento sin riel
+  // no se puede comparar contra ningún artefacto físico, así que no sirve para
+  // cuadrar. Una cita sí puede quedar sin declarar —el corte la cuenta aparte—
+  // porque tiene precio de lista del cual caerse; un movimiento no tiene nada.
+  // La hoja de caja siempre manda uno (arranca en efectivo, decisión 2 del plan
+  // D4), así que esto es un guard, no un camino que se vea.
+  if (cobro.method === undefined) {
+    return { error: 'Falta decir cómo entró o salió el dinero' };
+  }
 
   const notaCruda = (input.note ?? '').trim();
   if (notaCruda.length > NOTA_MAX) {

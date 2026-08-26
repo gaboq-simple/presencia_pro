@@ -95,7 +95,10 @@ export async function updateAppointmentStatusAsBarber(
   if (status === 'completed') {
     const resuelto = resolveCobro(cobro);
     if (esCobroError(resuelto)) return { error: resuelto.error };
-    patch['payment_method'] = resuelto.method;
+    // Espejo exacto de completeAppointment (S9-OPS-06): riel y monto se escriben
+    // solo si alguien los declaró. Sin declarar, la columna queda NULL — "no sé
+    // cómo pagaron" — en vez de un 'efectivo' que nadie dijo.
+    if (resuelto.method !== undefined) patch['payment_method'] = resuelto.method;
     if (resuelto.amount !== undefined) patch['price_charged'] = resuelto.amount;
   }
 

@@ -37,6 +37,9 @@ type Props = {
   onMutated: () => void;
   /** Terminó exitoso desde la ficha → el shell abre la hoja de propina (Paso 7). */
   onCompleted?: (appt: BarberDayAppointment) => void;
+  /** "Terminó" → el shell abre la hoja de COBRO (S9-OPS-06). Misma pregunta que
+      el hero y que el chip del swipe: una sola hoja para las tres superficies. */
+  onPedirCobro?: (appt: BarberDayAppointment) => void;
   /** Agregar/corregir la propina de una cita terminada → reabrir la hoja. */
   onOpenTip?: (appt: BarberDayAppointment) => void;
   /** Modo COBRO (D2): la ficha se abre desde el chip de la ventana de Deshacer,
@@ -45,7 +48,7 @@ type Props = {
       resuelta optimistamente y ofrecer resolverla otra vez confunde. */
   cobroEdit?: {
     amount:   string;
-    method:   Rail;
+    method:   Rail | null;
     onAmount: (v: string) => void;
     onMethod: (m: Rail) => void;
     onDone:   () => void;
@@ -54,7 +57,7 @@ type Props = {
 
 type Panel = 'none' | 'reschedule' | 'cancel' | 'notes';
 
-export default function AppointmentSheet({ appt, date, timezone, staffOptions, onClose, onMutated, onCompleted, onOpenTip, cobroEdit }: Props) {
+export default function AppointmentSheet({ appt, date, timezone, staffOptions, onClose, onMutated, onCompleted, onOpenTip, onPedirCobro, cobroEdit }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>('none');
@@ -198,7 +201,7 @@ export default function AppointmentSheet({ appt, date, timezone, staffOptions, o
             encadena la hoja de propina (Paso 7) vía onCompleted. */}
         {!cobroEdit && isActive && (
           <div className="mt-4 flex gap-2 border-t border-line pt-4">
-            <button disabled={isPending} onClick={() => run(() => completeAppointment(appt.id), 'No se pudo completar.', () => onCompleted?.(appt))} className="min-h-[44px] flex-1 rounded-xl bg-teal-ink text-sm font-semibold text-card disabled:opacity-50">Terminó</button>
+            <button disabled={isPending} onClick={() => { onClose(); onPedirCobro?.(appt); }} className="min-h-[44px] flex-1 rounded-xl bg-teal-ink text-sm font-semibold text-card disabled:opacity-50">Terminó</button>
             <button disabled={isPending} onClick={() => run(() => noShowAppointment(appt.id), 'No se pudo marcar No vino.')} className="min-h-[44px] flex-1 rounded-xl border border-line bg-card text-sm font-semibold text-ink-2 disabled:opacity-50">No vino</button>
           </div>
         )}

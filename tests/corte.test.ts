@@ -130,6 +130,35 @@ test('una cita SIN riel registrado no se adivina: queda aparte, no en efectivo',
   assert.equal(signedDiff(900, e.efectivo), 300, 'el descuadre positivo la delata');
 });
 
+test('mezcla de declarados y sin declarar: el total cuadra y NO se inventa descuadre', () => {
+  // El caso normal desde S9-OPS-06: el riel ya no se rellena solo, así que un día
+  // cualquiera trae cobros declarados y cobros que nadie declaró. Lo que este
+  // test fija es que la convivencia no produce ruido: **cada peso está en un
+  // cubo y en uno solo**, y quien contó bien cuadra en cero.
+  const citas = [
+    { amount: 200, method: 'efectivo' },
+    { amount: 150, method: 'efectivo' },
+    { amount: 300, method: 'tarjeta'  },
+    { amount: 250, method: ''         },   // nadie declaró cómo pagaron
+    { amount: 120, method: ''         },   // idem
+  ];
+  const e = expectedByRail(citas, [], 500);
+
+  assert.equal(e.efectivo, 850, 'fondo 500 + los dos declarados en efectivo');
+  assert.equal(e.tarjeta,  300);
+  assert.equal(e.sinRiel,  370, 'los dos sin declarar, juntos y con nombre propio');
+
+  // Partición: ni un peso se pierde ni se cuenta dos veces.
+  const cobrado = citas.reduce((t, c) => t + c.amount, 0);
+  assert.equal((e.efectivo - e.fondo) + e.tarjeta + e.transferencias + e.sinRiel, cobrado);
+
+  // Y el punto que importa: quien contó bien cuadra en CERO. Si `sinRiel` se
+  // hubiera repartido en efectivo, el cajón saldría faltando 370 sin que nadie
+  // haya perdido un peso — el descuadre inventado que este paso vino a borrar.
+  assert.equal(signedDiff(850, e.efectivo), 0, 'el cajón cuadra: lo sin declarar no lo toca');
+  assert.equal(signedDiff(300, e.tarjeta),  0, 'la terminal cuadra igual');
+});
+
 // ─── Cómo se rinde ────────────────────────────────────────────────────────────
 
 test('fmtSigned SIEMPRE lleva signo salvo el cero (que no tiene dirección)', () => {

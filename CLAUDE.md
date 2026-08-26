@@ -185,8 +185,8 @@ Citas agendadas (bot, manual, walk-in).
 | service_id | uuid FK → services.id | |
 | customer_id | uuid nullable FK → customers.id | |
 | starts_at, ends_at | timestamptz | |
-| status | text | CHECK: pending / confirmed / completed / cancelled / no_show / walkin |
-| source | text | CHECK: bot / manual / walkin |
+| status | text | CHECK: pending / confirmed / completed / cancelled / no_show / walkin. **`walkin` es valor MUERTO**: está en el CHECK y ningún escritor lo produce (0 filas) — un walk-in se discrimina por `source`, nunca por `status` (S9-OPS-03) |
+| source | text | CHECK: bot / manual / walkin / **`llamada`**. Este documento decía `bot / manual / walkin` y estaba MAL: el alta manual del barbero ofrece "Llamada telefónica" y funciona (corregido en S9-OPS-06, verificado contra `pg_constraint`) |
 | notes, booking_name | text nullable | |
 | created_by_staff_id | uuid nullable FK → staff.id | |
 | modified_by_staff_id | uuid nullable FK → staff.id | |
@@ -196,7 +196,7 @@ Citas agendadas (bot, manual, walk-in).
 | late_arrival_acknowledged | bool | default false. TRUE cuando el bot procesó el retraso para esta cita |
 | allow_overlap | bool | default false. TRUE = solape que la recepción forzó a conciencia; exenta del constraint anti-solape |
 | price_charged | numeric nullable | Precio SELLADO al completar. Lo rellena el trigger `seal_appointment_price` SOLO si está NULL; si una persona tecleó un monto, ese manda (migración 049 + D2) |
-| payment_method | text nullable | Riel del cobro. CHECK: efectivo / tarjeta / transferencia. Default de la app `'efectivo'` — nunca NULL en filas nuevas, por construcción (D2) |
+| payment_method | text nullable | Riel del cobro. CHECK: efectivo / tarjeta / transferencia. **`NULL` = nadie declaró cómo pagaron**, y es un dato distinto de "efectivo" (S9-OPS-06). La app ya NO pone un default: el riel se escribe sólo si alguien lo tocó, y el corte cuenta lo sin declarar en su propio cubo (`caja_cortes.sin_riel_snapshot`). La nota vieja —"default de la app `'efectivo'`, nunca NULL por construcción"— describía el defecto que ese paso borró |
 | arrived_at | timestamptz nullable | Llegada del cliente ("ya está acá"). Atributo, no status |
 | completed_at | timestamptz nullable | Instante REAL del cierre. Es la ATRIBUCIÓN del dinero: una cita de ayer cobrada hoy es de hoy (D6) |
 

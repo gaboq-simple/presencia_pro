@@ -102,6 +102,9 @@ export type CorteRow = {
   expectedCash: number;
   expectedCard: number;
   fondoSnapshot: number;
+  /** Cobrado del día cuyo riel nadie declaró. Congelado, y FUERA de los dos
+   *  esperados a propósito: no hay artefacto físico contra el cual contarlo. */
+  sinRiel:      number;
   cashDiff:     number;
   cardDiff:     number;
   firmadoPor:   string;
@@ -114,6 +117,7 @@ type CorteDbRow = {
   cash_counted: number | string; card_counted: number | string;
   expected_cash: number | string; expected_card: number | string;
   fondo_snapshot: number | string;
+  sin_riel_snapshot: number | string;
   cash_diff: number | string; card_diff: number | string;
   notified_at: string | null; notify_error: string | null;
   staff: { name: string } | null;
@@ -121,7 +125,7 @@ type CorteDbRow = {
 
 const SELECT_CORTE =
   'id, corte_date, created_at, replaces_id, cash_counted, card_counted, ' +
-  'expected_cash, expected_card, fondo_snapshot, cash_diff, card_diff, ' +
+  'expected_cash, expected_card, fondo_snapshot, sin_riel_snapshot, cash_diff, card_diff, ' +
   'notified_at, notify_error, staff:staff_id(name)';
 
 function mapCorte(r: CorteDbRow): CorteRow {
@@ -135,6 +139,7 @@ function mapCorte(r: CorteDbRow): CorteRow {
     expectedCash:  Number(r.expected_cash),
     expectedCard:  Number(r.expected_card),
     fondoSnapshot: Number(r.fondo_snapshot),
+    sinRiel:       Number(r.sin_riel_snapshot),
     cashDiff:      Number(r.cash_diff),
     cardDiff:      Number(r.card_diff),
     firmadoPor:    r.staff?.name ?? '—',

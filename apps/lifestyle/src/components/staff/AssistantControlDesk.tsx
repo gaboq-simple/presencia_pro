@@ -47,7 +47,7 @@ import CobroFields from './CobroFields';
 import CajaMovimientos from './CajaMovimientos';
 import CorteCard from './CorteCard';
 import { listarCabos, type CaboSuelto } from '@/app/staff/cabos-actions';
-import { DEFAULT_RAIL, type Rail } from '@/lib/cobro';
+import type { Rail } from '@/lib/cobro';
 import {
   type EngineLane,
   type Interval,
@@ -837,13 +837,15 @@ export default function AssistantControlDesk({
 
   const [cobroFor, setCobroFor]       = useState<DashboardAppointment | null>(null);
   const [cobroAmount, setCobroAmount] = useState('');
-  const [cobroMethod, setCobroMethod] = useState<Rail>(DEFAULT_RAIL);
+  // Sin riel preseleccionado (S9-OPS-06): si nadie lo toca, la action no escribe
+  // `payment_method` y el corte lo cuenta en su cubo propio. El tap ES el dato.
+  const [cobroMethod, setCobroMethod] = useState<Rail | null>(null);
 
   const handleComplete = (id: string) => {
     const appt = appointments.find((a) => a.id === id);
     if (!appt) return;
     setCobroAmount('');
-    setCobroMethod(DEFAULT_RAIL);
+    setCobroMethod(null);
     setCobroFor(appt);
   };
 

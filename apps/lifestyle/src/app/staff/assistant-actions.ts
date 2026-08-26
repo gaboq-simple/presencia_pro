@@ -283,7 +283,13 @@ export async function completeAppointment(
       completed_at:         new Date().toISOString(),
       modified_by_staff_id: session.staff_id,
       modified_at:          new Date().toISOString(),
-      payment_method:       resuelto.method,
+      // Los dos campos del dinero se escriben SOLO si alguien los declaró
+      // (S9-OPS-06). El riel salía antes con `'efectivo'` por default y eso era
+      // fabricar evidencia: `NULL` significa "no sé cómo pagaron", que es un dato
+      // distinto —y honesto— frente a "pagaron en efectivo". El corte lo cuenta
+      // en su propio cubo. El arreglo va acá, en el ORIGEN, y no en cada uno de
+      // los tres "Terminó" que llaman a esta action.
+      ...(resuelto.method !== undefined ? { payment_method: resuelto.method } : {}),
       ...(resuelto.amount !== undefined ? { price_charged: resuelto.amount } : {}),
     })
     .eq('id', appointmentId);

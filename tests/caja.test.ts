@@ -47,9 +47,14 @@ test('salida de insumos con nota: la nota viaja recortada', () => {
   assert.equal(m.note, 'toallas nuevas');
 });
 
-test('sin riel explícito el default es efectivo — jamás NULL (decisión 2 del plan)', () => {
-  const m = ok(resolveMovimiento({ type: 'entrada', concept: 'producto', amount: 80 }));
-  assert.equal(m.method, 'efectivo');
+test('sin riel el movimiento se RECHAZA — su columna es NOT NULL (S9-OPS-06)', () => {
+  // La asimetría con el cobro de una cita es deliberada y vale la pena fijarla:
+  // una CITA puede quedar sin riel declarado (tiene precio de lista del cual
+  // caerse, y el corte la cuenta en su cubo propio); un MOVIMIENTO no tiene nada
+  // de dónde agarrarse y su columna es NOT NULL, así que acá el riel es parte de
+  // la captura obligatoria. La hoja siempre manda uno: esto es el guard.
+  assert.match(err(resolveMovimiento({ type: 'entrada', concept: 'producto', amount: 80 })), /cómo/i);
+  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'producto', amount: 80, method: 'efectivo' })).method, 'efectivo');
 });
 
 // ─── El CHECK pareado, del lado de la persona ─────────────────────────────────
@@ -61,8 +66,8 @@ test('el concepto tiene que ir con el tipo: "salida por producto" no existe', ()
 });
 
 test('"otro" vale para los dos lados — es la válvula, no un agujero', () => {
-  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 10 })).concept, 'otro');
-  assert.equal(ok(resolveMovimiento({ type: 'salida',  concept: 'otro', amount: 10 })).concept, 'otro');
+  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 10, method: 'efectivo' })).concept, 'otro');
+  assert.equal(ok(resolveMovimiento({ type: 'salida',  concept: 'otro', amount: 10, method: 'efectivo' })).concept, 'otro');
 });
 
 test('la lista de conceptos es la misma que la del CHECK de la migración', () => {
@@ -92,8 +97,8 @@ test('cero y negativos no entran: la BD exige amount > 0', () => {
 });
 
 test('acepta lo que la gente teclea de verdad ($ y comas) y redondea a centavos', () => {
-  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'producto', amount: '$1,250' })).amount, 1250);
-  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'producto', amount: '99.999' })).amount, 100);
+  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'producto', amount: '$1,250', method: 'efectivo' })).amount, 1250);
+  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'producto', amount: '99.999', method: 'efectivo' })).amount, 100);
 });
 
 test('riel desconocido se rechaza (no se degrada a efectivo en silencio)', () => {
@@ -105,14 +110,14 @@ test('riel desconocido se rechaza (no se degrada a efectivo en silencio)', () =>
 // ─── La nota ──────────────────────────────────────────────────────────────────
 
 test('nota vacía o de puros espacios queda NULL, no cadena vacía', () => {
-  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5, note: '   ' })).note, null);
-  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5 })).note, null);
+  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5, method: 'efectivo', note: '   ' })).note, null);
+  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5, method: 'efectivo' })).note, null);
 });
 
 test('la nota es corta por diseño: pasada del tope, se rechaza con su medida', () => {
   const larga = 'x'.repeat(NOTA_MAX + 1);
-  assert.match(err(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5, note: larga })), /larga/i);
-  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5, note: 'x'.repeat(NOTA_MAX) })).note!.length, NOTA_MAX);
+  assert.match(err(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5, method: 'efectivo', note: larga })), /larga/i);
+  assert.equal(ok(resolveMovimiento({ type: 'entrada', concept: 'otro', amount: 5, method: 'efectivo', note: 'x'.repeat(NOTA_MAX) })).note!.length, NOTA_MAX);
 });
 
 test('el placeholder de la nota invita a COSAS, nunca a nombres de personas', () => {

@@ -1,9 +1,16 @@
 // ─── Tests de cobro (D2) — validación pura del monto + riel al completar ──────
-// Las dos asimetrías del módulo son el contrato y están fijadas acá:
-//   · el riel SIEMPRE sale con valor (default efectivo) — decisión 2 del plan;
-//   · el monto sale `undefined` cuando nadie lo editó, para que el trigger
-//     seal_appointment_price selle el precio de lista. Escribirlo explícitamente
-//     afirmaría que una persona lo confirmó, y nadie lo miró.
+// El contrato del módulo, fijado acá: **ninguno de los dos campos se escribe si
+// nadie lo declaró**, y cada `undefined` significa una cosa distinta:
+//   · el MONTO `undefined` → que lo selle el trigger seal_appointment_price con
+//     el precio de lista. Escribirlo afirmaría que una persona lo confirmó;
+//   · el RIEL `undefined` → que la columna quede NULL, o sea "no sé cómo
+//     pagaron". Hasta S9-OPS-06 caía en `'efectivo'` por default, y eso era
+//     fabricar evidencia: dos de los tres "Terminó" del barbero no preguntaban
+//     nada, así que el sistema afirmaba un riel que nadie miró y el corte —que
+//     compara riel por riel contra artefactos físicos— producía un descuadre
+//     espejo del tamaño de la tarjeta, todos los días.
+// `DEFAULT_RAIL` sigue exportado porque la hoja de CAJA sí lo necesita (su
+// columna es NOT NULL); lo que ya no hace es entrar solo por la puerta de atrás.
 //
 // Ejecutar: npm test
 
@@ -25,17 +32,27 @@ function ok(r: ReturnType<typeof resolveCobro>): CobroResuelto {
 
 // ─── El caso normal: el swipe de 2 segundos ───────────────────────────────────
 
-test('sin tocar nada: riel efectivo y monto undefined (lo sella el trigger)', () => {
+test('sin tocar nada: NI riel NI monto se escriben (S9-OPS-06)', () => {
   const r = ok(resolveCobro(undefined));
-  assert.equal(r.method, 'efectivo');
+  assert.equal(r.method, undefined, 'el riel NO cae al default: nadie lo declaró');
   assert.equal(r.amount, undefined);
 });
 
 test('objeto vacío o campos vacíos = igual que no tocar nada', () => {
   for (const input of [{}, { amount: '', method: '' }, { amount: null, method: null }]) {
     const r = ok(resolveCobro(input));
-    assert.equal(r.method, DEFAULT_RAIL);
+    assert.equal(r.method, undefined);
     assert.equal(r.amount, undefined);
+  }
+});
+
+test('el default de la caja NO se cuela en el cobro de una cita', () => {
+  // Contraprueba del arreglo: `DEFAULT_RAIL` existe y vale 'efectivo', y aun así
+  // `resolveCobro` no lo devuelve jamás por su cuenta. Si alguien reintrodujera
+  // el `?? DEFAULT_RAIL`, esta prueba es la que lo detiene.
+  assert.equal(DEFAULT_RAIL, 'efectivo');
+  for (const input of [undefined, {}, { amount: 200 }, { amount: '', method: null }]) {
+    assert.notEqual(ok(resolveCobro(input)).method, DEFAULT_RAIL);
   }
 });
 
@@ -53,10 +70,11 @@ test('solo riel editado: el monto sigue sin escribirse', () => {
   assert.equal(r.method, 'transferencia');
 });
 
-test('solo monto editado: el riel cae al default', () => {
+test('solo monto editado: el riel queda SIN DECLARAR', () => {
+  // Tocar el monto no es declarar cómo pagaron. Antes esto escribía 'efectivo'.
   const r = ok(resolveCobro({ amount: 180 }, 200));
   assert.equal(r.amount, 180);
-  assert.equal(r.method, 'efectivo');
+  assert.equal(r.method, undefined);
 });
 
 // ─── Lo que teclea una persona de verdad ──────────────────────────────────────

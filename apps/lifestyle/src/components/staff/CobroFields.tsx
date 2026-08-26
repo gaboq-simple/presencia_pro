@@ -8,6 +8,13 @@
 // pre-llenado: un campo lleno invita a confirmarlo sin mirar, y un monto
 // "confirmado" que nadie tecleó es exactamente el dato que la capa de dinero no
 // quiere. Vacío = no lo editaron = lo sella el trigger con la lista.
+//
+// El RIEL arranca en `null` — NINGUNO seleccionado — por la misma razón, y desde
+// S9-OPS-06 esa razón tiene medida: mientras venía preseleccionado en efectivo,
+// dos de los tres "Terminó" del barbero no preguntaban nada y el sistema
+// afirmaba "pagó en efectivo" sobre cobros que nadie miró. Es el mismo criterio
+// que el concepto de la hoja de caja, que tampoco trae default: **el tap ES el
+// dato**. Sin tap, el riel queda sin declarar y el corte lo cuenta aparte.
 
 'use client';
 
@@ -23,18 +30,19 @@ export function railLabel(r: Rail): string {
   return RAIL_LABEL[r];
 }
 
-/** "$200 · Efectivo" — el texto del chip y del resumen. */
-export function cobroResumen(amount: string, listPrice: number, method: Rail): string {
+/** "$200 · Efectivo" — o "$200 · sin riel" cuando nadie lo declaró. */
+export function cobroResumen(amount: string, listPrice: number, method: Rail | null): string {
   const monto = amount.trim() === '' ? listPrice : Number(amount.replace(/[$,\s]/g, ''));
   const n = Number.isFinite(monto) ? monto : listPrice;
-  return `$${n.toLocaleString('es-MX')} · ${RAIL_LABEL[method]}`;
+  return `$${n.toLocaleString('es-MX')} · ${method === null ? 'sin riel' : RAIL_LABEL[method]}`;
 }
 
 export default function CobroFields({
   amount, method, listPrice, onAmount, onMethod, disabled,
 }: {
   amount:    string;
-  method:    Rail;
+  /** `null` = nadie lo declaró todavía. No se pinta ninguno como elegido. */
+  method:    Rail | null;
   listPrice: number;
   onAmount:  (v: string) => void;
   onMethod:  (m: Rail) => void;
@@ -82,6 +90,14 @@ export default function CobroFields({
             </button>
           ))}
         </div>
+        {/* Sin juicio y sin bloquear: se puede cerrar sin declararlo, y se dice
+            qué pasa si se cierra así. Forzarlo convertiría un cobro de dos
+            segundos en un trámite; callarlo devolvería el default inventado. */}
+        {method === null && (
+          <span className="mt-1 block text-xs text-faint">
+            Si no lo dices, queda sin riel declarado y no entra al cuadre del cajón.
+          </span>
+        )}
       </div>
     </div>
   );

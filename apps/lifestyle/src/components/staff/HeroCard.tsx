@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
-import { completeAppointment, noShowAppointment, markArrived } from '@/app/staff/assistant-actions';
+import { noShowAppointment, markArrived } from '@/app/staff/assistant-actions';
 
 // ─── Helpers de tiempo (mismo patrón que DayBar) ──────────────────────────────
 
@@ -101,13 +101,15 @@ type Props = {
   onMutated: () => void;                              // refresh tras acción
   onRegister: () => void;                             // abre "+ Nueva cita" (estado vacío)
   onHeroAppointmentChange?: (id: string | null) => void; // para la referencia en el hilo
-  /** Terminó exitoso → el shell abre la hoja de propina (Paso 7). */
-  onCompleted?: (id: string) => void;
+  /** "Terminó" → el shell abre la hoja de COBRO (S9-OPS-06), que completa la
+      cita y encadena la de propina. El hero NO completa por su cuenta: hacerlo
+      era lo que dejaba pasar el cobro sin una sola pregunta sobre el dinero. */
+  onPedirCobro: (id: string) => void;
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function HeroCard({ appointments, timezone, onMutated, onRegister, onHeroAppointmentChange, onCompleted }: Props) {
+export default function HeroCard({ appointments, timezone, onMutated, onRegister, onHeroAppointmentChange, onPedirCobro }: Props) {
   const [nowMin, setNowMin] = useState<number>(() => nowLocalMinutes(timezone));
   useEffect(() => {
     const update = () => setNowMin(nowLocalMinutes(timezone));
@@ -205,8 +207,10 @@ export default function HeroCard({ appointments, timezone, onMutated, onRegister
   const primary =
     sel.mode === 'upcoming'
       ? { label: 'Llegó', onClick: () => run(markArrived, appt.id, 'No se pudo marcar la llegada.') }
-      // El Terminó exitoso encadena la hoja de propina (Paso 7) vía onCompleted.
-      : { label: 'Terminó', onClick: () => run(completeAppointment, appt.id, 'No se pudo completar la cita.', onCompleted) };
+      // "Terminó" abre la hoja de cobro; completar y encadenar la propina es
+      // trabajo del shell. Antes llamaba `completeAppointment` directo y sin
+      // cobro, así que el riel se escribía con un default que nadie declaró.
+      : { label: 'Terminó', onClick: () => onPedirCobro(appt.id) };
   const secondary = { label: 'No vino', onClick: () => run(noShowAppointment, appt.id, 'No se pudo marcar como no asistió.') };
   const showPrimary = !arrived;  // arrived-upcoming → sin Llegó
 

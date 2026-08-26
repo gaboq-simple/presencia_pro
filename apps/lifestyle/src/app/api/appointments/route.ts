@@ -44,7 +44,12 @@ const CreateAppointmentSchema = z.object({
   customerId:  z.string().uuid().optional(),
   startsAt:    z.string().datetime({ offset: true }),
   endsAt:      z.string().datetime({ offset: true }),
-  source:      z.enum(['bot', 'manual', 'walkin']).default('manual'),
+  // Espejo EXACTO del CHECK de la tabla, `llamada` incluido (S9-OPS-06). El enum
+  // era más estrecho que la BD, así que esta ruta no podía crear una cita nacida
+  // de una llamada aunque la columna la acepta — y el próximo que lo leyera iba a
+  // concluir que `llamada` no existe. Un tipo más angosto que su columna es la
+  // misma mentira que un documento desactualizado, sólo que compila.
+  source:      z.enum(['bot', 'manual', 'walkin', 'llamada']).default('manual'),
   notes:       z.string().max(500).optional(),
 });
 

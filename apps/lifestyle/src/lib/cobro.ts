@@ -7,10 +7,17 @@
 // entró DE VERDAD y por qué riel, sin romper el swipe de 2 segundos. De ahí las
 // dos asimetrías de este módulo, que no son casualidad:
 //
-//   · El RIEL siempre sale con valor (default 'efectivo'). Es la decisión 2 del
-//     plan: el riel jamás queda NULL en filas nuevas por construcción, no por
-//     validación — un movimiento sin riel no se puede comparar contra ningún
-//     artefacto físico y por lo tanto no sirve para cuadrar.
+//   · El RIEL sale `undefined` si nadie lo declaró, y la action NO escribe
+//     `payment_method` (S9-OPS-06). ANTES salía siempre con `'efectivo'` por
+//     default, y eso era fabricar evidencia: de los tres caminos de "Terminó"
+//     del barbero, dos no preguntaban nada, así que el sistema afirmaba "pagó en
+//     efectivo" sobre cobros que nadie miró. El corte compara riel por riel
+//     contra artefactos físicos, así que todo lo cobrado con tarjeta aparecía
+//     como sobrante en la terminal y faltante en el cajón: un descuadre espejo,
+//     inventado, todos los días.
+//     La regla dura de `CLAUDE.md` ("presente no es ausente") aplica igual acá:
+//     `NULL` es "no sé cómo pagaron", y eso es un dato distinto de "pagaron en
+//     efectivo". El corte lo cuenta en su propio cubo (`sinRiel`), con nombre.
 //   · El MONTO sale `undefined` si la persona no lo editó, y eso es deliberado:
 //     así la action NO escribe `price_charged` y el precio de lista lo sella el
 //     trigger `seal_appointment_price` (que solo rellena cuando está NULL). Si
@@ -32,10 +39,14 @@ export type CobroInput = {
   method?: string | null;
 };
 
-/** Lo que la action escribe. `amount: undefined` = no escribir price_charged. */
+/**
+ * Lo que la action escribe. Los DOS `undefined` significan lo mismo: no escribir
+ * esa columna. `amount` porque el trigger sella el precio de lista; `method`
+ * porque nadie declaró cómo pagaron y no hay nada honesto que poner.
+ */
 export type CobroResuelto = {
   amount:  number | undefined;
-  method:  Rail;
+  method:  Rail | undefined;
 };
 
 export type CobroError = { error: string };
@@ -56,10 +67,13 @@ function isRail(v: unknown): v is Rail {
  * cuando D6 necesite comparar contra la lista.
  */
 export function resolveCobro(input: CobroInput | undefined, _listPrice?: number): CobroResuelto | CobroError {
-  const method = input?.method == null || input.method === '' ? DEFAULT_RAIL : input.method;
-  if (!isRail(method)) {
+  // Sin riel declarado → `undefined`, y la action no escribe la columna. NO se
+  // cae en `DEFAULT_RAIL`: ese default era el que inventaba el dato (S9-OPS-06).
+  const declarado = input?.method == null || input.method === '' ? undefined : input.method;
+  if (declarado !== undefined && !isRail(declarado)) {
     return { error: `Método de pago no válido: ${String(input?.method)}` };
   }
+  const method: Rail | undefined = declarado;
 
   const raw = input?.amount;
   if (raw == null || raw === '') {

@@ -28,6 +28,9 @@ import type { BarberDayAppointment } from '@/lib/barberDay';
 import { computeDayDrift, DRIFT_THRESHOLD_MIN, type DriftProjection } from '@/lib/dayDrift';
 import { isTodayInTz, todayStrInTz } from '@/lib/dayWindow';
 import { refreshStaffDayAppointments } from '@/app/staff/actions';
+import { completeAppointment } from '@/app/staff/assistant-actions';
+import CobroFields from './CobroFields';
+import type { Rail } from '@/lib/cobro';
 import HeroCard from './HeroCard';
 import DayBar from './DayBar';
 import DayDriftNotice from './DayDriftNotice';
@@ -142,6 +145,30 @@ export default function StaffLayout({
     if (appt) setTipAppt(appt);
   }, []);
 
+  // ── La hoja de COBRO (S9-OPS-06) ──────────────────────────────────────────
+  // Vive acá, en el shell, por la misma razón que la de propina: la piden TRES
+  // superficies distintas —el hero, la ficha del hilo y el cabo suelto— y tener
+  // una sola hoja es lo que garantiza que las tres hagan LA MISMA pregunta. Con
+  // una copia por superficie, la primera corrección las separa, y separadas es
+  // como llegamos a que dos de los tres "Terminó" no preguntaran nada.
+  //
+  // El riel arranca en `null` a propósito: si nadie lo toca, la action no
+  // escribe `payment_method` y el corte cuenta ese cobro en su propio cubo. Es
+  // el gesto el que declara, no el default.
+  const [cobroAppt, setCobroAppt]     = useState<BarberDayAppointment | null>(null);
+  const [cobroAmount, setCobroAmount] = useState('');
+  const [cobroMethod, setCobroMethod] = useState<Rail | null>(null);
+  const [cobrando, setCobrando]       = useState(false);
+  const pedirCobro = useCallback((appt: BarberDayAppointment) => {
+    setCobroAmount('');
+    setCobroMethod(null);
+    setCobroAppt(appt);
+  }, []);
+  const pedirCobroById = useCallback((id: string) => {
+    const appt = appointmentsRef.current.find((a) => a.id === id);
+    if (appt) pedirCobro(appt);
+  }, [pedirCobro]);
+
   // Ref para leer la fecha dentro del intervalo sin re-suscribir el polling.
   const dateRef = useRef(date);
   useEffect(() => { dateRef.current = date; });
@@ -187,6 +214,23 @@ export default function StaffLayout({
     const fresh = await refreshStaffDayAppointments(dateRef.current);
     setAppointments(fresh);
   }, []);
+
+  // Confirmar el cobro: completa la cita con lo que se haya declarado (o con
+  // nada) y encadena la hoja de propina, que es el paso siguiente de siempre.
+  const confirmarCobro = useCallback(async () => {
+    const appt = cobroAppt;
+    if (!appt || cobrando) return;
+    setCobrando(true);
+    try {
+      const res = await completeAppointment(appt.id, { amount: cobroAmount, method: cobroMethod });
+      if (res && 'error' in res && res.error) return;   // el monto lo corrige la persona
+      setCobroAppt(null);
+      await refresh();
+      openTip(appt);
+    } finally {
+      setCobrando(false);
+    }
+  }, [cobroAppt, cobroAmount, cobroMethod, cobrando, refresh, openTip]);
 
   // ── Polling cada 30s ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -263,7 +307,7 @@ export default function StaffLayout({
                 onMutated={() => void refresh()}
                 onRegister={() => setShowNewForm(true)}
                 onHeroAppointmentChange={setHeroApptId}
-                onCompleted={openTipById}
+                onPedirCobro={pedirCobroById}
               />
             </div>
           )}
@@ -324,6 +368,7 @@ export default function StaffLayout({
                 onMutated={() => void refresh()}
                 onCompleted={openTip}
                 onOpenTip={openTip}
+                onPedirCobro={pedirCobro}
                 staffOptions={staffOptions}
                 projections={projectionById}
               />
@@ -399,6 +444,46 @@ export default function StaffLayout({
           })}
         </div>
       </nav>
+
+      {/* ── La hoja de COBRO (S9-OPS-06) ──────────────────────────────────── */}
+      {cobroAppt && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30" onClick={() => setCobroAppt(null)}>
+          <div
+            className="animate-card-in w-full max-w-xl rounded-t-card border border-line bg-card px-4 pb-8 pt-3 shadow-hero"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+            <p className="truncate text-lg font-semibold text-ink">
+              {cobroAppt.customer?.name ?? 'Cliente'}
+            </p>
+            <p className="mb-4 text-sm text-ink-2">{cobroAppt.service?.name ?? ''}</p>
+            <CobroFields
+              amount={cobroAmount}
+              method={cobroMethod}
+              listPrice={cobroAppt.price_charged ?? cobroAppt.service?.price ?? 0}
+              onAmount={setCobroAmount}
+              onMethod={setCobroMethod}
+              disabled={cobrando}
+            />
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setCobroAppt(null)}
+                disabled={cobrando}
+                className="min-h-[44px] flex-1 rounded-xl border border-line bg-card text-sm font-semibold text-ink-2 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void confirmarCobro()}
+                disabled={cobrando}
+                className="min-h-[44px] flex-1 rounded-xl bg-teal-ink text-sm font-semibold text-card disabled:opacity-50"
+              >
+                {cobrando ? 'Guardando…' : 'Terminó'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── La hoja de propina (Paso 7) ───────────────────────────────────── */}
       {tipAppt && (

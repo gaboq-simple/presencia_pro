@@ -217,9 +217,19 @@ function ResultadoCorte({
           Transferencias del día {fmtMonto(recien.transferencias)} · no se cuentan acá
         </p>
       )}
-      {recien && recien.sinRiel > 0 && (
-        <p className="mt-1 text-xs text-faint">
-          {fmtMonto(recien.sinRiel)} cobrados sin forma de pago registrada
+      {/* El cubo propio: cobrado cuyo riel nadie declaró (S9-OPS-06). Sale del
+          corte GUARDADO —no de `recien`—, así que sigue ahí al recargar. Va
+          fuera de las dos líneas de arriba a propósito: no entra a ninguna
+          comparación porque no hay artefacto físico que contar, y meterlo en
+          efectivo inventaría un descuadre. Dato, no acusación: se dice cuánto y
+          por qué no se compara, sin pedirle cuentas a nadie. */}
+      {corte.sinRiel > 0 && (
+        <p className="mt-2 rounded-lg bg-canvas px-3 py-2 text-xs text-ink-2">
+          <span className="font-semibold tabular-nums text-ink">{fmtMonto(corte.sinRiel)}</span>
+          {' '}sin riel declarado
+          <span className="block text-faint">
+            Se cobró, pero nadie dijo cómo se pagó. No se compara con el cajón ni con la terminal.
+          </span>
         </p>
       )}
 
