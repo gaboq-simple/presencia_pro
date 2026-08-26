@@ -455,10 +455,31 @@ Desplegadas en Supabase. Ambas tienen `verify_jwt: false` (autenticadas por secr
 > **`cron_invocaciones`** (una fila por invocación, escrita al encolar — existe
 > porque `net._http_response` retiene 6 h y su TTL no se puede cambiar en Supabase);
 > **`verificar-invocaciones`** (cada 5 min, copia el status real; no hace RAISE
-> porque revertiría lo que acaba de guardar); y **`alarma-invocaciones`** (cada 15
-> min, hace RAISE si la ÚLTIMA invocación de algún destino fue no-2xx; no escribe
-> nada y se pone verde sola cuando la siguiente corrida sale bien). Para saber si un
-> cron entregó de verdad, la fuente es `cron_invocaciones`, no `job_run_details`.
+> porque revertiría lo que acaba de guardar); y **`alarma-invocaciones`** (a los
+> minutos **7, 22, 37 y 52** — desfasada del verificador a propósito, ver abajo).
+> Para saber si un cron entregó de verdad, la fuente es `cron_invocaciones`, no
+> `job_run_details`.
+>
+> **La alarma tiene TRES miradas y tres textos distintos** (S8-OPS-04), porque el
+> dueño del problema no es el mismo: `verificador detenido` (el job de verificación
+> no corrió en dos períodos) · `verificación estancada` (invocaciones que nadie
+> resolvió tras tres períodos — antes `pendiente` no contaba como problema y un
+> verificador muerto dejaba la alarma verde para siempre) · `destino en falla` (la
+> última invocación de un destino fue no-2xx o sin respuesta). No escribe nada y se
+> pone verde sola cuando el riel vuelve a estar sano. Los umbrales derivan de
+> `periodo_verificador()`, que lee el `cron.job.schedule` del verificador — no hay
+> números fijos que se puedan desincronizar.
+>
+> **El desfase no es cosmético.** Con `*/15` la alarma caía SIEMPRE en un tick del
+> `*/5` del verificador y pg_cron los arranca en paralelo: medido el 2026-08-25, la
+> alarma leyó 7 ms después del arranque del verificador y 2 s antes de su commit,
+> vio la fila en `pendiente` y salió **verde sobre un 401 recién verificado**; el
+> rojo llegó 15 min tarde. `7,22,37,52` elimina la colisión por construcción.
+>
+> **La latencia real, que no es el período:** un fallo se ve como máximo un período
+> de verificador (≤5 min hasta que el veredicto se graba) más uno de alarma (≤15
+> min hasta que alguien lo mire) → **peor caso ~20 min desde la invocación, típico
+> ~10**. Donde antes se leía "cada 15 min" como si fuera la latencia, no lo era.
 
 ---
 

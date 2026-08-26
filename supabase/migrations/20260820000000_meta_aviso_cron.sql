@@ -296,6 +296,16 @@ SELECT cron.schedule(
 -- Alarmar cada 15 min: suficiente para que un rojo se vea el mismo día sin
 -- inundar `cron.job_run_details` cuando todo está bien (cuando todo está bien no
 -- escribe una sola línea de error).
+--
+-- ⚠️ CORREGIDO por `20260826000000_alarma_endurecida.sql` (S8-OPS-04). Dos cosas
+--    de este bloque quedaron mal y se dejan escritas en vez de borrarlas:
+--    · El `*/15` COLISIONA con el `*/5` del verificador —cada corrida de la
+--      alarma cae en un tick del verificador, siempre— y medido en vivo la alarma
+--      leía 2 s antes del commit y salía verde sobre un 401 recién verificado.
+--      Ahora es `7,22,37,52`.
+--    · "cada 15 min" es el PERÍODO, no la latencia, y se leyó como si fueran lo
+--      mismo. La latencia real de un fallo es un período de verificador + uno de
+--      alarma: **peor caso ~20 min desde la invocación**, típico ~10.
 SELECT cron.schedule(
   'alarma-invocaciones',
   '*/15 * * * *',
