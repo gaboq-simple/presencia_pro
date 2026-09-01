@@ -27,3 +27,29 @@ jobs:
 
       - name: Type check (apps/lifestyle)
         run: npm run type-check --workspace=apps/lifestyle
+
+  # Job APARTE, y no un step más del de arriba, por dos razones. (1) El job
+  # `lint-and-typecheck` conserva su clave y su nombre exactos: si algún día hay
+  # un required status check configurado contra él, este paso no se lo lleva
+  # puesto. (2) En la lista de checks del PR, una prueba rota se distingue de un
+  # error de lint sin abrir el log — y de paso corren en paralelo.
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # La suite es PURA — sin red, sin Supabase, sin Anthropic — así que no
+      # lleva una sola env var. El día que un test necesite un secreto, dejó de
+      # ser puro: el arreglo es el test, no una variable acá.
+      - name: Tests (suite completa)
+        run: npm test
