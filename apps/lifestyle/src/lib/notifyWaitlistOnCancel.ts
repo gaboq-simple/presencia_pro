@@ -80,20 +80,6 @@ export async function notifyWaitlistOnCancel(
 
   if (!entry.customer) return;
 
-  const notifiedAt = new Date();
-  const expiresAt  = new Date(notifiedAt.getTime() + 30 * 60_000);
-
-  // ── 1. Marcar como notificado ─────────────────────────────────────────────
-
-  await db
-    .table('waitlist')
-    .update({
-      status:      'notified',
-      notified_at: notifiedAt.toISOString(),
-      expires_at:  expiresAt.toISOString(),
-    })
-    .eq('id', entry.id);
-
   // ── Obtener datos del negocio y nombre del staff en paralelo ──────────────
 
   const [bizResult, staffResult] = await Promise.all([
@@ -112,13 +98,103 @@ export async function notifyWaitlistOnCancel(
   const tz            = biz?.timezone ?? 'America/Mexico_City';
   const phoneNumberId = biz?.whatsapp_phone_number_id;
 
-  // ── 2. Programar expiración ───────────────────────────────────────────────
+  // ── 1. Ofrecer el lugar por WhatsApp — el envío va PRIMERO ────────────────
+  //
+  // 🔴 El orden es la corrección (S9-OPS-08). Antes esta función marcaba
+  //    `status='notified'` + `notified_at` y agendaba la expiración a 30 min
+  //    ANTES de intentar el envío, y después descartaba el resultado. Como
+  //    `sendWaitlistOffer` **nunca lanza** (devuelve `TemplateSendResult`, ver
+  //    `whatsapp-templates.ts:65`), un rechazo de Meta dejaba a la persona
+  //    marcada como avisada, sin haberse enterado de nada, y con su lugar
+  //    liberado media hora después. Peor: el `return` por credenciales
+  //    faltantes salía DESPUÉS de esas dos escrituras, así que sin WhatsApp
+  //    configurado —el estado de hoy, con la WABA sin verificar— cada
+  //    cancelación quemaba al primero de la lista en silencio.
+  //
+  //    `notified_at` afirma un hecho del mundo igual que `sent_at`: que a
+  //    alguien se le avisó. Regla dura de CLAUDE.md — no se escribe sin
+  //    evidencia de ese hecho. Ahora los tres campos se escriben sólo cuando
+  //    el mensaje salió, y si no salió la persona **sigue en `waiting`**, que
+  //    es la verdad: su lugar no se ofreció y la próxima cancelación puede
+  //    volver a intentarlo.
+  //
+  //    Nota sobre concurrencia: el UPDATE temprano PARECÍA reservar la fila,
+  //    pero no lo hacía — filtraba sólo por `.eq('id')`, sin guarda por
+  //    `status`, así que dos cancelaciones simultáneas ya podían pisarse.
+  //    Mover el UPDATE no quita una garantía; quita la apariencia de una.
+
+  const accessToken = process.env['WHATSAPP_ACCESS_TOKEN'];
+
+  const serviceName  = entry.service?.name ?? 'tu servicio';
+  const dateStr      = formatWlDate(slotStartsAt, tz);
+  const timeStr      = formatWlTime(slotStartsAt, tz);
+  const customerName = entry.customer.name.trim().split(/\s+/)[0] ?? entry.customer.name;
+
+  let sent  = false;
+  let error: string | null = null;
+
+  if (!phoneNumberId || !accessToken) {
+    error = 'WhatsApp no configurado (falta phone_number_id o access token)';
+  } else {
+    const config: MetaConfig = { phoneNumberId, accessToken };
+    try {
+      const result = await sendWaitlistOffer(
+        config,
+        entry.customer.phone,
+        customerName,
+        serviceName,
+        dateStr,
+        timeStr,
+        staffName || 'tu barbero',
+      );
+      sent  = result.success;
+      error = result.success ? null : (result.error ?? 'error sin detalle');
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  if (!sent) {
+    // Ruidoso, no mudo: una oferta que no salió es justo lo que nadie ve.
+    // La entrada queda en `waiting` — sin `notified_at` y sin expiración.
+    console.error(JSON.stringify({
+      ts:          new Date().toISOString(),
+      service:     'waitlist',
+      event:       'offer_send_failed',
+      business_id: businessId,
+      waitlist_id: entry.id,
+      error,
+    }));
+    return;
+  }
+
+  // ── 2. El envío salió: recién ahora se escriben los hechos ────────────────
+
+  const notifiedAt = new Date();
+  const expiresAt  = new Date(notifiedAt.getTime() + 30 * 60_000);
+
+  await db
+    .table('waitlist')
+    .update({
+      status:      'notified',
+      notified_at: notifiedAt.toISOString(),
+      expires_at:  expiresAt.toISOString(),
+    })
+    .eq('id', entry.id);
+
+  // ── 3. Programar expiración ───────────────────────────────────────────────
+  // Sólo tiene sentido si la persona se enteró: la ventana de 30 min es el
+  // tiempo que tiene para contestar, y no se le puede correr el reloj a quien
+  // nunca recibió el mensaje.
 
   await db.table('scheduled_notifications').insert({
     type:           'waitlist_expiry',
     scheduled_for:  expiresAt.toISOString(),
     customer_phone: entry.customer.phone,
     customer_id:    entry.customer.id,
+    // Sin `sent_at`: esta fila es la expiración FUTURA, no un mensaje que salió.
+    // Marcarla como enviada sería la misma mentira que este paso corrige, y de
+    // paso la escondería del despachador (que busca `sent_at IS NULL`).
     metadata: {
       waitlist_id:     entry.id,
       slot_starts_at:  slotStartsAt,
@@ -127,25 +203,4 @@ export async function notifyWaitlistOnCancel(
       service_name:    entry.service?.name ?? '',
     },
   });
-
-  // ── 3. Enviar WhatsApp via template — best-effort ────────────────────────
-
-  const accessToken = process.env['WHATSAPP_ACCESS_TOKEN'];
-  if (!phoneNumberId || !accessToken) return;
-
-  const config: MetaConfig = { phoneNumberId, accessToken };
-  const serviceName   = entry.service?.name ?? 'tu servicio';
-  const dateStr       = formatWlDate(slotStartsAt, tz);
-  const timeStr       = formatWlTime(slotStartsAt, tz);
-  const customerName  = entry.customer.name.trim().split(/\s+/)[0] ?? entry.customer.name;
-
-  await sendWaitlistOffer(
-    config,
-    entry.customer.phone,
-    customerName,
-    serviceName,
-    dateStr,
-    timeStr,
-    staffName || 'tu barbero',
-  );
 }

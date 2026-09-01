@@ -15,6 +15,7 @@ import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.typ
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
 import { resolveCobro, esCobroError, type CobroInput } from '@/lib/cobro';
+import { resolveRegistroEnvio, ERROR_SIN_DETALLE } from '@/lib/envio';
 import {
   sendCancellationNotice,
   type MetaConfig,
@@ -187,7 +188,18 @@ export async function cancelAppointment(
         const timeStr  = formatApptTime(apptRow.starts_at, tz);
         const firstName = customerName ? customerName.split(' ')[0]! : '';
 
-        await sendCancellationNotice(
+        // 🔴 El resultado se MIRA (S9-OPS-08). `sendCancellationNotice` nunca
+        //    lanza —devuelve `TemplateSendResult`, dicho con todas las letras en
+        //    `whatsapp-templates.ts:65`— así que el `await` pelado de antes se
+        //    tragaba cualquier rechazo de Meta (token vencido, plantilla sin
+        //    aprobar, número inválido) y la línea de abajo escribía `sent_at`
+        //    igual. `sent_at` afirma que un mensaje salió: escribirlo sin mirar
+        //    es fabricar la evidencia con la que después responde la auditoría.
+        //    Es el caso testigo que nombra la regla dura de CLAUDE.md, y el
+        //    tercer campo de su terna (`arrived_at` lo cerró S9-OPS-03, el riel
+        //    S9-OPS-06). Mismo patrón que ya usan el corte (`notify_error`) y
+        //    `POST /api/customers/[id]/reactivation`.
+        const envio = await sendCancellationNotice(
           config,
           customerPhone,
           firstName,
@@ -196,7 +208,21 @@ export async function cancelAppointment(
           businessName,
         );
 
-        const now = new Date().toISOString();
+        const now      = new Date().toISOString();
+        const registro = resolveRegistroEnvio(envio, now);
+
+        if (!envio.success) {
+          // Ruidoso, no mudo: un aviso que no salió es justo lo que nadie ve.
+          console.error(JSON.stringify({
+            ts:             now,
+            service:        'cancel-appointment',
+            event:          'cancellation_notice_failed',
+            business_id:    session.business_id,
+            appointment_id: appointmentId,
+            error:          envio.error ?? ERROR_SIN_DETALLE,
+          }));
+        }
+
         await db
           .table('scheduled_notifications')
           .insert({
@@ -204,7 +230,8 @@ export async function cancelAppointment(
             customer_phone: customerPhone,
             type:           'cancellation_notice',
             scheduled_for:  now,
-            sent_at:        now,
+            // Uno u OTRO, nunca los dos, nunca ninguno — ver `lib/envio.ts`.
+            ...registro,
           });
       }
     }
