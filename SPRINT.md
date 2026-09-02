@@ -2168,6 +2168,26 @@ digan la verdad.
   que agende por el bot), **PLAT-01 → PR2**, **S4-G-01**, **S4-OPS-02** y
   **S1-G-01** (`META_APP_SECRET`).
 
+- **S9-RES-01 · El tipo miente: `service: ServiceRef` no-nullable sobre una columna nullable** ⚪ todo · **se resuelve dentro de P1 (fuente única del precio), no aparte**
+  `DashboardAppointment.service` está declarado `ServiceRef` (no-nullable) y se
+  hidrata por **cast** desde una fila cuyo `appointments.service_id` **sí es
+  NULL-able** en la BD (verificado contra `information_schema`, relevamiento R3 en
+  `docs/planes/costos-y-producto.md`). O sea: `tsc` no puede avisar de un embed
+  ausente en ninguno de los 16 sitios que hoy calculan el precio de una cita, y
+  cada sitio decidió por su cuenta qué hacer — 11 caen al precio de lista, 4
+  excluyen la fila entera y 1 reventaba (arreglado en `feat/day-revenue-embed-guard`).
+
+  **Es la misma familia que `RawAppointmentRow` antes de PR #174**, y la lección de
+  ahí manda: lo que destrabó la trampa fue **completar el tipo**, no quitar el
+  cast. Quitar el cast sin completar el tipo sólo mueve el error de lugar.
+
+  **Cómo se usa, y por eso no se hace suelto:** flipear `service` a
+  `ServiceRef | null` hace que `tsc` **enumere** los sitios rotos. Ese listado ES
+  la herramienta de descubrimiento de P1 — si el flip se hace antes, se paga el
+  ruido de 15 errores sin nadie que los consolide; si se hace dentro de P1, el
+  compilador dicta el alcance exacto de la fuente única y no queda ninguno por
+  inspección visual.
+
 ---
 
 ## Rediseño visual del dueño (aprobado sobre maqueta, plan en docs/planes/dueno-v3.md)

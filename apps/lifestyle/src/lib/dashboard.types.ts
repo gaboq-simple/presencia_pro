@@ -558,16 +558,11 @@ export async function queryStaffBlocksForDay(
 
 // ─── Función pura: ingresos del día ──────────────────────────────────────────
 // No hace fetch — opera sobre los appointments ya cargados.
-// Separado de getDayAppointments para reusar los datos ya traídos del servidor.
+// Se re-exporta desde `lib/dayRevenue.ts`, donde vive el cuerpo: este archivo
+// arrastra el cliente de Supabase y el alias `@/`, así que nada que viva acá se
+// puede probar en la suite pura. Los consumidores no cambian de import.
 
-export function computeDayRevenue(appointments: DashboardAppointment[]): DayRevenue {
-  const completed = appointments.filter((a) => a.status === 'completed');
-  // Precio SELLADO al completar (049) — editar el precio del servicio NO reescribe la
-  // historia. Fallback al precio vivo solo para completadas legacy sin sello.
-  const total = completed.reduce((sum, a) => sum + (a.price_charged ?? a.service.price), 0);
-  const currency = completed[0]?.service.currency ?? 'MXN';
-  return { total, currency, completedCount: completed.length };
-}
+export { computeDayRevenue } from './dayRevenue';
 
 // ─── Query: métricas por período ─────────────────────────────────────────────
 
