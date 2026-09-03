@@ -455,6 +455,36 @@ type CreateAppointmentInput = {
 const PAST_GRACE_MS = 15 * 60 * 1000;
 
 /**
+ * Un alta de cliente que falló NO se sigue de largo (S9-DATA-01).
+ *
+ * Antes el error se descartaba y la cita se creaba con `customer_id` NULL: para
+ * la recepción la cita aparecía normal, pero quedaba huérfana — sin historial,
+ * sin cadencia, invisible para el detector de fugas. Un dato ausente que NADIE
+ * ve es exactamente lo que la regla dura del repo viene a evitar.
+ *
+ * El mensaje al usuario es genérico a propósito (los detalles de un error de
+ * Postgres no se muestran en pantalla); el detalle va al log, que es donde se
+ * diagnostica.
+ */
+function errorDeAltaDeCliente(
+  err: { message?: string; code?: string } | null,
+  businessId: string,
+  nombre: string,
+): { error: string } {
+  console.error(JSON.stringify({
+    ts:          new Date().toISOString(),
+    service:     'create-appointment',
+    event:       'customer_insert_failed',
+    business_id: businessId,
+    // El nombre del cliente es PII: se registra su largo, no su contenido.
+    nombre_len:  nombre.length,
+    code:        err?.code ?? null,
+    error:       err?.message ?? 'sin detalle',
+  }));
+  return { error: 'No se pudo registrar al cliente. Intenta de nuevo.' };
+}
+
+/**
  * Crea una nueva cita desde la vista del asistente.
  *
  * · business_id siempre del servidor.
@@ -571,7 +601,15 @@ export async function createAssistantAppointment(
           customerWarning = `Este cliente tiene ${row.noshow_count} no-show${row.noshow_count !== 1 ? 's' : ''} registrado${row.noshow_count !== 1 ? 's' : ''}`;
         }
       } else {
-        const { data: created } = await db
+        // 🔴 El error se MIRA (S9-DATA-01). El `const { data: created } =` pelado
+        //    de antes descartaba cualquier fallo del INSERT y seguía con
+        //    `customerId = null`: la cita se creaba SIN CLIENTE y nadie se
+        //    enteraba — ni la recepción, que ve la cita aparecer, ni el detector
+        //    de fugas, que nunca la ve. El caso que lo hizo visible fue una base
+        //    reconstruida desde el repo, donde el CHECK de `consented_via`
+        //    rechazaba `pending_notice`; pero cualquier fallo del INSERT (unique
+        //    de teléfono en una carrera, RLS, red) producía lo mismo.
+        const { data: created, error: createErr } = await db
           .table('customers')
           .insert({
             name,
@@ -586,7 +624,8 @@ export async function createAssistantAppointment(
           })
           .select('id')
           .single();
-        customerId = (created as { id: string } | null)?.id ?? null;
+        if (createErr || !created) return errorDeAltaDeCliente(createErr, session.business_id, name);
+        customerId = (created as { id: string }).id;
       }
     } else {
       // Solo nombre: buscar por nombre exacto (less reliable)
@@ -604,8 +643,9 @@ export async function createAssistantAppointment(
           customerWarning = `Este cliente tiene ${row.noshow_count} no-show${row.noshow_count !== 1 ? 's' : ''} registrado${row.noshow_count !== 1 ? 's' : ''}`;
         }
       } else {
-        // Crear sin teléfono (phone es nullable desde migration 023)
-        const { data: created } = await db
+        // Crear sin teléfono (phone es nullable desde migration 023).
+        // El error se mira igual que arriba — ver la nota de ese bloque.
+        const { data: created, error: createErr } = await db
           .table('customers')
           .insert({
             name,
@@ -616,7 +656,8 @@ export async function createAssistantAppointment(
           })
           .select('id')
           .single();
-        customerId = (created as { id: string } | null)?.id ?? null;
+        if (createErr || !created) return errorDeAltaDeCliente(createErr, session.business_id, name);
+        customerId = (created as { id: string }).id;
       }
     }
   }
