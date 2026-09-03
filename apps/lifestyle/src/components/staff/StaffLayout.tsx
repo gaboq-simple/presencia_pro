@@ -51,6 +51,9 @@ type StaffOption = { id: string; name: string };
 export type StaffLayoutProps = {
   staffId: string;
   staffName: string;
+  /** Slug del negocio — el selector de perfil vive en /[slug]/staff (S9-SEC-01).
+   *  `null` si no se pudo resolver: entonces el nombre no es enlace y no pasa nada. */
+  businessSlug?: string | null;
   businessId: string;
   date: string;                              // 'YYYY-MM-DD'
   timezone: string;                          // IANA — para la línea "Ahora" del timeline
@@ -109,6 +112,7 @@ function isEndOfDay(appointments: DashboardAppointment[], dateStr: string, tz: s
 export default function StaffLayout({
   staffId,
   staffName,
+  businessSlug = null,
   businessId,
   date,
   timezone,
@@ -259,9 +263,23 @@ export default function StaffLayout({
           se pinta sobre el hero fijo al scrollear (mismo z → gana el orden del DOM). */}
       <header className="sticky top-0 z-20 border-b border-line bg-card px-4 py-3">
         <div className="mx-auto max-w-xl">
-          <p className="text-xs font-semibold uppercase tracking-wide text-faint">
-            {staffName}
-          </p>
+          {/* El nombre es la puerta de salida (S9-SEC-01): lleva al selector de
+              perfil, que es donde se cambia de persona o se cierra sesión. Sin este
+              enlace, una computadora compartida no tenía cómo volver al teclado de
+              PIN — el único camino era esperar 7 días a que la cookie expirara. */}
+          {businessSlug ? (
+            <a
+              href={`/${businessSlug}/staff`}
+              className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-faint transition hover:text-ink-2"
+            >
+              {staffName}
+              <span aria-hidden className="text-[10px] normal-case tracking-normal">· cambiar</span>
+            </a>
+          ) : (
+            <p className="text-xs font-semibold uppercase tracking-wide text-faint">
+              {staffName}
+            </p>
+          )}
 
           {showDayNav && (
             <div className="mt-1 flex items-center justify-between gap-2">

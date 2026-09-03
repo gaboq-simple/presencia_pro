@@ -13,7 +13,6 @@
 // REGLA: service_role_key nunca sale al cliente.
 
 import { redirect } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
 import {
   getStaffRecurringAvailability,
   getStaffBlockRequests,
@@ -21,8 +20,7 @@ import {
 // Read barbero-only: el día CON tipAmount (Paso 7). Solo esta ruta trae la propina.
 import { getBarberDayAppointments } from '@/lib/barberDay';
 import { todayStrInTz } from '@/lib/dayWindow';
-import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
-import { tenantDb } from '@/lib/tenantDb';
+import { getCurrentSession, getBusinessTimezone, getBusinessSlug } from '@/lib/auth';
 import StaffLayout from '@/components/staff/StaffLayout';
 import BarbershopPrompt from '@/components/staff/BarbershopPrompt';
 
@@ -76,21 +74,14 @@ export default async function StaffPage({
 
   const staffId = session.staff_id;
 
-  // Nombre del barbero — desde sesión Supabase Auth o DB
-  let staffName = session.name ?? '';
-  if (!staffName) {
-    const url = process.env['NEXT_PUBLIC_SUPABASE_URL'];
-    const key = process.env['SUPABASE_SERVICE_ROLE_KEY'];
-    if (url && key) {
-      const supabase = createClient(url, key);
-      const { data } = await tenantDb(supabase, businessId)
-        .table('staff')
-        .select('name')
-        .eq('id', staffId)
-        .maybeSingle();
-      staffName = (data as { name: string } | null)?.name ?? '';
-    }
-  }
+  // El nombre ya viene en la sesión (S9-SEC-01): la revalidación contra `staff`
+  // que hace `getCurrentSession` lo trae de la fila, así que el lookup aparte que
+  // vivía acá —el que existía porque la cookie del PIN nunca llevó nombre— se fue.
+  const staffName = session.name ?? '';
+
+  // El slug alimenta el enlace "cambiar de perfil" del header: la ruta /[slug]/staff
+  // es el selector, y sin el slug no hay cómo volver a ella desde adentro.
+  const businessSlug = await getBusinessSlug(businessId);
 
   // La tz del negocio se resuelve PRIMERO: define el "hoy" default, acota el día
   // de las citas a la tz local (no a UTC) y alimenta la línea "Ahora" del timeline.
@@ -117,6 +108,7 @@ export default async function StaffPage({
     <StaffLayout
       staffId={staffId}
       staffName={staffName}
+      businessSlug={businessSlug}
       businessId={businessId}
       date={date}
       timezone={timezone}

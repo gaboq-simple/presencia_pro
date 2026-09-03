@@ -10,7 +10,7 @@
 // Slug desconocido/inactivo → notFound() (mismo patrón que el minisite /[slug]).
 // REGLA: service_role_key nunca sale al cliente.
 
-import { notFound, redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import { getCurrentSession } from '@/lib/auth';
 import PinForm from '@/components/staff/PinForm';
@@ -43,12 +43,32 @@ export default async function SlugStaffPage({
   const business = await getBusinessBySlug(slug);
   if (!business) notFound();
 
-  // Ya hay sesión de ESTE negocio → no re-tipear el PIN. Rutear por rol:
-  // barbero a su vista (/staff), asistente/dueño a la mesa de control (/dashboard).
+  // Ya hay sesión de ESTE negocio → NO se redirige (S9-SEC-01). Antes sí, y eso
+  // dejaba el teclado de PIN inalcanzable: entrado un perfil, esa computadora no
+  // podía entrar con otro hasta que la cookie expirara a los 7 días. Ahora la
+  // ruta es el SELECTOR DE PERFIL: "Continuar como X" para el caso diario (un
+  // tap) y el teclado para entrar como otra persona, en la misma pantalla.
+  //
+  // Sesión de OTRO negocio → no se ofrece continuar: acá no aplica. Teclado limpio.
   const session = await getCurrentSession();
-  if (session && session.type === 'business' && session.business_id === business.id) {
-    redirect(session.role === 'barber' ? '/staff' : '/dashboard');
-  }
+  const sesionDeEsteNegocio =
+    session && session.type === 'business' && session.business_id === business.id
+      ? session
+      : null;
 
-  return <PinForm businessSlug={slug} businessName={business.name} />;
+  return (
+    <PinForm
+      businessSlug={slug}
+      businessName={business.name}
+      sesionActual={
+        sesionDeEsteNegocio
+          ? {
+              nombre:  sesionDeEsteNegocio.name || 'tu sesión',
+              rol:     sesionDeEsteNegocio.role,
+              destino: sesionDeEsteNegocio.role === 'barber' ? '/staff' : '/dashboard',
+            }
+          : null
+      }
+    />
+  );
 }

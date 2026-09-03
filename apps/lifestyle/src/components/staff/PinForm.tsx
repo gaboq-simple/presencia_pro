@@ -9,6 +9,10 @@
 //   - Al completar los 4 dígitos → submit automático.
 //   - Estado de carga + error visual.
 //   - Al éxito: router.push('/staff') con refresh.
+//   - Con `sesionActual`: encabezado de SELECTOR DE PERFIL (S9-SEC-01) — "Continuar
+//     como X" (el caso diario, un tap) y "Cerrar sesión", arriba del teclado. Sin
+//     él la ruta redirigía apenas había sesión y el teclado quedaba inalcanzable:
+//     una computadora compartida no podía cambiar de perfil en 7 días.
 //
 // Scopeado por negocio (MT-02): recibe el business_slug resuelto por la ruta
 // /[slug]/staff y lo envía en el body, para que el PIN se valide dentro del
@@ -27,14 +31,26 @@ import { useRouter } from 'next/navigation';
 // PinForm sin negocio reabre el login sin scope (barbero al negocio equivocado).
 // Si un consumidor no tiene el negocio en scope, usar <BarbershopPrompt /> (pide el
 // slug y rutea acá), NO relajar este tipo. El error de tipo es la barrera funcionando.
+/** Quién está adentro AHORA en esta computadora, si hay alguien de este negocio. */
+export type SesionActual = {
+  nombre:  string;
+  rol:     string;
+  /** A dónde lo lleva "Continuar" — ya resuelto por rol en el server. */
+  destino: string;
+};
+
 export default function PinForm({
   businessSlug,
   businessName,
+  sesionActual = null,
 }: {
   businessSlug: string;
   businessName: string;
+  /** `null` = nadie de este negocio está adentro → teclado limpio, como siempre. */
+  sesionActual?: SesionActual | null;
 }) {
   const router = useRouter();
+  const [saliendo, setSaliendo] = useState(false);
   const [digits, setDigits] = useState<string[]>(['', '', '', '']);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -75,6 +91,23 @@ export default function PinForm({
       setLoading(false);
     }
   }, [loading, router, businessSlug]);
+
+  // ── Cerrar sesión ───────────────────────────────────────────────────────────
+  // Reusa /api/auth/logout, que limpia LOS DOS mecanismos (ls_session + sb-*).
+  // Después del refresh esta misma pantalla se re-renderiza sin `sesionActual`.
+
+  const salir = useCallback(async () => {
+    if (saliendo) return;
+    setSaliendo(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      router.refresh();
+    } catch {
+      setError('No se pudo cerrar la sesión. Intenta de nuevo.');
+    } finally {
+      setSaliendo(false);
+    }
+  }, [saliendo, router]);
 
   // ── Manejo de inputs ────────────────────────────────────────────────────────
 
@@ -155,8 +188,41 @@ export default function PinForm({
           </div>
           <h1 className="text-lg font-semibold text-gray-900">Acceso con PIN</h1>
           <p className="mt-1 text-sm font-medium text-gray-700">{businessName}</p>
-          <p className="mt-0.5 text-sm text-gray-500">Ingresa tu PIN de 4 digitos</p>
+          <p className="mt-0.5 text-sm text-gray-500">
+            {sesionActual ? 'Ingresa el PIN para entrar como otra persona' : 'Ingresa tu PIN de 4 digitos'}
+          </p>
         </div>
+
+        {/* Selector de perfil — solo si YA hay alguien de este negocio adentro.
+            El caso diario (soy yo, es mi compu) sale de acá con un tap; el cambio
+            de perfil se teclea abajo, sin pasos intermedios. */}
+        {sesionActual && (
+          <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs text-gray-500">Sesión abierta en esta computadora</p>
+            <p className="mt-0.5 truncate text-sm font-semibold text-gray-900">
+              {sesionActual.nombre}
+              <span className="ml-1.5 font-normal text-gray-500">· {etiquetaRol(sesionActual.rol)}</span>
+            </p>
+            {/* Apilados, no lado a lado: "Continuar como <Nombre>" se parte en dos
+                líneas dentro de una tarjeta de 320 px, y el botón que se usa todos
+                los días no puede ser el que se ve apretado. */}
+            <button
+              type="button"
+              onClick={() => { router.push(sesionActual.destino); router.refresh(); }}
+              className="mt-3 w-full rounded-lg bg-gray-900 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 active:scale-95"
+            >
+              Continuar como {primerNombre(sesionActual.nombre)}
+            </button>
+            <button
+              type="button"
+              onClick={() => void salir()}
+              disabled={saliendo}
+              className="mt-2 w-full rounded-lg px-3 py-1.5 text-sm font-medium text-gray-500 transition hover:text-gray-900 disabled:opacity-50"
+            >
+              {saliendo ? 'Saliendo...' : 'Cerrar sesión'}
+            </button>
+          </div>
+        )}
 
         {/* PIN inputs */}
         <div
@@ -208,4 +274,19 @@ export default function PinForm({
       </div>
     </main>
   );
+}
+
+// ─── Helpers de presentación ──────────────────────────────────────────────────
+
+function etiquetaRol(rol: string): string {
+  if (rol === 'barber') return 'Barbero';
+  if (rol === 'assistant') return 'Recepción';
+  if (rol === 'admin') return 'Administrador';
+  if (rol === 'owner') return 'Dueño';
+  return rol;
+}
+
+/** El botón dice un nombre, no una ficha: "Continuar como Carlos", no el completo. */
+function primerNombre(nombre: string): string {
+  return nombre.trim().split(/\s+/)[0] ?? nombre;
 }

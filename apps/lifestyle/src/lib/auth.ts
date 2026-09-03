@@ -13,10 +13,12 @@
 // Esto permite que el operador use su sesión de Supabase Auth sin problemas,
 // y que los usuarios de demo usen la cookie ls_session.
 
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createAuthClient } from '@/lib/supabase/server';
 import { verifySession, SESSION_COOKIE } from '@/lib/session';
+import { resolverSesionPin, type StaffVigente } from '@/lib/sessionGuard';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -46,19 +48,56 @@ function getServiceClient() {
   return createClient(url, key);
 }
 
+// ─── Vigencia de la persona (S9-SEC-01) ───────────────────────────────────────
+
+/**
+ * La fila de `staff` como está HOY, sin filtrar por `active`.
+ *
+ * El `active` NO va en el WHERE a propósito: filtrarlo acá colapsaría "está
+ * desactivada" contra "no existe", y son incidentes distintos. Quien decide es
+ * `resolverSesionPin` (puro y con tests); esta función solo trae el hecho.
+ */
+async function getStaffVigente(staffId: string): Promise<StaffVigente | null> {
+  const supabase = getServiceClient();
+  // eslint-disable-next-line no-restricted-syntax -- revalidación del propio actor por su id (que viene de la cookie firmada, no del cliente). El business_id de la fila es justamente lo que se va a COMPARAR contra el de la cookie: scopear por él acá haría la comparación tautológica y el cruce de negocios pasaría inadvertido.
+  const { data, error } = await supabase
+    .from('staff')
+    .select('id, business_id, role, name, active')
+    .eq('id', staffId)
+    .maybeSingle();
+
+  // Un fallo de lectura NO es "esta persona ya no puede": es "no sé". Se propaga
+  // para que el llamador no confunda un hipo de red con una revocación y deje a
+  // media barbería afuera. La regla dura del repo, del lado de la lectura.
+  if (error) throw new Error(`getStaffVigente failed: ${error.message}`);
+
+  return (data as StaffVigente | null) ?? null;
+}
+
 // ─── Función principal ────────────────────────────────────────────────────────
 
 /**
  * Retorna la sesión activa del usuario, o null si no hay sesión válida.
  *
  * Orden:
- *   1. ls_session cookie — firmada con HMAC-SHA256
+ *   1. ls_session cookie — firmada con HMAC-SHA256, REVALIDADA contra `staff`
  *   2. Supabase Auth session — verificada con getUser()
+ *
+ * 🔴 La cookie ya no basta (S9-SEC-01). Prueba quién dijo ser al entrar; quien
+ *    decide si todavía puede es la fila de `staff` de este instante. Sin eso,
+ *    desactivar a un barbero no lo sacaba: su cookie valía 7 días más.
+ *
+ * 🔴 Un rechazo CAE al camino 2 en vez de cortar. Es lo que hace que una compu
+ *    con una `ls_session` muerta y una sesión de dueño viva entre como dueño, en
+ *    vez de quedarse trabada con la identidad equivocada.
+ *
+ * Memoizada con `cache()`: la revalidación agrega UNA consulta por request, no
+ * una por llamador (un render llama a este helper varias veces vía los guards).
  *
  * Siempre se llama desde el servidor (Server Component, Route Handler,
  * Server Action). El service_role_key nunca sale al cliente.
  */
-export async function getCurrentSession(): Promise<CurrentSession | null> {
+export const getCurrentSession = cache(async (): Promise<CurrentSession | null> => {
   // ── 1. ls_session cookie ──────────────────────────────────────────────────
   const cookieStore = await cookies();
   const lsCookieValue = cookieStore.get(SESSION_COOKIE)?.value;
@@ -66,17 +105,33 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   if (lsCookieValue) {
     const payload = await verifySession(lsCookieValue);
     if (payload) {
-      // 'business' | 'staff' (el variant 'organization' fue retirado)
-      return {
-        type: 'business',
+      const staff = payload.staff_id ? await getStaffVigente(payload.staff_id) : null;
+      const veredicto = resolverSesionPin(payload, staff);
+
+      if (veredicto.ok) {
+        return {
+          type: 'business',
+          business_id: veredicto.businessId,
+          role: veredicto.role as AuthRole,
+          staff_id: veredicto.staffId,
+          // El nombre sale de la fila. Antes era `null` siempre y cada vista que
+          // lo necesitaba iba a buscarlo por su cuenta.
+          name: veredicto.name,
+          auth_type: 'token',
+        };
+      }
+
+      // Ruidoso, no mudo: una sesión que se cae sin dejar rastro es indistinguible
+      // de un bug de login. Sin PII — el staff_id ya es un identificador interno.
+      console.warn(JSON.stringify({
+        ts:          new Date().toISOString(),
+        service:     'auth',
+        event:       'ls_session_rechazada',
+        motivo:      veredicto.motivo,
         business_id: payload.business_id,
-        role: payload.role === 'barber' ? 'barber'
-            : payload.role === 'assistant' ? 'assistant'
-            : 'owner',
-        staff_id: payload.staff_id ?? null,
-        name: null,
-        auth_type: 'token',
-      };
+        staff_id:    payload.staff_id ?? null,
+      }));
+      // y sigue al camino 2 — no `return null`.
     }
   }
 
@@ -115,7 +170,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   } catch {
     return null;
   }
-}
+});
 
 /**
  * Resultado del guard `requireOwnerOrAdmin` para rutas API de administración.
@@ -219,3 +274,20 @@ export async function getBusinessTimezone(businessId: string): Promise<string> {
   return (data as { timezone: string } | null)?.timezone ?? 'America/Mexico_City';
 }
 
+
+/**
+ * Obtiene el slug del negocio a partir del business_id.
+ *
+ * Lo pide el enlace "cambiar de perfil" (S9-SEC-01): el selector vive en
+ * /[slug]/staff, y desde adentro de una vista solo se conoce el business_id.
+ */
+export async function getBusinessSlug(businessId: string): Promise<string | null> {
+  const supabase = getServiceClient();
+  const { data } = await supabase
+    .from('businesses')
+    .select('slug')
+    .eq('id', businessId)
+    .maybeSingle();
+
+  return (data as { slug: string } | null)?.slug ?? null;
+}
