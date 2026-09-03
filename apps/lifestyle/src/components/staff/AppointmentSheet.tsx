@@ -5,8 +5,8 @@
 // (tel:/wa.me, reemplaza la mensajería business-wide que sacamos en el Paso 1) y,
 // como fallback accesible al swipe, Terminó / No vino.
 //
-// Reusa los server actions existentes (mismo wiring que AssistantDayTimeline):
-// completeAppointment, noShowAppointment, cancelAppointment, rescheduleAppointment,
+// Reusa los server actions existentes, sin envoltorio propio: completeAppointment,
+// noShowAppointment, cancelAppointment, rescheduleAppointment y
 // updateAppointmentNotes. useTransition + error inline, como el resto de la vista.
 
 'use client';

@@ -2188,6 +2188,28 @@ digan la verdad.
   compilador dicta el alcance exacto de la fuente única y no queda ninguno por
   inspección visual.
 
+
+- **S9-RES-02 · `getStaffBlocksForDay` es una server action sin ningún llamador** ⚪ todo · **retirarla es cambio de comportamiento: necesita decisión de Gabriel**
+  Verificado en PR-D (2026-09-03): `git grep getStaffBlocksForDay` no devuelve una
+  sola invocación fuera de su propia definición en `app/staff/assistant-actions.ts`.
+  Su JSDoc decía que la llamaban `/staff/gestion` y `AvailabilityTimeline`; la
+  primera es un `redirect()` desde que el barbero se rediseñó y el segundo no
+  existe como archivo. La única superficie que necesita esos bloques es la mesa del
+  asistente, y los recibe ya hidratados por `dashboard/page.tsx`, que llama al core
+  `queryStaffBlocksForDay` directo.
+
+  **Por qué es residuo y no basura inocua:** es una **superficie autenticada
+  expuesta y sin uso**. Pasa por `requireAssistantSession()` —o sea que acepta
+  roles assistant / owner / admin / barber— y devuelve los bloques de TODOS los
+  barberos del negocio. No hay fuga de tenant (el scope sale de la sesión) ni
+  defecto conocido; lo que sobra es la puerta. Una action exportada es un endpoint
+  para Next, no una función privada.
+
+  **Lo que NO se decide acá:** el re-export de tipo `StaffBlockForDay` que vive en
+  el mismo bloque **sí tiene consumidor** (`AssistantControlDesk`) y se queda pase
+  lo que pase. Y retirar la action toca el `server-reference-manifest`, así que no
+  es una edición de comentario: entra como paso propio o se deja anotada.
+
 ---
 
 ## Rediseño visual del dueño (aprobado sobre maqueta, plan en docs/planes/dueno-v3.md)

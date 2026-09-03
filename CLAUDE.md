@@ -566,6 +566,13 @@ Componentes principales del panel. Todos en `apps/lifestyle/src/components/`.
 > sin que el archivo existiera. Si se agrega una fila acá, comprobar que el
 > componente existe: una descripción precisa de algo inexistente cuesta más que
 > una ausencia.
+>
+> **Convención `[fantasma intencional]`.** Un comentario de `src` puede nombrar a
+> propósito un componente borrado: para registrar una corrección ("esta nota decía
+> X y era falso") o como historia ("reemplaza a Y"). Esos casos llevan el tag
+> literal `[fantasma intencional]` en el mismo bloque de comentario, y el censo de
+> nombres huérfanos los descarta por ese tag en vez de volver a levantarlos cada
+> vez. Sin el tag, un nombre sin archivo es un defecto.
 
 ### Vista del admin (`admin/`)
 | Componente | Descripción |

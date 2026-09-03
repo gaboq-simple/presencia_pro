@@ -834,9 +834,11 @@ type RawBlockWithStaffRow = {
  * citas propias vía `.eq('staff_id')`. Incluye `arrived_at`, `price_charged`,
  * `adjusted_starts_at`, autoría, etc. — nunca trae citas de otros barberos.
  *
- * El shell del barbero (StaffLayout) usa este modelo para alimentar
- * AssistantDayTimeline con todas sus acciones inline (completar / no asistió /
- * reagendar / cancelar / notas), sin traer del negocio lo que no es suyo.
+ * El shell del barbero (StaffLayout) usa este modelo —vía `lib/barberDay.ts`,
+ * que le agrega la propina— para alimentar `AppointmentThread` con todas sus
+ * acciones inline (completar / no asistió / reagendar / cancelar / notas), sin
+ * traer del negocio lo que no es suyo. Antes decía `AssistantDayTimeline`, que
+ * `AppointmentThread` reemplazó en el Paso 4 y ya no existe. [fantasma intencional]
  *
  * @param businessId - UUID del negocio (de la sesión — nunca del cliente). Scopea vía helper.
  * @param staffId    - UUID del staff autenticado (del servidor — nunca del cliente)

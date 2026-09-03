@@ -92,7 +92,12 @@ async function assertBarberOwnsAppointment(
 
 /**
  * Recarga las citas del negocio para el día dado.
- * Llamado desde AssistantLayout para polling periódico y post-mutación.
+ *
+ * La llama `AssistantControlDesk`, y SOLO desde su poll de 20 s: la recarga
+ * post-mutación va por `router.refresh()` (el optimista ya pintó, y el revert
+ * vive en `mutateAppt`). Esta nota decía "desde AssistantLayout para polling
+ * periódico y post-mutación" — el componente ya no existe y la segunda mitad
+ * describía un camino que no es este. [fantasma intencional]
  */
 export async function refreshAssistantAppointments(
   date: string,
@@ -957,7 +962,7 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
 // (junto al core queryStaffBlocksForDay). Hoy lo importa desde aquí UN consumidor
 // —`AssistantControlDesk`— y por eso el re-export se queda. Esta nota listaba
 // tres: los otros dos (`AssistantLayout`, `AvailabilityTimeline`) ya no existen
-// como archivo.
+// como archivo. [fantasma intencional]
 export type { StaffBlockForDay } from '@/lib/dashboard.types';
 
 /**
@@ -971,7 +976,7 @@ export type { StaffBlockForDay } from '@/lib/dashboard.types';
  * que el barbero se rediseñó y el segundo ya no existe. La única superficie que
  * necesita estos bloques es la mesa del asistente, y los recibe ya hidratados por
  * `dashboard/page.tsx`, que llama al core directo. Se deja como está porque
- * retirarla es un cambio de comportamiento, no de comentario.
+ * retirarla es un cambio de comportamiento, no de comentario. [fantasma intencional]
  */
 export async function getStaffBlocksForDay(
   date: string,

@@ -44,7 +44,7 @@
 // `AppointmentThread` y `HeroCard` (sólo `isoToLocalMinutes`) — module-local y no
 // exportados en los cuatro. Extraerlos a un util compartido es de un paso
 // posterior. (Esta nota nombraba a `PanoramaTimeline` y a `AvailabilityTimeline`:
-// el primero no tiene estos helpers y el segundo ya no existe.)
+// el primero no tiene estos helpers y el segundo ya no existe.) [fantasma intencional]
 
 'use client';
 

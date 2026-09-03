@@ -3,6 +3,8 @@
 // en la vista del barbero y cierra la brecha visual con la mesa del asistente:
 // mismo lenguaje (border-left por estado, atenuar por TONO nunca por opacity, glow
 // al hover, banda del ahora que respira).
+// ([fantasma intencional] `AssistantDayTimeline` ya no existe; se lo nombra como
+//  historia, porque es la razón por la que este componente existe.)
 //
 //   · Cada cita = card con riel + punto a la izquierda y border-left del estado.
 //   · Pasado atenuado por tono (past-bg/past-ink/past-line), sin velo gris.

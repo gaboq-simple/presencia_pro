@@ -121,7 +121,6 @@ export default async function DashboardPage({
 
   // ── Vista asistente — mesa de control propia (S6-UI-02) ──────────────────
   // Diverge de owner/admin: monta AssistantControlDesk (diseño congelado).
-  // /staff/gestion del barbero sigue usando AssistantLayout intacto.
   if (session.role === 'assistant') {
     // Etapa 1 (paralela): config del negocio en 1 query fusionada + staff +
     // excepciones. Ninguna depende de otra.

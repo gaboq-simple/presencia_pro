@@ -1,5 +1,7 @@
 // ─── NewAppointmentForm ───────────────────────────────────────────────────────
-// Formulario rápido para crear citas desde la vista del asistente.
+// Formulario rápido para crear citas. Hoy lo monta `StaffLayout` —la vista del
+// BARBERO, pestaña Hoy— y ningún otro lugar; esta nota decía "desde la vista del
+// asistente", que dejó de ser cierto cuando el asistente pasó a su mesa propia.
 //
 // Flujo:
 //   1. Carga catálogo de servicios (GET /api/catalog?businessId=)
@@ -7,7 +9,7 @@
 //      servicio, barbero, hora.
 //   3. endsAt se calcula automáticamente: startsAt + duration_minutes.
 //   4. Submit → createAssistantAppointment (Server Action).
-//   5. onCreated() callback → AssistantLayout refresca las citas.
+//   5. onCreated() callback → el shell que lo montó refresca las citas.
 //
 // Diseño: modal tipo sheet fijo en la parte inferior (mobile-first).
 

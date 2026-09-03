@@ -1,10 +1,10 @@
 // ─── AssistantControlDesk ─────────────────────────────────────────────────────
 // Client Component — mesa de control de la Recepción/Asistente (S6-UI-02).
 //
-// Diverge de AssistantLayout: implementa el diseño congelado
-// (design-studies/asistente-FINAL.html) como una vista propia. Se monta SOLO en
-// la rama role==='assistant' de dashboard/page.tsx; /staff/gestion (barbero)
-// sigue usando AssistantLayout intacto.
+// Implementa el diseño congelado (design-studies/asistente-FINAL.html) como una
+// vista propia. Se monta SOLO en la rama role==='assistant' de dashboard/page.tsx.
+// El barbero tiene su propio shell, `StaffLayout` en /staff; /staff/gestion es hoy
+// un `redirect()` a esa ruta.
 //
 // Estructura de dos zonas (panorama con scroll propio + cola de acción fija) +
 // header con datos reales. Estado de las piezas:
