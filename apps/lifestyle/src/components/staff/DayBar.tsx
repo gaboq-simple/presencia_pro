@@ -46,7 +46,8 @@ function timeToMinutes(t: string): number {
   return (hh ?? 0) * 60 + (mm ?? 0);
 }
 
-/** ISO → minutos desde medianoche en el timezone dado (misma técnica que AvailabilityTimeline) */
+/** ISO → minutos desde medianoche en el timezone dado (misma técnica que
+ *  `AssistantVerticalCalendar`, `AppointmentThread` y `HeroCard`) */
 function isoToLocalMinutes(iso: string, timezone: string): number {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false,

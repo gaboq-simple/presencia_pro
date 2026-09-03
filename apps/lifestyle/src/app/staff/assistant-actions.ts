@@ -951,18 +951,27 @@ export async function rescheduleAppointment(input: RescheduleInput): Promise<{ e
   }
 }
 
-// ─── Staff blocks del día (para AvailabilityTimeline) ────────────────────────
+// ─── Staff blocks del día ────────────────────────────────────────────────────
 
 // Re-export para retrocompatibilidad: el tipo ahora vive en @/lib/dashboard.types
-// (junto al core queryStaffBlocksForDay). Los consumidores que lo importan desde
-// aquí (AssistantLayout, AssistantControlDesk, AvailabilityTimeline) no cambian.
+// (junto al core queryStaffBlocksForDay). Hoy lo importa desde aquí UN consumidor
+// —`AssistantControlDesk`— y por eso el re-export se queda. Esta nota listaba
+// tres: los otros dos (`AssistantLayout`, `AvailabilityTimeline`) ya no existen
+// como archivo.
 export type { StaffBlockForDay } from '@/lib/dashboard.types';
 
 /**
  * Server action: bloques aprobados de todos los barberos del negocio para el día.
  * Deriva staffIds/tz de la sesión (scope por negocio) y delega en el core puro
- * queryStaffBlocksForDay. Firma sin cambios — /staff/gestion y AvailabilityTimeline
- * la siguen llamando igual. Solo status='approved' — los pending no afectan.
+ * queryStaffBlocksForDay. Solo status='approved' — los pending no afectan.
+ *
+ * ⚠️ **Hoy no la llama nadie** (verificado 2026-09-03: `git grep` sin resultados
+ * fuera de esta definición). Esta nota decía que la seguían llamando igual
+ * `/staff/gestion` y `AvailabilityTimeline`; la primera es un `redirect()` desde
+ * que el barbero se rediseñó y el segundo ya no existe. La única superficie que
+ * necesita estos bloques es la mesa del asistente, y los recibe ya hidratados por
+ * `dashboard/page.tsx`, que llama al core directo. Se deja como está porque
+ * retirarla es un cambio de comportamiento, no de comentario.
  */
 export async function getStaffBlocksForDay(
   date: string,

@@ -40,8 +40,11 @@
 //   Reagendar (4B+), foco de barbero, descansos (break_start/end), retiro de
 //   PanoramaTimeline. Los callbacks de gesto (onPlace/reschedule) siguen inertes.
 //
-// NOTA: los helpers de tiempo son un espejo de PanoramaTimeline/AvailabilityTimeline
-// (module-local, no exportados). Extraerlos a un util compartido es de un paso posterior.
+// NOTA: los helpers de tiempo son un espejo de los de `DayBar` (los dos),
+// `AppointmentThread` y `HeroCard` (sólo `isoToLocalMinutes`) — module-local y no
+// exportados en los cuatro. Extraerlos a un util compartido es de un paso
+// posterior. (Esta nota nombraba a `PanoramaTimeline` y a `AvailabilityTimeline`:
+// el primero no tiene estos helpers y el segundo ya no existe.)
 
 'use client';
 
@@ -157,7 +160,7 @@ function stateFor(
   return 'conf';
 }
 
-// ─── Helpers de tiempo (espejo de PanoramaTimeline/AvailabilityTimeline) ──────
+// ─── Helpers de tiempo (espejo de DayBar / AppointmentThread / HeroCard) ──────
 
 /** 'HH:MM[:SS]' → minutos desde medianoche */
 function timeToMinutes(t: string): number {
