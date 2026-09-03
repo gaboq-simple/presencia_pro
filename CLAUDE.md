@@ -72,7 +72,7 @@ propaga. El caso testigo es el aviso de cancelación, que hoy inserta
 
 Schema del proyecto **presenciapro / apps/lifestyle**. Todas las tablas están en `public`, todas tienen RLS habilitado.
 
-**21 tablas.** Las que este documento detalla abajo son las del flujo principal; las de dinero, auditoría y compliance se resumen en «Tablas que este documento no detalla» al final de la sección. Si una columna no aparece acá, la fuente es la BD (o `apps/lifestyle/supabase/migrations/` + `supabase/migrations/`), no este archivo.
+**24 tablas** (verificado contra `information_schema.tables` el 2026-09-03; decía 21 y estaba vencido). Las que este documento detalla abajo son las del flujo principal; las de dinero, auditoría y compliance se resumen en «Tablas que este documento no detalla» al final de la sección. Si una columna no aparece acá, la fuente es la BD (o `apps/lifestyle/supabase/migrations/` + `supabase/migrations/`), no este archivo.
 
 ### Tabla: `businesses`
 Negocio raíz del tenant. Un registro = una barbería/salón.
@@ -144,6 +144,14 @@ Catálogo de servicios ofrecidos por el negocio.
 | price | numeric | CHECK >= 0 |
 | currency | text | default 'MXN' |
 | active | bool | default true |
+| created_at | timestamptz | default now() |
+| price_min, price_max | numeric nullable | Rango cuando el precio no es único (corte + barba, etc.). El bot los usa para responder "¿cuánto sale?" sin inventar un número exacto |
+| price_note | text nullable | Aclaración del precio en palabras ("desde", "según largo") |
+
+> **12 columnas, no 8.** Este documento listaba 8 y no mencionaba `price_min` /
+> `price_max` / `price_note`, que tienen 28 / 26 / 18 referencias en `src`
+> (verificado 2026-09-03). Un lector que documentara el catálogo desde acá habría
+> concluido que el precio de un servicio es siempre un escalar.
 
 ### Tabla: `staff_services` (junction)
 Qué servicios puede realizar cada barbero.
@@ -182,7 +190,7 @@ Citas agendadas (bot, manual, walk-in).
 | id | uuid PK | |
 | business_id | uuid FK → businesses.id | |
 | staff_id | uuid FK → staff.id | |
-| service_id | uuid FK → services.id | |
+| service_id | uuid **nullable** FK → services.id | **Es NULL-able**, y este documento no lo decía: por eso quince sitios que calculan el precio de una cita asumieron que el embed del servicio siempre llega. `DashboardAppointment.service` sigue declarado no-nullable e hidratado por cast, así que `tsc` tampoco avisa — ver SPRINT.md **S9-RES-01**. 0 filas con NULL hoy; eso es el seed, no el esquema |
 | customer_id | uuid nullable FK → customers.id | |
 | starts_at, ends_at | timestamptz | |
 | status | text | CHECK: pending / confirmed / completed / cancelled / no_show / walkin. **`walkin` es valor MUERTO**: está en el CHECK y ningún escritor lo produce (0 filas) — un walk-in se discrimina por `source`, nunca por `status` (S9-OPS-03) |
@@ -335,6 +343,9 @@ razón en los planes. Se listan acá para que nadie concluya que no existen.
 | `management_audit` | Quién cambió qué en la configuración (precios, horarios, staff). Alimenta la pestaña Actividad | SPRINT.md S6-SEC-01 |
 | `arco_requests` | Solicitudes ARCO del formulario público `/arco` (LFPDPPP Art. 22-25). Sin autenticación por diseño; rate limit 3/hora por teléfono | SPRINT.md S2-LEG-03 |
 | `organizations` | Residuo del flujo multi-sucursal retirado (PR #152). 0 filas, sin código que la lea | — |
+| `agente_tareas` | Dónde vive una propuesta del agente desde que nace hasta que se sabe si sirvió. El estado es un caché del último evento y un UPDATE directo no puede saltarse el evento (trigger + GUC). Sin UI y sin envíos todavía; 0 filas | `docs/planes/agente-fase-1.md` (A3) · SPRINT.md S9-AG-02 |
+| `agente_tarea_eventos` | La historia de esas transiciones, inmutable por trigger. Es la tabla autoritativa: `agente_tareas.estado` se deriva de acá. 0 filas | idem |
+| `cron_invocaciones` | Una fila por invocación de cron, escrita al ENCOLAR. Existe porque `net._http_response` retiene 6 h y su TTL no se puede cambiar en Supabase — es la única fuente para saber si un cron entregó de verdad, no `job_run_details`. ~20 k filas | `supabase/migrations/20260820000000_meta_aviso_cron.sql` · SPRINT.md S8-OPS-04 |
 
 ### Nota
 - **`organizations`**: **la tabla SÍ existe** (8 columnas) y `businesses.organization_id` también. Lo que se retiró (PR #152) es el *flujo*: el token compartido de organización, la vista consolidada y las 14 ramas de organización en las rutas. Con 0 filas, no rompió nada. El borrado de la tabla y de la columna quedó para una migración aparte, todavía pendiente.
@@ -507,7 +518,7 @@ Las de `assistant-actions.ts`. Requieren sesión válida vía `requireAssistantS
 | `noShowAppointment` | `(id) → void` | Marca status=no_show (idempotente) |
 | `createAssistantAppointment` | `(input: CreateAppointmentInput) → { id, warning? }` | Crea cita desde panel; lookup/create customer; retorna warning si is_flagged |
 | `rescheduleAppointment` | `(input: RescheduleInput) → void` | Reagenda + verifica conflictos + notifica cliente WA + nuevos reminders |
-| `getStaffBlocksForDay` | `(date) → StaffBlockForDay[]` | Bloqueos aprobados del día (para AvailabilityTimeline) |
+| `getStaffBlocksForDay` | `(date) → StaffBlockForDay[]` | Bloqueos aprobados del día (hoy los consume `AssistantVerticalCalendar`; el `AvailabilityTimeline` al que apuntaba esta nota ya no existe) |
 | `searchCustomers` | `(query) → CustomerSearchResult[]` | Busca por nombre/teléfono (ILIKE, max 5 resultados) |
 | `takeoverConversation` | `(customerPhone) → void` | Pone session_mode='human'; bloquea FSM para ese cliente |
 | `releaseConversation` | `(customerPhone) → void` | Devuelve session_mode='bot' (idempotente) |
@@ -541,13 +552,20 @@ Componentes principales del panel. Todos en `apps/lifestyle/src/components/`.
 ### Vista del asistente (`staff/`)
 | Componente | Descripción |
 |---|---|
-| `AssistantLayout.tsx` | **CÓDIGO MUERTO — ninguna ruta lo renderiza.** Fue la vista del asistente (hoy: `AssistantControlDesk`) y después la del barbero en `/staff/gestion`, pero esa ruta quedó como un `redirect()` a `/staff` cuando el barbero se rediseñó. Con él quedaron desconectados `DayTimeline` y `AppointmentCard`, sus únicos consumidores. Contiene: buscador de clientes, botón "+ Nueva cita", AvailabilityTimeline, AssistantUpcoming, AssistantDayTimeline. Polling cada 30s. Header con botón de chat (badge amarillo si hay convs. humanas). |
+| `AssistantControlDesk.tsx` | **La vista del asistente.** La monta `/dashboard` cuando el rol es `assistant` (diseño congelado). Dueño ÚNICO del estado del día: `useState<DashboardAppointment[]>` + `mutateAppt` con optimista y server action. Auto-refresh cada 20 s (`POLL_MS`), pausado durante un gesto. Monta `CajaMovimientos` y `CorteCard`. |
 | `ConversationList.tsx` | Bottom sheet con lista de bot_conversations activas. Orden: human→paused→bot. Polling cada 10s. Click → abre ChatPanel en overlay. |
 | `ChatPanel.tsx` | Panel de chat 85vh. Header con modo + "Tomar control"/"Devolver al bot". Burbujas: cliente=izquierda/gris, bot=derecha/oscuro, staff=derecha/azul. Polling cada 5s. Input deshabilitado si modo≠human. |
-| `AvailabilityTimeline.tsx` | Grid horizontal staff×hora. Línea "ahora" en rojo. Slots clickables. |
 | `NewAppointmentForm.tsx` | Bottom sheet para crear cita. Fetch catálogo vía GET /api/catalog. Server action `createAssistantAppointment`. |
-| `AssistantDayTimeline.tsx` | Lista del día con formularios inline de cancelar/notas/reagendar. |
 | `RecurringAvailability.tsx` | Server Component read-only. Muestra horario semanal del barbero + "Descanso: HH:MM–HH:MM" si existen breaks. |
+
+> **Los componentes de esta sección se verificaron uno por uno el 2026-09-03**
+> (`find apps/lifestyle/src -name '<X>.tsx'` por cada nombre citado). Se quitaron
+> **ocho fantasmas** — `AssistantLayout`, `DayTimeline`, `AppointmentCard`,
+> `AssistantUpcoming`, `AssistantDayTimeline`, `AvailabilityTimeline`,
+> `ConsolidatedView` y `BranchSelector` — que este archivo describía con detalle
+> sin que el archivo existiera. Si se agrega una fila acá, comprobar que el
+> componente existe: una descripción precisa de algo inexistente cuesta más que
+> una ausencia.
 
 ### Vista del admin (`admin/`)
 | Componente | Descripción |

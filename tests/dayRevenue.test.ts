@@ -54,7 +54,13 @@ test('cita sin servicio pero con precio sellado: vale su precio, no revienta', (
   assert.equal(r.completedCount, 1);
 });
 
-test('cita sin servicio y sin sello: aporta 0, no revienta', () => {
+// ⚠️ NO BORRAR SIN REEMPLAZO: es la ÚNICA aserción que sostiene el defecto
+// original de `dashboard.types.ts:567` (`a.service.price` sin `?.`). Con un sello
+// presente, el `??` corta ANTES de tocar `a.service.price`, así que la cita con
+// precio nunca reventaba: el crash sólo ocurre cuando faltan los dos. Verificado
+// por mutación — al quitar el guard del monto, de los siete tests de este archivo
+// falla éste y ningún otro. Si desaparece, el bug vuelve con la suite en verde.
+test('ÚNICO GUARDIÁN del defecto 567 — sin servicio y sin sello: aporta 0, no revienta', () => {
   const r = computeDayRevenue([cita(null, null)]);
   assert.equal(r.total, 0, 'sin ningún precio del que hablar, 0 es lo único honesto');
   assert.equal(r.completedCount, 1, 'la cita se cuenta igual: existió');
