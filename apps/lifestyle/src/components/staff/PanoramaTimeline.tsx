@@ -9,8 +9,8 @@
 // Motor portado del §6 del HANDOFF (maqueta congelada), pero idiomático React: las
 // posiciones se DERIVAN de winStart en cada render (no layout() imperativo).
 //
-// PR-3 — GESTO click-to-place: tocás una cita movible → se levanta → el panorama
-// ilumina SOLO los huecos donde CABE el servicio (validación por duración) → tocás
+// PR-3 — GESTO click-to-place: tocas una cita movible → se levanta → el panorama
+// ilumina SOLO los huecos donde CABE el servicio (validación por duración) → tocas
 // un chip de hora → `onMove` la reagenda (el desk llama a rescheduleAppointment).
 // NO drag. Cancelar: Esc, botón Cancelar, o tocar la cita levantada de nuevo.
 
@@ -190,7 +190,7 @@ export default function PanoramaTimeline({
   // Metadata reducida por carril + piso "ahora", en refs para el resolvedor del
   // drag (corre en handlers de pointer, fuera del render). El arrastre ya NO usa los
   // chips sugeridos: calcula la hora del cursor y la snapea a 15 min reales (ver
-  // resolveDragTarget) → suelta donde apuntás, no en el chip ralo más cercano.
+  // resolveDragTarget) → suelta donde apuntas, no en el chip ralo más cercano.
   const laneMetaRef = useRef<
     Map<string, { availFrom: number; availTo: number; unavail: Interval[]; appts: { id: string; start: number; dur: number; name: string }[] }>
   >(new Map());

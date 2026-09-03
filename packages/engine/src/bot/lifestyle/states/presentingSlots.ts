@@ -327,7 +327,7 @@ export async function handleShowingSlots(
 
   // ── Un solo horario único (autoAssign) → CONFIRMING (propuesta negociable, R3)
   // Antes saltaba directo a AWAITING_BOOKING_NAME, auto-confirmando el slot y
-  // cerrando la puerta a "preferís otra hora". Ahora se PROPONE el slot —
+  // cerrando la puerta a "prefiero otra hora". Ahora se PROPONE el slot —
   // manteniéndolo en pendingSlots — y se va a CONFIRMING_APPOINTMENT:
   //   - "sí" cae en el handler P1 (confirmingAppointment.ts: pendingSlots.length===1
   //     && isAffirmation) y avanza a nombre en UN paso (sin fricción extra).

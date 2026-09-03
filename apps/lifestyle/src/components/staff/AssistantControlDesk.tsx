@@ -1113,7 +1113,7 @@ export default function AssistantControlDesk({
               </p>
             ) : (
               <p className="mt-0.5 text-xs text-faint">
-                Captura lo mínimo; después tocás el hueco donde encaja.
+                Captura lo mínimo; después tocas el hueco donde encaja.
               </p>
             )}
             <div className="mt-4 flex flex-col gap-3">

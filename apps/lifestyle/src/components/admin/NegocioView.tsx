@@ -143,7 +143,7 @@ function OcupacionBlock({ occ }: { occ: OccupancyResult }): React.ReactElement |
       {capMode && pct !== null ? (
         <p className="mt-2 text-sm text-ink-2">
           <span className="text-2xl font-bold tabular-nums text-ink">{pct}%</span> de tus sillas ocupadas.
-          El otro {100 - pct}% son huecos que igual pagás — ahí está tu espacio para crecer.
+          El otro {100 - pct}% son huecos que igual pagas — ahí está tu espacio para crecer.
         </p>
       ) : (
         <p className="mt-2 text-sm text-faint">
@@ -162,7 +162,7 @@ function OcupacionBlock({ occ }: { occ: OccupancyResult }): React.ReactElement |
           </p>
           {occ.potentialMonthly !== null && occ.potentialMonthly > 0 && (
             <p className="mt-1 text-xs text-faint">
-              Potencial estimado: hasta ~{money(occ.potentialMonthly)}/mes si trabajás esas franjas. No es un resultado garantizado.
+              Potencial estimado: hasta ~{money(occ.potentialMonthly)}/mes si trabajas esas franjas. No es un resultado garantizado.
             </p>
           )}
           <button

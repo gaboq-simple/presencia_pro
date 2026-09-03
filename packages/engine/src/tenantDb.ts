@@ -1,6 +1,6 @@
 // ─── tenantDb — guard de aislamiento multi-tenant (blindaje por código) ───────
 //
-// Contrato: una vez que atás un cliente a un businessId (SERVER-derivado — de la
+// Contrato: una vez que atas un cliente a un businessId (SERVER-derivado — de la
 // sesión en rutas, o de la resolución por whatsapp_phone_number_id en el bot),
 // TODA query a una tabla de tenant queda scopeada por business_id sin que el caller
 // pueda olvidarlo. Reemplaza el patrón frágil `getServiceClient().from(t).eq('business_id', …)`

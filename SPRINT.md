@@ -2210,6 +2210,30 @@ digan la verdad.
   lo que pase. Y retirar la action toca el `server-reference-manifest`, así que no
   es una edición de comentario: entra como paso propio o se deja anotada.
 
+
+- **S9-RES-03 · `NewAppointmentForm` lo monta solo el BARBERO, y se escribió para el asistente** ⚪ todo · **toca la vista de uso diario: no es higiene, necesita mirada de producto**
+  Verificado en PR-C (2026-09-03). El componente se presentaba como "formulario
+  rápido para crear citas desde la vista del asistente" y su paso 5 decía que
+  `onCreated()` refrescaba vía `AssistantLayout`. Hoy su ÚNICO montaje es
+  `StaffLayout.tsx:499` —la pestaña Hoy del barbero—; el comentario se corrigió en
+  PR-E, pero el hecho que revela quedó sin resolver.
+
+  **Lo que sí tiene la mesa del asistente:** crea citas por
+  `createAssistantAppointment` (`AssistantControlDesk.tsx:623`), pero por el camino
+  de **walk-in** —tap en el hueco, `source='walkin'`—, no por el formulario
+  completo. O sea que el asistente puede parar a alguien que llegó, y no está
+  claro que pueda dar de alta una cita **por teléfono para otro día**, que es el
+  canal que `NewAppointmentForm` ofrece (`source='llamada'`).
+
+  **Las dos lecturas, y por eso no se decide acá:** puede ser deliberado —la mesa
+  es "diseño congelado" (S6-UI-02) y quizá el alta por teléfono se movió a otro
+  gesto— o puede ser una pérdida del rediseño que nadie notó porque el formulario
+  siguió existiendo, montado por otra vista. Resolverlo pide abrir la mesa con
+  sesión de asistente y buscar el gesto, no leer código.
+
+  **Por qué importa:** si es una pérdida, el asistente de un negocio real no puede
+  agendar la llamada que entra, que es su trabajo principal.
+
 ---
 
 ## Rediseño visual del dueño (aprobado sobre maqueta, plan en docs/planes/dueno-v3.md)
