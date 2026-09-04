@@ -30,6 +30,7 @@ import {
   noShowAppointment,
   completeAppointment,
   cancelAppointment,
+  registrarRetraso,
   confirmAppointment,
   markArrived,
   getActiveConversations,
@@ -868,6 +869,29 @@ export default function AssistantControlDesk({
     mutateAppt(id, (a) => ({ ...a, arrived_at: new Date().toISOString() }), markArrived,
       (a) => `${a.customer?.name ?? 'Cliente'} — llegada registrada`);
 
+  // "Avisó que viene" (S9-OPS-10) — le corre la hora efectiva a la cita, con lo
+  // cual sale sola de la cola de atrasados (su filtro mira `adjusted_starts_at`).
+  // No usa `mutateAppt` porque el optimista tendría que calcular la hora nueva, y
+  // quien la calcula es el RPC —única autoridad del retraso, que además puede
+  // decir que NO se puede. Adivinarla acá sería pintar algo que quizá no ocurre.
+  const handleAviso = async (id: string, minutos: number) => {
+    mutatingRef.current = true;
+    try {
+      const res = await registrarRetraso(id, minutos);
+      if (res?.error) { setToast({ msg: res.error, kind: 'err' }); return; }
+      const appt = appointments.find((a) => a.id === id);
+      setToast({
+        msg: `${appt?.customer?.name ?? 'Cliente'} — ${minutos} min de retraso registrados`,
+        kind: 'ok',
+      });
+      router.refresh();
+    } catch {
+      setToast({ msg: 'No se pudo registrar el retraso', kind: 'err' });
+    } finally {
+      mutatingRef.current = false;
+    }
+  };
+
   const handleCancelAppt = (id: string, reason: string) =>
     mutateAppt(id, (a) => ({ ...a, status: 'cancelled' }), (i) => cancelAppointment(i, reason),
       (a) => `Cita de ${a.customer?.name ?? 'cliente'} cancelada`);
@@ -1090,7 +1114,9 @@ export default function AssistantControlDesk({
               nextUp={nextUp}
               onMove={handleMoveFromQueue}
               onNoShow={handleNoShow}
+              onAviso={(id, min) => void handleAviso(id, min)}
               onHover={setHighlightId}
+              maxLateMinutes={maxLateMinutes}
             />
           </div>
         </div>

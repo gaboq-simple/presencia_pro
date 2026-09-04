@@ -41,6 +41,10 @@ const GATES: Record<string, 'asistente' | 'dueño'> = {
   noShowAppointment:            'asistente',
   confirmAppointment:           'asistente',
   markArrived:                  'asistente',
+  // Registrar "avisó que llega tarde" es operación del día, no configuración: lo
+  // atiende quien toma la llamada. Un barbero solo puede hacerlo sobre SUS citas
+  // (`assertBarberOwnsAppointment`), igual que el resto de sus mutaciones.
+  registrarRetraso:             'asistente',
   createAssistantAppointment:   'asistente',
   rescheduleAppointment:        'asistente',
   getStaffBlocksForDay:         'asistente',

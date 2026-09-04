@@ -1339,6 +1339,78 @@ export async function sendMessageFromPanel(
 
 // ─── Gestión de horario semanal ───────────────────────────────────────────────
 
+// ─── Registrar que el cliente avisó que llega tarde (S9-OPS-10) ──────────────
+
+/**
+ * "Voy diez minutos tarde" deja de ser un mensaje que nadie puede anotar.
+ *
+ * Hasta acá las tres columnas del retraso (`adjusted_starts_at`,
+ * `delay_reported_minutes`, `late_arrival_acknowledged`) se LEÍAN en tres lugares
+ * del mostrador y las escribía **solo el bot**. Sin bot —o con el cliente
+ * llamando por teléfono, que es el caso normal— avisar **empeoraba** la
+ * situación: a los `auto_cancel_after_minutes` el cron lo marcaba ausente igual,
+ * le sumaba un no-show y lo acercaba a `is_flagged`. La persona hizo lo correcto
+ * y el sistema la castigó por eso.
+ *
+ * No reimplementa nada: llama al MISMO RPC que el bot
+ * (`check_late_arrival_feasibility`), que es la autoridad — valida contra
+ * `businesses.max_late_minutes`, comprueba el traslape con la cita siguiente y
+ * aplica las tres columnas en la misma transacción. La única diferencia es el
+ * tercer parámetro: con el `staff_id` de quien atendió el aviso, el audit firma
+ * `staff` y no `bot`.
+ *
+ * Cuando NO es factible devuelve el motivo del RPC tal cual, sin adornarlo: "el
+ * retraso excede el máximo" y "se traslaparía con la siguiente" son cosas
+ * distintas y la recepción decide distinto con cada una.
+ */
+export async function registrarRetraso(
+  appointmentId: string,
+  minutos: number,
+): Promise<{ error?: string; nuevaHora?: string }> {
+  const session = await requireAssistantSession();
+  const supabase = getServiceClient();
+
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
+
+  if (!Number.isInteger(minutos) || minutos <= 0) {
+    return { error: 'Los minutos de retraso tienen que ser un número mayor a cero' };
+  }
+
+  // Pertenencia al negocio ANTES del RPC: la función es SECURITY DEFINER y busca
+  // la cita por id sin filtrar por negocio (no puede — el business_id lo saca de
+  // la propia fila). El scope lo pone este llamador, como en el resto del módulo.
+  const { data: suya } = await tenantDb(supabase, session.business_id)
+    .table('appointments')
+    .select('id')
+    .eq('id', appointmentId)
+    .maybeSingle();
+  if (!suya) return { error: 'Cita no encontrada' };
+
+  const { data, error } = await supabase.rpc('check_late_arrival_feasibility', {
+    p_appointment_id: appointmentId,
+    p_delay_minutes:  minutos,
+    p_actor_staff_id: session.staff_id,
+  });
+
+  if (error) throw new Error(`registrarRetraso failed: ${error.message}`);
+
+  const r = (Array.isArray(data) ? data[0] : data) as {
+    feasible:       boolean;
+    reason:         string;
+    adjusted_start: string | null;
+  } | undefined;
+
+  if (!r) return { error: 'No se pudo registrar el retraso' };
+  // El motivo del RPC va tal cual: es el que distingue "excede el máximo" de
+  // "se traslapa", y con cada uno la recepción hace algo distinto.
+  if (!r.feasible) return { error: r.reason };
+
+  // Sin revalidatePath: ninguna action de este módulo lo usa. La mesa pinta
+  // optimista y recarga con router.refresh() — ver `mutateAppt`.
+  return { nuevaHora: r.adjusted_start ?? undefined };
+}
+
 // ─── Gestión de horarios: BORRADA (S9-SEC-02) ────────────────────────────────
 // Acá vivía `updateStaffSchedule(staffId, slots[])`: reemplazaba el horario semanal
 // de CUALQUIER barbero del negocio, colgada de `requireAssistantSession` —que no

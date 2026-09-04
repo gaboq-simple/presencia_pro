@@ -10,6 +10,12 @@
 //   · "Mover" NO reimplementa el reacomodo — entra al MISMO gesto click-to-place del
 //     panorama (onMove → el desk levanta la cita allá). La sugerencia es un HINT.
 //   · "Marcar no llegó" libera el hueco (onNoShow → noShowAppointment).
+//   · "Avisó que viene" registra el retraso (onAviso → registrarRetraso). Es la
+//     TERCERA jugada, y la que faltaba: sin ella, un cliente que llama para avisar
+//     no tenía dónde ser anotado y el cron lo marcaba ausente igual — o sea que
+//     avisar empeoraba su situación (S9-OPS-10). Los minutos se eligen de chips
+//     acotados por `max_late_minutes`, que es la tolerancia que el negocio declaró:
+//     ofrecer más sería ofrecer algo que el RPC va a rechazar.
 //   · Hover en la tarjeta resalta la cita en el panorama (onHover → conexión viva).
 //
 // Presentacional: el desk calcula atrasados/sugerencias/próxima-cita (fuente única
@@ -20,6 +26,7 @@
 
 'use client';
 
+import { useState } from 'react';
 import { fmtMin } from './panoramaEngine';
 
 // ─── Tipos (calculados por el desk) ────────────────────────────────────────────
@@ -48,6 +55,9 @@ type ActionQueueProps = {
   nextUp: NextUpItem | null;      // próxima cita (estado tranquilo)
   onMove: (apptId: string) => void;   // → entra al gesto click-to-place
   onNoShow: (apptId: string) => void; // → marca no_show (libera el hueco)
+  onAviso: (apptId: string, minutos: number) => void; // → registra el retraso
+  /** Tolerancia declarada por el negocio (`businesses.max_late_minutes`). */
+  maxLateMinutes: number;
   onHover: (apptId: string | null) => void; // conexión viva cola↔panorama
 };
 
@@ -63,7 +73,15 @@ function initials(name: string): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onHover }: ActionQueueProps) {
+export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onAviso, onHover, maxLateMinutes }: ActionQueueProps) {
+  // Qué tarjeta tiene abierta la fila de minutos. Una sola a la vez: son
+  // decisiones de un cliente concreto, no un modo.
+  const [avisando, setAvisando] = useState<string | null>(null);
+
+  // Chips acotados a la tolerancia del negocio. Con el default de 15 quedan
+  // 5/10/15; si el negocio declara 30, quedan 5/10/15/20/30. Nunca se ofrece un
+  // número que el RPC vaya a rechazar por política.
+  const opcionesMinutos = [5, 10, 15, 20, 30].filter((m) => m <= maxLateMinutes);
   const count = lateItems.length;
 
   return (
@@ -151,7 +169,7 @@ export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onHov
               {/* Por qué */}
               <p className="px-3 pb-2.5 text-[11.5px] leading-snug text-ink-2">
                 <b className="font-semibold text-ink">Aún no llega.</b> Su lugar sigue apartado.
-                Recórrelo con otro barbero o libera el hueco.
+                Si avisó, córrele la hora; si no, recórrelo con otro barbero o libera el hueco.
               </p>
 
               {/* Jugada sugerida (hint del primer hueco) */}
@@ -173,7 +191,9 @@ export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onHov
                 </div>
               </div>
 
-              {/* Acciones — "Mover" entra al gesto; "No llegó" libera */}
+              {/* Acciones — "Mover" entra al gesto; "No llegó" libera; "Avisó
+                  que viene" le corre la hora y lo saca de esta cola sola (el
+                  filtro de atrasados mira `adjusted_starts_at`). */}
               <div className="flex gap-2 px-2.5 pb-2.5">
                 <button
                   onClick={() => onMove(item.apptId)}
@@ -188,6 +208,40 @@ export default function ActionQueue({ lateItems, nextUp, onMove, onNoShow, onHov
                   Marcar no llegó
                 </button>
               </div>
+
+              {opcionesMinutos.length > 0 && (
+                <div className="px-2.5 pb-2.5">
+                  {avisando === item.apptId ? (
+                    <div className="rounded-card border border-amber-border bg-amber-tint px-2.5 py-2">
+                      <p className="text-[11px] font-semibold text-amber">¿Cuánto se retrasa?</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {opcionesMinutos.map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => { setAvisando(null); onAviso(item.apptId, m); }}
+                            className="rounded-pill border border-amber-border bg-card px-2.5 py-1 text-[12px] font-semibold tabular-nums text-amber transition hover:bg-amber-tint"
+                          >
+                            {m} min
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setAvisando(null)}
+                          className="rounded-pill px-2 py-1 text-[12px] font-medium text-ink-2 transition hover:text-ink"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAvisando(item.apptId)}
+                      className="w-full rounded-pill px-3 py-1 text-center text-[12.5px] font-medium text-ink-2 transition hover:text-ink"
+                    >
+                      Avisó que viene
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
