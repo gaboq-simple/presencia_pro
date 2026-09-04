@@ -202,3 +202,53 @@ export function describeMovimiento(m: MovimientoDescribible): string {
   return `registró una ${m.type === 'salida' ? 'salida' : 'entrada'} de ` +
     `${fmtMonto(m.amount)} · ${etiquetaConcepto(m.concept).toLowerCase()} · ${m.method}`;
 }
+
+// ─── El fondo de caja (S9-DIN-01) ─────────────────────────────────────────────
+// El cambio con el que abre el cajón. No es una venta ni un movimiento: es el
+// piso contra el que se cuenta, y por eso vive en `businesses` y no en
+// `caja_movimientos`.
+//
+// Tuvo DOS LECTORES Y CERO ESCRITORES desde que existe la capa de dinero: se
+// leía en `corteData.ts` y solo se podía cambiar por SQL a mano. Con el default
+// 0 —y con la card del corte pidiendo contar TODO lo que hay en el cajón, fondo
+// incluido— el efectivo contado salía por encima del esperado todos los días: un
+// descuadre positivo del tamaño exacto del fondo. No era una fuga ni un hallazgo,
+// era un offset; y un descuadre que siempre miente en la misma dirección enseña a
+// ignorar el que sí importa.
+
+/** Techo de cordura. Un fondo es cambio para el día, no la caja fuerte. */
+export const MAX_FONDO = 99_999.99;
+
+export type FondoError = { error: string };
+
+export function esFondoError(r: number | FondoError): r is FondoError {
+  return typeof r === 'object' && r !== null && 'error' in r;
+}
+
+/**
+ * Resuelve lo que una persona tecleó como fondo de caja.
+ *
+ * Devuelve `{ error }` en vez de `throw`, como `resolveCobro` y
+ * `resolveMovimiento`: son cosas que la persona puede corregir sola, y Next
+ * redacta los `throw` en producción.
+ *
+ * Vacío es CERO explícito, no un error: "hoy abro sin cambio" es una respuesta
+ * legítima y frecuente. Lo que no se acepta es un texto que no es un número —
+ * ahí no se adivina un cero, porque un cero inventado vuelve a torcer el corte
+ * en silencio, que es justo el defecto que este módulo viene a cerrar.
+ */
+export function resolveFondo(input: number | string | null | undefined): number | FondoError {
+  if (input === null || input === undefined) return 0;
+
+  const crudo = typeof input === 'string' ? input.trim() : input;
+  if (crudo === '') return 0;
+
+  const n = typeof crudo === 'number' ? crudo : Number(crudo.replace(/[$,\s]/g, ''));
+
+  if (!Number.isFinite(n)) return { error: 'El fondo tiene que ser un número' };
+  if (n < 0) return { error: 'El fondo no puede ser negativo' };
+  if (n > MAX_FONDO) return { error: `El fondo es demasiado grande (máximo ${fmtMonto(MAX_FONDO)})` };
+
+  // Centavos exactos: la columna es numeric(10,2) y el float acumula ruido.
+  return Math.round(n * 100) / 100;
+}

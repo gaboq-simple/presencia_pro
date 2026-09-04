@@ -1,13 +1,15 @@
 // ─── GET|PATCH /api/business/config ──────────────────────────────────────────
 // Gestiona la configuración del negocio (reportes + reseñas).
 //
-// GET  → retorna { report_enabled, report_whatsapp, review_requests_enabled, review_url }
+// GET  → retorna { report_enabled, report_whatsapp, review_requests_enabled, review_url,
+//                  caja_fondo }
 //
 // PATCH body:
 //   report_enabled?:          boolean
 //   report_whatsapp?:         string (10–13 dígitos)
 //   review_requests_enabled?: boolean
 //   review_url?:              string (URL válida) | null
+//   caja_fondo?:              number >= 0 (el fondo de caja — S9-DIN-01)
 //   → Si review_requests_enabled=true y no hay review_url → 422
 //
 // Auth: requiere sesión de owner o admin del negocio (token o Supabase Auth).
@@ -18,6 +20,7 @@ import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { requireOwnerOrAdmin } from '@/lib/auth';
 import { logManagementAudit } from '@/lib/managementAudit';
+import { MAX_FONDO } from '@/lib/caja';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -35,13 +38,22 @@ const PatchBodySchema = z
       .url('review_url debe ser una URL válida')
       .optional()
       .nullable(),
+    // El fondo llega YA resuelto por `resolveFondo` (el cliente valida y muestra
+    // el mensaje); acá se revalida el contrato mínimo, porque una ruta no confía
+    // en su llamador aunque sea propio.
+    caja_fondo: z
+      .number()
+      .min(0, 'El fondo no puede ser negativo')
+      .max(MAX_FONDO, 'El fondo es demasiado grande')
+      .optional(),
   })
   .refine(
     (data) =>
       data.report_enabled          !== undefined ||
       data.report_whatsapp         !== undefined ||
       data.review_requests_enabled !== undefined ||
-      data.review_url              !== undefined,
+      data.review_url              !== undefined ||
+      data.caja_fondo              !== undefined,
     { message: 'Se requiere al menos un campo a actualizar' },
   );
 
@@ -66,7 +78,7 @@ export async function GET(): Promise<NextResponse> {
     const supabase = getServiceClient();
     const { data, error } = await supabase
       .from('businesses')
-      .select('report_enabled, report_whatsapp, review_requests_enabled, review_url')
+      .select('report_enabled, report_whatsapp, review_requests_enabled, review_url, caja_fondo')
       .eq('id', auth.businessId)
       .maybeSingle();
 
@@ -104,13 +116,14 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     );
   }
 
-  const updates: Record<string, boolean | string | null> = {};
+  const updates: Record<string, boolean | string | number | null> = {};
   if (parsed.data.report_enabled          !== undefined) updates['report_enabled']          = parsed.data.report_enabled;
   if (parsed.data.report_whatsapp         !== undefined) updates['report_whatsapp']         = parsed.data.report_whatsapp;
   if (parsed.data.review_requests_enabled !== undefined) updates['review_requests_enabled'] = parsed.data.review_requests_enabled;
   if (parsed.data.review_url              !== undefined) updates['review_url']              = parsed.data.review_url;
+  if (parsed.data.caja_fondo              !== undefined) updates['caja_fondo']              = parsed.data.caja_fondo;
 
-  const CONFIG_FIELDS = 'report_enabled, report_whatsapp, review_requests_enabled, review_url';
+  const CONFIG_FIELDS = 'report_enabled, report_whatsapp, review_requests_enabled, review_url, caja_fondo';
 
   try {
     const supabase = getServiceClient();

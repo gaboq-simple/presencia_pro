@@ -31,6 +31,7 @@ import type {
 } from '@/lib/dashboard.types';
 import BlockRequestsInbox from './BlockRequestsInbox';
 import CorteResumen, { type CorteParaDueno } from './CorteResumen';
+import FondoDeCaja from './FondoDeCaja';
 import StaffPhotoManager from './StaffPhotoManager';
 import StaffManagementPanel from './StaffManagementPanel';
 import ServicesManagementPanel from './ServicesManagementPanel';
@@ -131,6 +132,13 @@ export default function DashboardLayout({
           serie de la semana. Solo lectura: el dueño no cuenta el cajón. */}
       <div className="mt-5">
         <CorteResumen cortes={cortes} hoy={hoyLocal} />
+      </div>
+
+      {/* El fondo (S9-DIN-01) va PEGADO al cuadre y no en el bloque de
+          configuración: es el piso contra el que se cuenta el cajón, así que sin
+          él el descuadre de arriba no quiere decir nada. */}
+      <div className="mt-3">
+        <FondoDeCaja />
       </div>
 
       {/* Bandeja de solicitudes de bloqueo — cola de acciones, no configuración */}
