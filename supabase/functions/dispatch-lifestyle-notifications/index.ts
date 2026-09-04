@@ -1,27 +1,34 @@
 // ─── dispatch-lifestyle-notifications ────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 🔴 PENDIENTE AL DESPLEGARLA (S8-PER-01 · P3 + S7-NOTIF-01)
+// 🔒 GUARD DE BAJA Y CONSENTIMIENTO (S8-PER-01 · P3 → cerrado en S7-NOTIF-01)
 //
 // Esta función tiene su PROPIA copia de `sendWhatsAppMeta` (Deno no comparte el
-// paquete del engine), así que el guard de la baja que P3 puso en el engine NO
-// la cubre. Hoy no hay daño: la función **nunca se desplegó** y la cola está
-// vacía. Pero el día que S7-NOTIF-01 la despliegue, dos de los nueve tipos que
-// despacha son PROACTIVOS y tienen que respetar `customers.opted_out_at`:
+// paquete del engine), así que el guard que P3 puso en el engine NO la cubre.
+// Mientras no estuvo desplegada eso no hacía daño; para desplegarla, sí.
 //
+// De los nueve tipos que despacha, DOS son proactivos y respetan la baja:
 //   · `review_request` — pedir una reseña es marketing.
 //   · `reactivation`   — idem, y es el caso central del plan.
 //
 // Los otros siete (los tres recordatorios, follow_up, waitlist_expiry,
 // reschedule_notice y cancellation_notice) son `appointment_utility`: NO se
 // suprimen, porque son de una cita que el propio cliente agendó y no dárselos es
-// peor servicio, no más privacidad (regla de niveles, docs/planes/permiso.md).
+// peor servicio, no más privacidad (docs/planes/permiso.md).
 //
-// La forma de hacerlo, para que no haya que re-decidirla: filtrar el SELECT de
-// la cola con un join a `customers` —`opted_out_at IS NULL`— solo para esos dos
-// tipos, y marcar `failed_at` con razón, nunca `sent_at`: registrar como enviado
-// algo que se suprimió le miente al historial que un día tiene que probar que NO
-// se le escribió.
+// 🔴 UNA CORRECCIÓN A LA NOTA QUE ESTE BLOQUE REEMPLAZA. Decía "filtrar el SELECT
+// de la cola con un join a `customers`". No se hizo así, y la razón importa: una
+// fila filtrada en el SELECT **no se resuelve nunca** — vuelve a salir en la
+// consulta del minuto siguiente, para siempre, porque nadie le escribe `sent_at`
+// ni `failed_at`. La cola se llenaría de inmortales. Se traen todas y la
+// supresión se RESUELVE: `failed_at` + el motivo en `metadata`, nunca `sent_at`
+// (registrar como enviado algo que se suprimió le miente al historial que un día
+// tiene que probar que NO se le escribió). La segunda mitad de esa nota —"marcar
+// `failed_at` con razón"— es justamente lo que se hace, y solo tiene sentido si
+// la fila se trae.
+//
+// La regla vive en `supresion.ts`, puro y sin imports, y la suite de node la
+// importa por ruta relativa: lo que se prueba es exactamente lo que se despliega.
 // ═══════════════════════════════════════════════════════════════════════════════
 // Edge Function (Deno). Despacha recordatorios pendientes de la tabla
 // scheduled_notifications de lifestyle.
@@ -68,6 +75,7 @@
 //   WHATSAPP_ACCESS_TOKEN     — System User Token de Meta Business Account
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { decidirEnvio, esProactivo } from './supresion.ts';
 
 // ─── Env ──────────────────────────────────────────────────────────────────────
 
@@ -516,6 +524,9 @@ Deno.serve(async (_req) => {
     total:     0,
     sent:      0,
     failed:    0,
+    // Una supresión NO es un fallo: un fallo se reintenta, una supresión se
+    // respeta. Contarlas juntas dispararía [CRON-ALERT] por comportarse bien.
+    suppressed: 0,
     skipped:   0,
     errors:    [] as string[],
   };
@@ -535,6 +546,48 @@ Deno.serve(async (_req) => {
     if (!claimed || claimed.length === 0) {
       summary.skipped++;
       continue;
+    }
+
+    // ── Guard de baja y consentimiento ──────────────────────────────────────
+    // Va DESPUÉS del claim (la fila ya es de esta corrida, así que nadie más la
+    // toca) y ANTES de cualquier envío. Solo consulta para los tipos proactivos:
+    // los siete de utilidad no pagan una query que no cambia nada.
+    if (esProactivo(row.type)) {
+      let fila = null;
+      let huboError = false;
+      try {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('opted_out_at, consent_at, consented_via')
+          .eq('business_id', row.business_id)
+          .eq('phone', row.customer_phone)
+          .maybeSingle();
+        if (error) huboError = true;
+        else fila = data;
+      } catch {
+        huboError = true;
+      }
+
+      const veredicto = decidirEnvio(row.type, fila, huboError);
+      if (!veredicto.enviar) {
+        // `failed_at` y NUNCA `sent_at`: el historial tiene que poder probar que
+        // a esta persona NO se le escribió. El motivo viaja en metadata para que
+        // "se dio de baja" y "no se pudo comprobar" no se lean igual después.
+        await supabase
+          .from('scheduled_notifications')
+          .update({
+            sent_at:   null,
+            failed_at: new Date().toISOString(),
+            metadata:  { ...(row.metadata ?? {}), suppressed_reason: veredicto.motivo },
+          })
+          .eq('id', row.id);
+
+        summary.suppressed++;
+        console.log('[dispatch-lifestyle-notifications] suprimida', {
+          id: row.id, type: row.type, motivo: veredicto.motivo,
+        });
+        continue;
+      }
     }
 
     // ── waitlist_expiry — logica de expiracion y re-notificacion ─────────

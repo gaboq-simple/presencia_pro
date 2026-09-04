@@ -74,7 +74,10 @@ SELECT cron.schedule(
   $$ SELECT public.invoke_edge('dispatch-auto-cancel'); $$
 );
 
--- ⚠️ `dispatch-lifestyle-notifications` NO se agenda todavía, a propósito.
+-- ⚠️ `dispatch-lifestyle-notifications` NO se agenda ACÁ, a propósito.
+-- (S7-NOTIF-01, 2026-09-04: su schedule vive ahora en
+--  `20260904000000_cron_despachador_notificaciones.sql`, que se aplica DESPUÉS
+--  del deploy de la function. El razonamiento de abajo es el que lo puso ahí.)
 -- Al ejecutar D3 se verificó que esa function TAMPOCO está desplegada en el
 -- proyecto; agendarla ahora crearía un job fallando 404 cada minuto — ruido
 -- permanente que no prueba nada. Su schedule entra JUNTO con su deploy, y el
