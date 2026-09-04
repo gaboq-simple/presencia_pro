@@ -7,8 +7,9 @@
 'use server';
 
 import { createClient } from '@supabase/supabase-js';
-import { getCurrentSession, getBusinessTimezone } from '@/lib/auth';
+import { getCurrentSession, getBusinessTimezone, requireOwnerOrAdmin } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
+import { logManagementAudit } from '@/lib/managementAudit';
 import { getDayAppointments, queryStaffBlocksForDay, zonedWallTimeToUtc, localDayRangeUtc } from '@/lib/dashboard.types';
 import { todayStrInTz } from '@/lib/dayWindow';
 import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
@@ -1338,64 +1339,18 @@ export async function sendMessageFromPanel(
 
 // ─── Gestión de horario semanal ───────────────────────────────────────────────
 
-type AvailabilitySlot = {
-  day_of_week: number;
-  start_time:  string;
-  end_time:    string;
-  break_start?: string | null;
-  break_end?:   string | null;
-  is_active?:   boolean;
-};
-
-/**
- * Reemplaza el horario semanal recurrente de un barbero.
- * DELETE existing + INSERT new. Array vacío = descanso total.
- * Admite los campos de migration 025: break_start, break_end, is_active.
- */
-export async function updateStaffSchedule(
-  staffId: string,
-  availability: AvailabilitySlot[],
-): Promise<void> {
-  const session = await requireAssistantSession();
-  const supabase = getServiceClient();
-  const db = tenantDb(supabase, session.business_id);
-
-  // Verificar que el staff pertenece al negocio de la sesión
-  const { data: existing, error: fetchErr } = await db
-    .table('staff')
-    .select('id')
-    .eq('id', staffId)
-    .maybeSingle();
-
-  if (fetchErr || !existing) throw new Error('Staff no encontrado');
-
-  // staff_availability NO tiene business_id (se scopea por staff_id, ya validado
-  // arriba contra el negocio) → queda crudo, fuera del helper. Ver tenantDb.ts.
-  const { error: deleteError } = await supabase
-    .from('staff_availability')
-    .delete()
-    .eq('staff_id', staffId);
-
-  if (deleteError) throw new Error(`updateStaffSchedule delete failed: ${deleteError.message}`);
-
-  if (availability.length > 0) {
-    const rows = availability.map((slot) => ({
-      staff_id:    staffId,
-      day_of_week: slot.day_of_week,
-      start_time:  slot.start_time,
-      end_time:    slot.end_time,
-      break_start: slot.break_start ?? null,
-      break_end:   slot.break_end   ?? null,
-      is_active:   slot.is_active   ?? true,
-    }));
-
-    const { error: insertError } = await supabase
-      .from('staff_availability')
-      .insert(rows);
-
-    if (insertError) throw new Error(`updateStaffSchedule insert failed: ${insertError.message}`);
-  }
-}
+// ─── Gestión de horarios: BORRADA (S9-SEC-02) ────────────────────────────────
+// Acá vivía `updateStaffSchedule(staffId, slots[])`: reemplazaba el horario semanal
+// de CUALQUIER barbero del negocio, colgada de `requireAssistantSession` —que no
+// comprueba rol— y sin escribir una línea de audit. Un barbero con su PIN podía
+// dejar a un compañero sin horario, y como el horario alimenta la disponibilidad,
+// sacarlo de la agenda del bot; el cambio no aparecía en Actividad.
+//
+// No se le puso un gate: se borró, porque **no tenía ni un llamador**. La UI del
+// horario usa `PATCH /api/staff/[id]/schedule` (`StaffScheduleEditor.tsx:157`), que
+// exige `owner|admin`, valida el body con zod, toma snapshot del horario anterior y
+// audita. La action era una segunda puerta a la misma capacidad, más débil y sin
+// testigos — y de las dos, la que manda es siempre la de menor gate.
 
 // ─── Gestión de excepciones de horario ───────────────────────────────────────
 
@@ -1427,7 +1382,11 @@ export type ScheduleException = {
 export async function createScheduleException(
   data: ScheduleExceptionInput,
 ): Promise<ScheduleException> {
-  const session = await requireAssistantSession();
+  // Configurar quién trabaja qué día es autoridad del dueño, no pertenencia al
+  // negocio (S9-SEC-02): mismo gate que la ruta equivalente de día libre.
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) throw new Error(auth.error);
+  const session = { business_id: auth.businessId, staff_id: auth.staffId };
   const supabase = getServiceClient();
   const db = tenantDb(supabase, session.business_id);
 
@@ -1458,7 +1417,29 @@ export async function createScheduleException(
 
   if (error) throw new Error(`createScheduleException failed: ${error.message}`);
 
-  return result as ScheduleException;
+  const fila = result as ScheduleException;
+
+  // Audit (best-effort, igual que las rutas de gestión: un fallo del audit NO
+  // revierte la excepción ya guardada). Misma forma que `day-off/route.ts:179`:
+  // la entidad es el BARBERO, porque es a él a quien se le cambió el calendario.
+  await logManagementAudit(supabase, {
+    entity:        'staff',
+    entityId:      data.staffId,
+    action:        'updated',
+    businessId:    session.business_id,
+    actorStaffId:  session.staff_id,
+    oldData:       null,
+    newData:       {
+      exception_date: fila.exception_date,
+      available:      fila.available,
+      start_time:     fila.start_time,
+      end_time:       fila.end_time,
+      reason:         fila.reason,
+    },
+    changedFields: ['schedule_exception'],
+  });
+
+  return fila;
 }
 
 /**
@@ -1466,15 +1447,45 @@ export async function createScheduleException(
  * El AND business_id garantiza que solo se puede borrar del negocio propio.
  */
 export async function deleteScheduleException(exceptionId: string): Promise<void> {
-  const session = await requireAssistantSession();
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) throw new Error(auth.error);
   const supabase = getServiceClient();
+  const db = tenantDb(supabase, auth.businessId);
 
-  const { error } = await tenantDb(supabase, session.business_id)
+  // El snapshot va ANTES del DELETE: después la fila no existe, y un audit que
+  // dice "se borró algo" sin decir QUÉ no sirve para reconstruir el día de nadie.
+  const { data: antes } = await db
+    .table('staff_schedule_exceptions')
+    .select('id, staff_id, exception_date, available, start_time, end_time, reason')
+    .eq('id', exceptionId)
+    .maybeSingle();
+
+  const { error } = await db
     .table('staff_schedule_exceptions')
     .delete()
     .eq('id', exceptionId);
 
   if (error) throw new Error(`deleteScheduleException failed: ${error.message}`);
+
+  const fila = antes as (ScheduleException & { staff_id: string }) | null;
+  if (fila) {
+    await logManagementAudit(supabase, {
+      entity:        'staff',
+      entityId:      fila.staff_id,
+      action:        'updated',
+      businessId:    auth.businessId,
+      actorStaffId:  auth.staffId,
+      oldData:       {
+        exception_date: fila.exception_date,
+        available:      fila.available,
+        start_time:     fila.start_time,
+        end_time:       fila.end_time,
+        reason:         fila.reason,
+      },
+      newData:       null,
+      changedFields: ['schedule_exception'],
+    });
+  }
 }
 
 /**
@@ -1486,7 +1497,11 @@ export async function getScheduleExceptions(
   staffId: string,
   month?: string,
 ): Promise<ScheduleException[]> {
-  const session = await requireAssistantSession();
+  // Lectura del mismo panel del dueño: mismo gate que sus mutaciones, para que no
+  // haya una rendija de lectura sobre la configuración que el barbero no gestiona.
+  const auth = await requireOwnerOrAdmin();
+  if (!auth.ok) throw new Error(auth.error);
+  const session = { business_id: auth.businessId };
   const supabase = getServiceClient();
   const db = tenantDb(supabase, session.business_id);
 

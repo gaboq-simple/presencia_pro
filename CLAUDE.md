@@ -509,6 +509,20 @@ los otros cuatro se listan acá para que no se los busque en el lugar equivocado
 
 Las de `assistant-actions.ts`. Requieren sesión válida vía `requireAssistantSession()` (acepta roles: assistant, owner, admin, barber). Usan service_role_key — nunca exponer al cliente.
 
+> **⚠️ `requireAssistantSession()` NO comprueba el rol** — solo exige que haya sesión.
+> Eso es deliberado para la operación del día (el mostrador tiene que poder trabajar
+> sin ir a buscar al dueño), y era un agujero para la CONFIGURACIÓN: hasta S9-SEC-02
+> las tres actions de excepciones de horario colgaban de ese gate, así que un
+> barbero con su PIN podía cambiarle el calendario a un compañero. Hoy exigen
+> `owner|admin` y auditan. **Una server action es un endpoint HTTP público con un id
+> estable: que la UI no muestre el control no es una defensa.** El gate de cada
+> action exportada está fijado en `tests/actionGates.repo.test.ts` — agregar una
+> action nueva sin decidir su gate rompe la suite.
+>
+> `updateStaffSchedule` **ya no existe** (S9-SEC-02): no tenía llamadores y
+> duplicaba, sin gate ni audit, lo que `PATCH /api/staff/[id]/schedule` ya hace con
+> `owner|admin`, validación zod y snapshot previo. [fantasma intencional]
+
 | Acción | Firma resumida | Descripción |
 |---|---|---|
 | `refreshAssistantAppointments` | `(date: string) → DashboardAppointment[]` | Recarga citas del día para polling |
@@ -525,10 +539,9 @@ Las de `assistant-actions.ts`. Requieren sesión válida vía `requireAssistantS
 | `sendMessageFromPanel` | `(customerPhone, message) → { sent }` | Envía WA directo; requiere session_mode='human'; renueva taken_at |
 | `getActiveConversations` | `() → ConversationSummary[]` | Lista bot_conversations del negocio; orden: human→paused→bot; max 50 |
 | `getConversationMessages` | `(customerPhone) → ConversationMessage[]` | Historial de conversation_messages para una conversación; max 100; ASC |
-| `updateStaffSchedule` | `(staffId, slots[]) → void` | Reemplaza horario semanal (DELETE+INSERT); soporta break_start/end, is_active |
-| `createScheduleException` | `(data) → ScheduleException` | UPSERT en staff_schedule_exceptions por (staff_id, exception_date) |
-| `deleteScheduleException` | `(exceptionId) → void` | DELETE con guard business_id |
-| `getScheduleExceptions` | `(staffId, month?) → ScheduleException[]` | Excepciones del mes o futuras; ordena por exception_date ASC |
+| `createScheduleException` | `(data) → ScheduleException` | UPSERT en staff_schedule_exceptions por (staff_id, exception_date). **Gate `owner\|admin`** (S9-SEC-02) + `management_audit` |
+| `deleteScheduleException` | `(exceptionId) → void` | DELETE con guard business_id. **Gate `owner\|admin`** + audit con snapshot previo |
+| `getScheduleExceptions` | `(staffId, month?) → ScheduleException[]` | Excepciones del mes o futuras; ordena por exception_date ASC. **Gate `owner\|admin`** |
 
 ---
 
