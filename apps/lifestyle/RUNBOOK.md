@@ -224,6 +224,35 @@ La URL de acceso es: `https://[NEXT_PUBLIC_APP_URL]/dashboard?token=[access_toke
 
 ## 6. Backup y restauracion de base de datos
 
+> ### 🔴 DECISION VIGENTE (2026-09-04, Gabriel): **la autoridad del esquema es el DUMP.**
+>
+> El directorio `supabase/migrations/` es **documentacion de la historia, no una
+> receta reproducible**. Se llego a esa decision midiendo: el ledger de produccion
+> tiene 28 migraciones y el repo 92 archivos en **dos** carpetas con esquemas de
+> nombre incompatibles, y los `version` del ledger no son los prefijos de los
+> archivos (los estampo `apply_migration` al aplicarlas). Un censo por nombre da
+> **4 falsos positivos de 5**. O sea que el repo **no puede reconstruir produccion,
+> y nadie puede demostrar lo contrario con un comando**.
+>
+> **Que significa en la practica:**
+>
+> - **Un entorno nuevo** (staging, el segundo cliente, el ensayo de restauracion)
+>   se crea **restaurando un dump**, nunca reproduciendo migraciones.
+> - **El restore drill (S4-OPS-02) se hace contra el dump.** Eso es lo que ese
+>   ensayo prueba, y es lo unico que prueba: que el backup restaura. NO prueba que
+>   el repo construya, porque el repo no construye.
+> - **Toda migracion nueva SIGUE llevando su archivo al repo.** La decision no
+>   afloja eso: el archivo es como se lee y se revisa un cambio de esquema, y
+>   `tests/schemaChecks.repo.test.ts` rompe el build si el codigo escribe un valor
+>   que las migraciones del repo no permiten (el defecto de S9-DATA-01).
+> - **La descripcion del esquema en `CLAUDE.md` se verifica contra la BD**, no
+>   contra los archivos.
+>
+> Alternativa descartada: adoptar el flujo de la CLI (`supabase db push`), que
+> exigia renumerar el historico para que `version` = prefijo del archivo. Se
+> descarto por costo contra beneficio con un solo entorno productivo.
+
+
 ### Backups automaticos
 
 El workflow `.github/workflows/backup-weekly.yml` ejecuta `scripts/backup-supabase.sh` cada domingo a las 03:00 UTC (y on-demand via `workflow_dispatch`).

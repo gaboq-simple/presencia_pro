@@ -72,7 +72,7 @@ propaga. El caso testigo es el aviso de cancelación, que hoy inserta
 
 Schema del proyecto **presenciapro / apps/lifestyle**. Todas las tablas están en `public`, todas tienen RLS habilitado.
 
-**24 tablas** (verificado contra `information_schema.tables` el 2026-09-03; decía 21 y estaba vencido). Las que este documento detalla abajo son las del flujo principal; las de dinero, auditoría y compliance se resumen en «Tablas que este documento no detalla» al final de la sección. Si una columna no aparece acá, la fuente es la BD (o `apps/lifestyle/supabase/migrations/` + `supabase/migrations/`), no este archivo.
+**24 tablas** (verificado contra `information_schema.tables` el 2026-09-03; decía 21 y estaba vencido). Las que este documento detalla abajo son las del flujo principal; las de dinero, auditoría y compliance se resumen en «Tablas que este documento no detalla» al final de la sección. Si una columna no aparece acá, **la fuente es la BD** — no este archivo, y tampoco los directorios de migraciones: por decisión de 2026-09-04 (S9-DATA-02) la autoridad del esquema es el **dump**, y `supabase/migrations/` es documentación de la historia, no una receta reproducible. Ver `apps/lifestyle/RUNBOOK.md` §6.
 
 ### Tabla: `businesses`
 Negocio raíz del tenant. Un registro = una barbería/salón.
