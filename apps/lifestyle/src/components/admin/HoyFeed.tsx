@@ -1,8 +1,15 @@
-// ─── Pestaña "Hoy" — feed de rescate (detector de fugas) ──────────────────────
+// ─── El feed de rescate (detector de fugas) ───────────────────────────────────
 // Server Component presentacional. Recibe el feed ya computado (lib/cadence via
-// lib/retentionFeed) y el pulso. Sin interactividad: el botón "Enviar mensaje" es
+// lib/retentionFeed). Sin interactividad: el botón "Enviar mensaje" es
 // PLACEHOLDER (el bottom-sheet que escribe es PR2); "volvieron" no se trackea aún.
 // Tokens Zentriq-claro (globals.css @theme): teal=bueno, ámbar=atención, rojo=crítico.
+//
+// P1 (S10-DUE-01) lo parte en dos por AUDIENCIA, no por tamaño:
+//   · `RecuperarResumen` → Panorama. El TAMAÑO del problema y su enlace. Panorama
+//     contesta "¿hay algo que atender?", y para eso un número basta.
+//   · el default (lista)  → Clientela. Recorrer nombres uno por uno es trabajo de
+//     la pestaña de la clientela, no de la primera pantalla del día.
+// La lista NO se duplica: quien la quiere, la tiene en un solo lugar.
 
 import type { RetentionFeed, CadenceResult, FeedUrgency } from '@/lib/cadence';
 
@@ -91,6 +98,21 @@ const PLURAL: Record<'critical' | 'leaving' | 'lost', (n: number) => string> = {
   lost:     (n) => (n === 1 ? 'perdido' : 'perdidos'),
 };
 
+/** Conteo por urgencia sobre TODAS las filas (no solo las visibles): el resumen
+ *  tiene que describir el total, o plegar el resto lo escondería. Compartido por
+ *  la lista y por el resumen de Panorama — dos conteos separados del mismo dato
+ *  se desincronizan el día que alguien toque uno. */
+function resumenPorUrgencia(feed: RetentionFeed): string[] {
+  const porUrgencia = feed.rows.reduce<Record<string, number>>((acc, r) => {
+    const k = r.urgency === 'none' ? 'leaving' : r.urgency;
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {});
+  return (['critical', 'leaving', 'lost'] as const)
+    .filter((k) => (porUrgencia[k] ?? 0) > 0)
+    .map((k) => `${porUrgencia[k]} ${PLURAL[k](porUrgencia[k]!)}`);
+}
+
 export default function HoyFeed({
   feed,
   contactados,
@@ -105,16 +127,7 @@ export default function HoyFeed({
   const visibles = feed.rows.slice(0, VISIBLES);
   const resto = feed.rows.slice(VISIBLES);
 
-  // Conteo por urgencia sobre TODAS las filas (no solo las visibles): el resumen
-  // tiene que describir el total, o plegar el resto lo escondería.
-  const porUrgencia = feed.rows.reduce<Record<string, number>>((acc, r) => {
-    const k = r.urgency === 'none' ? 'leaving' : r.urgency;
-    acc[k] = (acc[k] ?? 0) + 1;
-    return acc;
-  }, {});
-  const resumen = (['critical', 'leaving', 'lost'] as const)
-    .filter((k) => (porUrgencia[k] ?? 0) > 0)
-    .map((k) => `${porUrgencia[k]} ${PLURAL[k](porUrgencia[k]!)}`);
+  const resumen = resumenPorUrgencia(feed);
 
   return (
     <div className={embedded ? '' : 'mx-auto w-full max-w-2xl px-4 py-5'}>
@@ -167,5 +180,48 @@ export default function HoyFeed({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Panorama: el tamaño del problema, y dónde atenderlo ──────────────────────
+// Una fila. No repite ni un nombre: el que quiere ver a quién, va a Clientela.
+// El conteo sale del MISMO helper que la lista, así que no pueden discrepar.
+export function RecuperarResumen({
+  feed,
+  contactados,
+}: {
+  feed: RetentionFeed;
+  contactados: number;
+}): React.ReactElement | null {
+  // Sin nadie que recuperar no hay nada que decir. El estado vacío explicativo
+  // ("aún no hay patrones que detectar") vive con la lista, en Clientela: es
+  // pedagogía, y la pedagogía no va en la pantalla que se abre todos los días.
+  if (feed.rows.length === 0) return null;
+
+  const resumen = resumenPorUrgencia(feed);
+
+  return (
+    <section className="mt-6 rounded-xl bg-card p-4 shadow-card">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-xs font-medium uppercase tracking-wide text-faint">Para recuperar</p>
+        <a href="#clientela" className="text-[13px] text-ink-2 underline decoration-line-2 underline-offset-2">
+          Ver la lista
+        </a>
+      </div>
+
+      <p className="mt-2 text-ink">
+        <span className="text-[26px] font-light tabular-nums leading-none">{feed.rows.length}</span>
+        <span className="text-sm text-ink-2"> {feed.rows.length === 1 ? 'cliente' : 'clientes'} atrasados de su ritmo</span>
+      </p>
+
+      <p className="mt-1 text-[13px] text-ink-2 tabular-nums">
+        {resumen.join(' · ')}
+        {contactados > 0 && <span className="text-faint"> · {contactados} contactados</span>}
+      </p>
+
+      <p className="mt-2 px-1 text-[11px] text-faint">
+        El envío se activa cuando WhatsApp esté conectado.
+      </p>
+    </section>
   );
 }

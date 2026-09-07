@@ -1,21 +1,24 @@
 // ─── Pulso de hoy (Negocio · Panorama) — presentacional ───────────────────────
-// Gauge de ocupación (héroe) + proyección tres capas + métricas del día con
-// comparación + barberos de hoy. INFORMA, no opina: cada número va con su dato de
-// comparación, jamás un juicio ("vas bien" / "mal día" están prohibidos).
+// Cuatro stats del día + dos líneas de contexto. INFORMA, no opina: cada número
+// va con su dato de comparación, jamás un juicio ("vas bien" / "mal día" están
+// prohibidos).
 //
-// Reglas de robustez (Paso 4):
-//   1. "Barberos hoy" desaparece con ≤1 barbero (comparar uno contra sí mismo = ruido).
+// P1 (S10-DUE-01) le sacó el bloque "Barberos hoy" —era su pieza más alta— y lo
+// mudó a Administrar como `BarberosHoy.tsx`, junto al riel del día y al equipo de
+// la semana. Con él se fueron las reglas 1 y 3, que eran suyas y viajaron con el
+// componente. Lo que queda acá es el pulso: cuánto se lleva cobrado, qué tan
+// llena está la silla, cuántas citas y cuántas faltas.
+//
+// Reglas de robustez que SIGUEN acá (Paso 4):
 //   2. Sin semana pasada (`comparable=false`) → placeholder que orienta, nunca un +0%.
-//   3. >3 barberos → 3 visibles + el resto colapsado en un <details> nativo (sin JS).
 //   4. Comparación flat (igual que la semana pasada) en gris neutro, sin juicio.
 // Server Component. Tokens Zentriq-claro, Inter tabular-nums. Español mexicano neutro.
 
-import type { PulsoHoy as PulsoHoyData, DayMetric, PulsoBarbero } from '@/lib/pulsoHoy';
+import type { PulsoHoy as PulsoHoyData, DayMetric } from '@/lib/pulsoHoy';
 import { StatFila } from '@/components/admin/viz/StatFila';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 const money = (n: number): string => MXN.format(Math.round(n));
-const pctInt = (p: number | null): number => Math.round((p ?? 0) * 100);
 
 const DOW_NAME = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 function weekdayOf(dateStr: string): number {
@@ -32,44 +35,9 @@ function deltaTexto(m: DayMetric, dowName: string): string {
   return `${d > 0 ? '+' : '−'}${Math.abs(d)} vs el ${dowName} pasado`;
 }
 
-// ── Barra de ocupación de un barbero ──
-function BarberoRow({ b }: { b: PulsoBarbero }): React.ReactElement {
-  return (
-    <li className="py-2">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-sm font-medium text-ink">{b.staffName}</span>
-        <span className="shrink-0 text-sm text-ink-2">
-          {b.pct === null
-            ? <span className="text-faint">no trabaja hoy</span>
-            : <><span className="font-semibold tabular-nums text-ink">{pctInt(b.pct)}%</span> · <span className="tabular-nums">{money(b.revenue)}</span></>}
-        </span>
-      </div>
-      {b.pct !== null && (
-        <div className="mt-1 h-2 w-full overflow-hidden rounded bg-tint-1">
-          <div className="h-full rounded bg-teal-border" style={{ width: `${Math.max(pctInt(b.pct), 2)}%` }} />
-        </div>
-      )}
-    </li>
-  );
-}
-
-// Promedio de ocupación (solo barberos que trabajan hoy) para la fila colapsada.
-function avgPct(list: PulsoBarbero[]): number | null {
-  const vals = list.map((b) => b.pct).filter((p): p is number => p !== null);
-  if (vals.length === 0) return null;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
-}
-
-const VISIBLE_BARBEROS = 3;
-
 export default function PulsoHoy({ data }: { data: PulsoHoyData }): React.ReactElement {
   const dowName = DOW_NAME[weekdayOf(data.dateStr)] ?? 'la semana';
   const { projection, cobrado, occupancyDeltaPoints: dp, comparable } = data;
-
-  // Regla 3: 3 visibles + resto colapsado.
-  const shown = data.barberos.slice(0, VISIBLE_BARBEROS);
-  const rest = data.barberos.slice(VISIBLE_BARBEROS);
-  const restAvg = avgPct(rest);
 
   return (
     <section className="mt-2 rounded-xl bg-card p-4 shadow-card">
@@ -121,27 +89,6 @@ export default function PulsoHoy({ data }: { data: PulsoHoyData }): React.ReactE
         <span className="tabular-nums">{data.walkIns.today}</span> walk-ins
       </p>
 
-      {/* ── Barberos de hoy — Regla 1: solo con 2+ barberos ── */}
-      {data.barberos.length > 1 && (
-        <div className="mt-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-faint">Barberos hoy</p>
-          <ul className="mt-1 divide-y divide-line">
-            {shown.map((b) => <BarberoRow key={b.staffId} b={b} />)}
-          </ul>
-          {/* Regla 3: el resto colapsa en un <details> nativo (sin JS de cliente). */}
-          {rest.length > 0 && (
-            <details className="group mt-1 border-t border-line">
-              <summary className="flex cursor-pointer list-none items-center justify-between py-2 text-sm text-ink-2 marker:content-none">
-                <span>+{rest.length} barbero{rest.length === 1 ? '' : 's'} más</span>
-                <span className="text-faint">{restAvg !== null ? `~${pctInt(restAvg)}% ocupación` : 'no trabajan hoy'}</span>
-              </summary>
-              <ul className="divide-y divide-line">
-                {rest.map((b) => <BarberoRow key={b.staffId} b={b} />)}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
     </section>
   );
 }

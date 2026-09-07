@@ -21,11 +21,13 @@ import type { NegocioRevenue } from '@/lib/negocioMetrics';
 import type { OccupancyResult } from '@/lib/occupancy';
 import type { StaffRecompraResult, StaffRecompraRow } from '@/lib/staffRecompra';
 import type { AnalisisData } from '@/lib/analisisData';
+import type { Fuga as FugaData } from '@/lib/fugaData';
 import { CANAL_COLOR, CANAL_LABEL } from '@/lib/analisis';
 import { seqStep, pctWidth } from '@/lib/viz';
 import { BarraFila } from './viz/BarraFila';
 import { HeatmapGrid, type HeatCelda } from './viz/HeatmapGrid';
 import { Columnas, type ColumnaDato } from './viz/Columnas';
+import { FugaHeatmap } from './Fuga';
 
 const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
 const money = (n: number): string => MXN.format(Math.round(n));
@@ -322,12 +324,14 @@ function Barberos({ data }: { data: StaffRecompraResult }): React.ReactElement |
 // ─── Vista ────────────────────────────────────────────────────────────────────
 
 export default function AnalisisView({
-  revenue, occupancy, barberos, analisis,
+  revenue, occupancy, barberos, analisis, fuga,
 }: {
   revenue: NegocioRevenue;
   occupancy: OccupancyResult;
   barberos: StaffRecompraResult;
   analisis: AnalisisData;
+  /** P1: el diagnóstico de la fuga baja de Panorama. */
+  fuga: FugaData;
 }): React.ReactElement {
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-5">
@@ -338,6 +342,11 @@ export default function AnalisisView({
 
       <Hero revenue={revenue} mesLabel={analisis.mesLabel} />
       <SemanaTipica occ={occupancy} />
+      {/* P1: el heatmap 7×2 de huecos llegó de Panorama. Va PEGADO a la semana
+          típica a propósito: una dice cómo se llena una semana cualquiera y la
+          otra dónde quedó el espacio en la que acaba de pasar. Separadas, cada
+          una se lee como un dato suelto; juntas, se leen como una comparación. */}
+      <FugaHeatmap data={fuga} />
       <Servicios data={analisis.servicios} mesLabel={analisis.mesLabel} />
       <CanalYBot canal={analisis.canal} bot={analisis.bot} mesLabel={analisis.mesLabel} />
       <Barberos data={barberos} />

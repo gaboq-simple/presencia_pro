@@ -1,7 +1,19 @@
-// ─── Pestaña "Clientela" — la base como un todo (dv3-5'') ─────────────────────
+// ─── Pestaña "Clientela" — la base como un todo, y a quién atender ────────────
 // Server Component presentacional. Recibe los agregados ya computados
-// (`lib/cadence` vía `lib/clientelaStats`). NO es un rolodex: sin buscador, sin
-// nombres ni teléfonos — la base como colectivo.
+// (`lib/cadence` vía `lib/clientelaStats`).
+//
+// 🔴 P1 (S10-DUE-01) CAMBIA UNA REGLA DE ESTA PESTAÑA, a conciencia. Decía "NO es
+// un rolodex: sin buscador, sin nombres ni teléfonos — la base como colectivo", y
+// ahora sí hay nombres: el feed de rescate y las faltas repetidas bajaron de
+// Panorama. La regla vieja quería evitar un DIRECTORIO —una lista donde se busca
+// a cualquiera— y eso sigue prohibido: no hay buscador y no hay teléfonos. Lo que
+// entra es una COLA DE TRABAJO: personas que el sistema señala por un criterio
+// (atrasadas de su propio ritmo, o con dos faltas este mes), no personas que se
+// pueden mirar porque sí. La diferencia es quién elige a quién se mira.
+//
+// El orden de la pestaña sale de eso: primero la base como colectivo (la
+// composición, la retención, el movimiento) y al final a quién hay que atender —
+// el agregado explica, la cola acciona.
 //
 // El rediseño cambia una cosa de fondo: **la composición del todo ES el dato**, y
 // cinco tarjetas apiladas la escondían. Antes había que leer cinco números y
@@ -13,10 +25,13 @@
 // `lib/viz.sharePcts`, que reparte 100 conservando la suma — `pctWidth` mediría
 // contra el máximo y daría una barra que suma 240%.
 
-import type { ClientelaStats, RfmSegment, SegmentCounts, RetentionRate, SegmentMovement } from '@/lib/cadence';
+import type { ClientelaStats, RfmSegment, SegmentCounts, RetentionRate, SegmentMovement, RetentionFeed } from '@/lib/cadence';
+import type { Fuga as FugaData } from '@/lib/fugaData';
 import { SEGMENT_STYLE, SEGMENT_ORDER } from '@/lib/segmentStyles';
 import { sharePcts } from '@/lib/viz';
 import { Apilada, type SegmentoApilada } from '@/components/admin/viz/Apilada';
+import HoyFeed from '@/components/admin/HoyFeed';
+import { FaltasRepetidas } from '@/components/admin/Fuga';
 
 // Copy propia de la leyenda (no es color/label → no va al módulo compartido).
 const SEGMENT_HINT: Record<RfmSegment, string> = {
@@ -236,7 +251,19 @@ function MovementBlock({ movement }: { movement: SegmentMovement }): React.React
 
 // ─── Vista ────────────────────────────────────────────────────────────────────
 
-export default function ClientelaView({ stats }: { stats: ClientelaStats }): React.ReactElement {
+export default function ClientelaView({
+  stats,
+  feed,
+  contactados,
+  fuga,
+}: {
+  stats: ClientelaStats;
+  /** P1: la cola de rescate baja de Panorama, con nombres y todo. */
+  feed: RetentionFeed;
+  contactados: number;
+  /** P1: de la fuga solo llegan las faltas repetidas (la capacidad es de Análisis). */
+  fuga: FugaData;
+}): React.ReactElement {
   const { totalCustomers, newThisMonth, segmentCounts, retention, movement } = stats;
   // Mes anterior (UTC, alineado con el `monthStartMs` del agregador) para el reloj etiquetado.
   const prevMonth = MONTHS_ES[(new Date().getUTCMonth() + 11) % 12];
@@ -296,6 +323,17 @@ export default function ClientelaView({ stats }: { stats: ClientelaStats }): Rea
           <MovementBlock movement={movement} />
         </div>
       </section>
+
+      {/* ── A quién atender (P1: bajó de Panorama con su lista entera) ───────
+           Va al final: los tres bloques de arriba explican la base, y este dice
+           qué hacer con ella. El estado vacío explicativo del feed vive acá y no
+           en Panorama porque es pedagogía — enseña qué va a aparecer cuando haya
+           historial— y la pedagogía no va en la pantalla que se abre a diario. */}
+      <HoyFeed feed={feed} contactados={contactados} embedded />
+
+      {/* Las faltas repetidas son dato, sin acción: las señas no existen, así que
+          no hay botón. Se muestran para tenerlas presentes al reservar. */}
+      <FaltasRepetidas faltas={fuga.faltas} />
     </div>
   );
 }

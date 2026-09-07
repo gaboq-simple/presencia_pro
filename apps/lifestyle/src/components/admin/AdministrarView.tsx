@@ -18,10 +18,12 @@ import Link from 'next/link';
 import type { DayRevenue } from '@/lib/dashboard.types';
 import type { EquipoSemana as EquipoSemanaData } from '@/lib/equipoSemana';
 import type { DiaRail as DiaRailData } from '@/lib/diaRail';
+import type { PulsoHoy as PulsoHoyData } from '@/lib/pulsoHoy';
 import { toDateStr } from '@/lib/dashboard.types';
 import { isTodayInTz, todayStrInTz } from '@/lib/dayWindow';
 import DiaRail from '@/components/admin/DiaRail';
 import EquipoSemana from '@/components/admin/EquipoSemana';
+import BarberosHoy from '@/components/admin/BarberosHoy';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +56,7 @@ export default function AdministrarView({
   dayRevenue,
   rail,
   equipo,
+  pulso,
   panel,
 }: {
   date: string;
@@ -62,6 +65,8 @@ export default function AdministrarView({
   /** El riel ya resuelto por `lib/diaRailData` (ahí vive el reloj). */
   rail: DiaRailData;
   equipo: EquipoSemanaData;
+  /** P1: el pulso llega solo por su bloque de barberos, y SIEMPRE es el de hoy. */
+  pulso: PulsoHoyData;
   /** La configuración y lo del día sin resolver (DashboardLayout). */
   panel: React.ReactNode;
 }): React.ReactElement {
@@ -114,6 +119,14 @@ export default function AdministrarView({
           currency={dayRevenue.currency}
           vacioEsHoy={esHoy}
         />
+
+        {/* ── Quién está atendiendo hoy (P1: llegó de Panorama) ──────────────
+             🔴 SOLO cuando el día que se está mirando ES hoy. `pulso` se computa
+             siempre para el día de hoy, así que rendirlo mientras se navega el
+             día 15 pondría los números de hoy bajo el encabezado de otro día —
+             exactamente la clase de afirmación falsa que el resto del sistema
+             se cuida de no hacer. Navegando a otro día, el bloque no existe. */}
+        {esHoy && <BarberosHoy data={pulso} />}
 
         {/* ── El equipo de la semana que contiene este día ── */}
         <EquipoSemana data={equipo} />

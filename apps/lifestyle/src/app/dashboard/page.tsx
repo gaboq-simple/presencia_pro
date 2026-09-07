@@ -260,13 +260,16 @@ export default async function DashboardPage({
     />
   );
 
+  // P1 (S10-DUE-01): Panorama ya no recibe `negocioRevenue`/`negocioOccupancy`/
+  // `negocioStaff` — no los renderizaba desde dv3-6, cuando "La historia" se
+  // mudó a Análisis por copia. Las tres consultas SIGUEN corriendo: son de
+  // `AnalisisView`, que es quien las pinta. `fuga` ahora va a las tres pestañas
+  // porque quedó partida (conclusión en Panorama, heatmap en Análisis, faltas en
+  // Clientela) — una sola consulta, tres lectores.
   return (
     <OwnerTabs
       panorama={
         <NegocioView
-          revenue={negocioRevenue}
-          occupancy={negocioOccupancy}
-          barberos={negocioStaff}
           pulso={pulsoHoy}
           semana={pulsoSemana}
           feed={retentionFeed}
@@ -281,15 +284,24 @@ export default async function DashboardPage({
           occupancy={negocioOccupancy}
           barberos={negocioStaff}
           analisis={analisis}
+          fuga={fuga}
         />
       }
-      clientela={<ClientelaView stats={clientelaStats} />}
+      clientela={
+        <ClientelaView
+          stats={clientelaStats}
+          feed={retentionFeed}
+          contactados={contactados}
+          fuga={fuga}
+        />
+      }
       administrar={
         <AdministrarView
           date={date}
           timezone={timezone}
           dayRevenue={dayRevenue}
           rail={diaRail}
+          pulso={pulsoHoy}
           equipo={equipoSemana}
           panel={dashboardPanel}
         />
