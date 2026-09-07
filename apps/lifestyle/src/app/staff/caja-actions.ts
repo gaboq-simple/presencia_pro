@@ -28,13 +28,17 @@ import {
   type Fijo, type EstadoFijo, type Cadencia, type PagoDeFijo,
 } from '@/lib/fijos';
 import {
+  computePeriodo, rangoDelPeriodo, topeDelPeriodo,
+  type RangoId, type ResumenPeriodo,
+} from '@/lib/periodo';
+import {
   resolveMovimiento,
   esMovimientoError,
   type MovimientoInput,
   type MovimientoType,
 } from '@/lib/caja';
 import { expectedByRail, signedDiff, buildAvisoCorte } from '@/lib/corte';
-import { getInsumosDelCorte, getCortesDelDia, type CorteRow } from '@/lib/corteData';
+import { getInsumosDelCorte, getInsumosDelRango, getCortesDelDia, type CorteRow } from '@/lib/corteData';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 
 function getServiceClient() {
@@ -746,4 +750,40 @@ export async function confirmarFijo(
   revalidatePath('/staff');
   revalidatePath('/dashboard');
   return { movimientoId: (data as { id: string } | null)?.id };
+}
+
+// ─── El período (M5 de S10-ASIS-01) ───────────────────────────────────────────
+// Semana o mes de lo que el mostrador registró. Su valor mayor NO es el total: es
+// que un día sin registro se VEA, cosa que mirando un día por vez es imposible.
+//
+// LA CEGUERA DEL CORTE MANDA SOBRE LA COMODIDAD. El período llega hasta AYER,
+// salvo que el corte de hoy ya esté firmado. Si incluyera hoy, su total sería
+// —menos el fondo y sin el reparto por riel— el esperado que la persona todavía
+// tiene que contar, y contar dejaría de ser evidencia para volverse copiar. Es la
+// única regla del §3 del plan que este paso podía romper sin darse cuenta.
+//
+// Y NO HAY UNA SEGUNDA REGLA DEL DINERO: la query es `getInsumosDelRango`,
+// hermana de la del corte y con su mismo predicado, y la aritmética la hace
+// `computePeriodo`, que corre `computeCobrado` por día y suma.
+
+export async function getPeriodo(rango: RangoId = 'semana'): Promise<ResumenPeriodo & { incluyeHoy: boolean }> {
+  const auth = await requireBusinessSession();
+  if (!auth.ok) throw new Error(auth.error);
+
+  const timezone = await getBusinessTimezone(auth.businessId);
+  const hoy = todayStrInTz(timezone);
+
+  // ¿Ya se firmó el corte de hoy? Es lo único que decide si hoy puede entrar.
+  const cortesDeHoy = await getCortesDelDia(auth.businessId, hoy);
+  const tope = topeDelPeriodo(hoy, cortesDeHoy.length > 0);
+
+  const { desde, hasta } = rangoDelPeriodo(rango, hoy, tope);
+  const insumos = await getInsumosDelRango(auth.businessId, desde, hasta, timezone);
+
+  return {
+    ...computePeriodo(
+      desde, hasta, insumos.citas, insumos.movimientos, new Set(insumos.diasAbiertos),
+    ),
+    incluyeHoy: hasta === hoy,
+  };
 }

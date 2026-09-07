@@ -10,7 +10,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { tenantDb } from '@/lib/tenantDb';
-import { localDayRangeUtc } from '@/lib/dayWindow';
+import { localDayRangeUtc, todayStrInTz } from '@/lib/dayWindow';
 import type { CitaCobrada, MovimientoDelCorte } from '@/lib/corte';
 
 function getServiceClient() {
@@ -149,6 +149,84 @@ export async function getCobrosSinRiel(
     monto:   Number(r.price_charged ?? r.service?.price ?? 0),
     completadoAt: r.completed_at,
   }));
+}
+
+/**
+ * Los insumos de un RANGO de días locales, ya etiquetados con su día.
+ *
+ * Es `getInsumosDelCorte` estirado: **el mismo predicado** —citas `completed`
+ * atribuidas por `completed_at`, movimientos por `occurred_on`— sobre una ventana
+ * de varios días en vez de uno. Vive pegado a él a propósito: si el período
+ * usara `starts_at`, o contara las citas de otra manera, la semana y el día
+ * dirían números distintos del mismo negocio.
+ *
+ * El día local de cada cita se calcula con `todayStrInTz(tz, instante)` — la
+ * MISMA función que decide qué día es hoy, con su `now` inyectable. No hace falta
+ * un conversor nuevo, y usar el mismo evita que dos definiciones de "día local"
+ * se separen con el tiempo.
+ */
+export type InsumosDelRango = {
+  citas:       { fecha: string; amount: number }[];
+  movimientos: { fecha: string; type: string; amount: number }[];
+  /** Días de la semana (0=domingo) con horario activo. Vacío = sin horarios cargados. */
+  diasAbiertos: number[];
+};
+
+export async function getInsumosDelRango(
+  businessId: string,
+  desde: string,
+  hasta: string,
+  timezone: string,
+): Promise<InsumosDelRango> {
+  const db = tenantDb(getServiceClient(), businessId);
+  const { start } = localDayRangeUtc(desde, timezone);
+  const { end }   = localDayRangeUtc(hasta, timezone);
+
+  // `staff_availability` NO tiene business_id (su aislamiento es transitivo por
+  // staff_id, contrato de `tenantDb`): se acota con los ids del negocio, que sí
+  // salen de una query scopeada. Mismo procedimiento que `semanaHero`.
+  const { data: staffRows } = await db.table('staff').select('id').eq('active', true);
+  const staffIds = ((staffRows ?? []) as unknown as { id: string }[]).map((x) => x.id);
+
+  const [citasRes, movsRes, availRes] = await Promise.all([
+    db.table('appointments')
+      .select('price_charged, completed_at, service:service_id(price)')
+      .eq('status', 'completed')
+      .gte('completed_at', start)
+      .lt('completed_at', end),
+    db.table('caja_movimientos')
+      .select('type, amount, occurred_on')
+      .gte('occurred_on', desde)
+      .lte('occurred_on', hasta),
+    staffIds.length === 0
+      ? Promise.resolve({ data: [] as unknown[] })
+      : getServiceClient().from('staff_availability').select('day_of_week')
+          .in('staff_id', staffIds).eq('is_active', true),
+  ]);
+
+  if (citasRes.error) throw new Error(`getInsumosDelRango citas: ${citasRes.error.message}`);
+  if (movsRes.error)  throw new Error(`getInsumosDelRango movimientos: ${movsRes.error.message}`);
+
+  type CitaRangoRow = { price_charged: number | string | null; completed_at: string; service: { price: number | string } | null };
+  type MovRangoRow  = { type: string; amount: number | string; occurred_on: string };
+
+  const diasAbiertos = [...new Set(
+    ((availRes.data ?? []) as unknown as { day_of_week: number }[]).map((a) => a.day_of_week),
+  )];
+
+  return {
+    diasAbiertos,
+    citas: ((citasRes.data ?? []) as unknown as CitaRangoRow[]).map((r) => ({
+      fecha:  todayStrInTz(timezone, new Date(r.completed_at)),
+      // Mismo COALESCE que el corte: el sellado, con la lista como red.
+      amount: Number(r.price_charged ?? r.service?.price ?? 0),
+    })),
+    movimientos: ((movsRes.data ?? []) as unknown as MovRangoRow[]).map((r) => ({
+      fecha:  r.occurred_on,
+      type:   r.type,
+      amount: Number(r.amount),
+    })),
+  };
 }
 
 // ─── Lectura de cortes ────────────────────────────────────────────────────────

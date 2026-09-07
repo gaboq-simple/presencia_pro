@@ -31,6 +31,7 @@ import CorteCard from './CorteCard';
 import CobrosSinRiel from './CobrosSinRiel';
 import FijosDelDia from './FijosDelDia';
 import FijosLista from './FijosLista';
+import PeriodoCard from './PeriodoCard';
 import { isTodayInTz } from '@/lib/dayWindow';
 import { listarFijos } from '@/app/staff/caja-actions';
 import type { EstadoFijo } from '@/lib/fijos';
@@ -204,6 +205,11 @@ export default function CajaModule({
       {/* Las plantillas, plegadas: se consultan poco pero tienen que poder
           consultarse — un fijo que no se encuentra es peor que no tenerlo. */}
       <FijosLista estados={fijos ?? []} onCambio={recargarFijos} />
+
+      {/* El período, DESPUÉS del cierre: primero se resuelve hoy, después se mira
+          para atrás. Llega hasta ayer mientras el corte de hoy no esté firmado —
+          incluirlo revelaría el esperado que todavía hay que contar a ciegas. */}
+      <PeriodoCard timezone={timezone} reloadKey={reloadKey + escrituras} />
 
       {/* ④ Contar (D5) — a ciegas, como siempre. Se auto-oculta si no es hoy. */}
       {esHoy && (
