@@ -132,7 +132,11 @@ export default function HoyFeed({
   return (
     <div className={embedded ? '' : 'mx-auto w-full max-w-2xl px-4 py-5'}>
       <div className="mt-6 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-1">
-        <h2 className="text-sm font-semibold text-ink">Para recuperar</h2>
+        {/* Kicker en mayúsculas como TODAS las secciones de Clientela ("Quién
+            vuelve", "Cómo se mueven", "Faltas repetidas"). Con `font-semibold`
+            normal se leía como si viniera de otro sistema — la voz única de
+            dv3-5' se rompe en el sitio donde dos vistas se juntan. */}
+        <p className="text-[11px] font-semibold uppercase tracking-[.10em] text-faint">Para recuperar</p>
         {/* Resumen por urgencia: el TAMAÑO del problema en una línea, para que
             plegar el resto no esconda cuánto hay. */}
         <p className="text-[13px] text-ink-2 tabular-nums">

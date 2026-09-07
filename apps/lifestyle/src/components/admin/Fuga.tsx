@@ -27,9 +27,6 @@ import { huecoStep } from '@/lib/viz';
 
 const DOW_LARGO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 });
-const money = (n: number): string => MXN.format(Math.round(n));
-
 // ─── Panorama: la conclusión ──────────────────────────────────────────────────
 // Dos frases: cuánto espacio hay y dónde está. El heatmap que las acompañaba se
 // fue a Análisis — respondía "¿cómo se reparte la semana?", que es una pregunta
@@ -97,10 +94,19 @@ export function FugaHeatmap({ data }: { data: FugaData }): React.ReactElement | 
         <span className="text-[26px] font-light tabular-nums leading-none">{c.totalFreeHours}</span>
         <span className="text-sm text-ink-2"> horas-barbero sin usar</span>
       </p>
-      {/* Peso como REFERENCIA, no como pérdida. */}
-      <p className="mt-0.5 text-[13px] text-ink-2">
-        equivalen a <span className="tabular-nums">~{money(c.pesoRef)}</span> en servicios.
-      </p>
+      {/* 🔴 EL PESO DE REFERENCIA SE FUE, y no por espacio. Decía "equivalen a
+          ~$71,200 en servicios" y en Panorama, solo, se podía leer como la
+          referencia que decía ser. Acá queda DOS CARDS ARRIBA del ingreso real
+          del mes ($17,330) y la vecindad lo convierte en otra cosa: un número
+          4× mayor que lo que el negocio factura, al lado de lo que factura, se
+          lee como "perdiste $71,200" — exactamente lo que la regla de tono del
+          módulo prohíbe. Y el problema no es el encuadre sino la magnitud: con
+          178 horas-barbero libres en una semana, `slots × precio` describe una
+          barbería que factura cuatro veces su mes en siete días. Las HORAS son
+          la unidad honesta; convertirlas a pesos invita a una conclusión que el
+          dato no sostiene. Lo cazó la captura de Análisis, no el `tsc`.
+          `pesoRef` sigue calculándose en `lib/fuga.ts` y sin consumidor: es el
+          número el que no sirve para mostrarse, no el cálculo el que está mal. */}
 
       <div className="mt-3 overflow-x-auto">
         <HeatmapGrid

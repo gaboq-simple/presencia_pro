@@ -271,8 +271,13 @@ export default function ClientelaView({
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-5">
       <p className="text-[11px] font-semibold uppercase tracking-[.10em] text-faint">Clientela</p>
+      {/* 🔴 Decía "La base como un todo — sin nombres ni teléfonos" y P1 lo volvió
+          FALSO en la misma pantalla: abajo hay nombres. Lo cazó la captura, no el
+          `tsc`. La frase nueva dice las dos mitades que la pestaña de verdad tiene
+          —el colectivo arriba, la cola de trabajo abajo— y conserva la promesa que
+          SÍ se sigue cumpliendo: no hay teléfonos, y no se puede buscar a nadie. */}
       <p className="mt-0.5 text-[11px] font-medium text-faint">
-        La base como un todo — sin nombres ni teléfonos.
+        La base como un todo, y a quién atender. Sin buscador y sin teléfonos.
       </p>
 
       {totalCustomers > 0 ? (
