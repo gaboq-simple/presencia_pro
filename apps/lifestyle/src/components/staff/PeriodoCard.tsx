@@ -63,10 +63,12 @@ export default function PeriodoCard({ timezone, reloadKey }: Props): React.React
 
   return (
     <details className="rounded-card border border-line bg-card px-4 py-3">
+      {/* "Período" era jerga: el rótulo dice directamente de qué semana o mes se
+          está hablando, que es lo que la persona quiere saber al mirarlo. */}
       <summary className="cursor-pointer text-sm font-semibold text-ink">
-        Lo que va del período
+        {rango === 'semana' ? 'Esta semana' : 'Este mes'}
         <span className="ml-2 font-normal text-faint">
-          {datos ? `${rango === 'semana' ? 'esta semana' : 'este mes'} · ${fmtMonto(datos.total)}` : '…'}
+          {datos ? `entró ${fmtMonto(datos.total)}` : '…'}
         </span>
       </summary>
 
@@ -99,7 +101,7 @@ export default function PeriodoCard({ timezone, reloadKey }: Props): React.React
             </div>
             <div className="text-xs text-ink-2">
               <span className="tabular-nums">{fmtMonto(datos.deAgenda)}</span> de citas ·{' '}
-              <span className="tabular-nums">{fmtMonto(datos.entradas)}</span> de caja
+              <span className="tabular-nums">{fmtMonto(datos.entradas)}</span> sin cita
             </div>
             <div className="text-xs text-ink-2">
               salió <span className="tabular-nums font-semibold text-ink">{fmtMonto(datos.salidas)}</span>
@@ -114,7 +116,7 @@ export default function PeriodoCard({ timezone, reloadKey }: Props): React.React
           </p>
 
           {/* Las barras. El hueco se ve porque el día está y su barra no. */}
-          <ul className="mt-3 flex items-end gap-1" aria-label="Cobrado por día">
+          <ul className="mt-3 flex items-end gap-1" aria-label="Lo que entró cada día">
             {datos.dias.map((d) => (
               <li key={d.fecha} className="flex min-w-0 flex-1 flex-col items-center gap-1">
                 <span

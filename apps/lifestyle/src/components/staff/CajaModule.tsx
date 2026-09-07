@@ -133,7 +133,7 @@ export default function CajaModule({
         </h2>
         <p className="text-xs text-faint">
           {esHoy
-            ? 'En este orden: lo que quedó abierto, lo que entró y salió, lo que falta declarar, y al final se cuenta.'
+            ? 'Cuatro cosas, en este orden. Ninguna te frena: puedes contar la caja aunque falte algo.'
             : 'Lo que se registró ese día. El conteo solo se captura el mismo día.'}
         </p>
       </header>
@@ -142,8 +142,8 @@ export default function CajaModule({
           últimos 14 días". El gesto más frecuente del día estaba archivado como
           excepción (R1 punto 3); acá está abierto, y en la agenda "Terminó" ahora
           vive en el camino principal (P8, mismo paso). */}
-      <section className="flex flex-col gap-2" aria-label="Citas sin cerrar">
-        <PasoHeader n={1} titulo="Citas sin cerrar" pendientes={cabos?.total ?? null} />
+      <section className="flex flex-col gap-2" aria-label="Citas por resolver">
+        <PasoHeader n={1} titulo="Citas por resolver" pendientes={cabos?.total ?? null} />
         {cabos && cabos.total > 0 && (
           <div className="rounded-card border border-amber-border bg-amber-tint px-4 py-3 text-sm">
             <p className="mb-2 text-xs text-ink-2">De los últimos 14 días</p>
@@ -180,8 +180,8 @@ export default function CajaModule({
           los fijos que vencieron. Los fijos van ADENTRO de este paso y no en uno
           propio porque confirmar un fijo ES registrar un movimiento: no es un
           ritual aparte. El badge cuenta los que están tocando la puerta. */}
-      <section className="flex flex-col gap-2" aria-label="Movimientos del día">
-        <PasoHeader n={2} titulo="Movimientos del día" pendientes={fijosPendientes} />
+      <section className="flex flex-col gap-2" aria-label="Lo que entró y salió">
+        <PasoHeader n={2} titulo="Lo que entró y salió" pendientes={fijosPendientes} />
         <FijosDelDia
           estados={fijos ?? []}
           onCambio={() => { recargarFijos(); setEscrituras((n) => n + 1); onMovimiento?.(); }}
@@ -192,8 +192,8 @@ export default function CajaModule({
 
       {/* ③ Cobros sin declarar — el cubo `sinRiel` del corte, como tarea y ANTES
           de contar. Hasta hoy este número solo aparecía DESPUÉS de firmar. */}
-      <section className="flex flex-col gap-2" aria-label="Cobros sin declarar">
-        <PasoHeader n={3} titulo="Cobros sin declarar" pendientes={sinRiel} />
+      <section className="flex flex-col gap-2" aria-label="Falta decir cómo pagaron">
+        <PasoHeader n={3} titulo="Falta decir cómo pagaron" pendientes={sinRiel} />
         <CobrosSinRiel
           date={date}
           timezone={timezone}
@@ -202,15 +202,6 @@ export default function CajaModule({
         />
       </section>
 
-      {/* Las plantillas, plegadas: se consultan poco pero tienen que poder
-          consultarse — un fijo que no se encuentra es peor que no tenerlo. */}
-      <FijosLista estados={fijos ?? []} onCambio={recargarFijos} />
-
-      {/* El período, DESPUÉS del cierre: primero se resuelve hoy, después se mira
-          para atrás. Llega hasta ayer mientras el corte de hoy no esté firmado —
-          incluirlo revelaría el esperado que todavía hay que contar a ciegas. */}
-      <PeriodoCard timezone={timezone} reloadKey={reloadKey + escrituras} />
-
       {/* ④ Contar (D5) — a ciegas, como siempre. Se auto-oculta si no es hoy. */}
       {esHoy && (
         <section className="flex flex-col gap-2" aria-label="Contar la caja">
@@ -218,6 +209,22 @@ export default function CajaModule({
           <CorteCard date={date} timezone={timezone} />
         </section>
       )}
+
+      {/* ── Fuera del cierre ────────────────────────────────────────────────
+          Lo de abajo NO es parte de las cuatro cosas: son dos cajones que se
+          consultan de vez en cuando. Estaban intercalados entre el paso 3 y el
+          4, y ahí rompían la cuenta —el encabezado promete cuatro pasos y se
+          leían seis bloques—. Van después del flujo, plegados, para que el
+          cierre se lea de una sola pasada (M5b). */}
+      <div className="mt-2 flex flex-col gap-3 border-t border-line pt-3">
+        {/* Las plantillas: se consultan poco pero tienen que poder consultarse —
+            un fijo que no se encuentra es peor que no tenerlo. */}
+        <FijosLista estados={fijos ?? []} onCambio={recargarFijos} />
+
+        {/* La semana y el mes. Llega hasta ayer mientras el corte de hoy no esté
+            firmado: incluirlo revelaría el esperado que hay que contar a ciegas. */}
+        <PeriodoCard timezone={timezone} reloadKey={reloadKey + escrituras} />
+      </div>
     </div>
   );
 }

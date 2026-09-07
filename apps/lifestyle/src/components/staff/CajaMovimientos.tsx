@@ -153,7 +153,7 @@ export default function CajaMovimientos({ date, timezone, reloadKey }: Props) {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-ink">Caja del día</h3>
-          <p className="text-xs text-faint">Lo que no pasó por la agenda</p>
+          <p className="text-xs text-faint">Dinero que no viene de una cita</p>
         </div>
         {esHoy && (
           <button
@@ -231,7 +231,7 @@ export default function CajaMovimientos({ date, timezone, reloadKey }: Props) {
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
             <p className="text-lg font-semibold text-ink">Movimiento de caja</p>
-            <p className="mb-4 text-sm text-ink-2">Dinero que no pasó por la agenda</p>
+            <p className="mb-4 text-sm text-ink-2">Dinero que no viene de una cita</p>
 
             {/* Entró / Salió — el signo del dinero, primero */}
             <div className="grid grid-cols-2 gap-2">

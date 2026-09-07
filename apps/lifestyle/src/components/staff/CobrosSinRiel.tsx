@@ -105,7 +105,7 @@ export default function CobrosSinRiel({
 
   return (
     <section
-      aria-label="Cobros sin riel declarado"
+      aria-label="Cobros sin forma de pago"
       className="rounded-card border border-line bg-card px-4 py-3 shadow-card"
     >
       {error && (

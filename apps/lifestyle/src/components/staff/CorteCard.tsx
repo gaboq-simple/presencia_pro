@@ -14,6 +14,13 @@
 // escrito junto con ella: "el efectivo del cajón", "el total de la terminal",
 // "esperado", "diferencia", "corregir". Si una de las dos cambia una palabra, la
 // otra queda mintiendo.
+//
+// M5b: el título pasó de "El corte" a "El corte de caja". En una barbería "corte"
+// es un corte de PELO —esta tarjeta vive al lado de una agenda llena de "Corte de
+// cabello"—, y el término completo es el que el guion ya enseña, así que se
+// desambigua sin inventar una palabra nueva. Y el encabezado de los tres números
+// dejó de ser "contado · esperado · diferencia": ahora usa verbos, porque quien lo
+// lee por primera vez tiene que saber cuál columna es la suya.
 
 'use client';
 
@@ -79,11 +86,11 @@ export default function CorteCard({ date, timezone }: Props) {
 
   return (
     <section
-      aria-label="El corte"
+      aria-label="El corte de caja"
       className="rounded-card border border-line bg-card px-4 py-3 shadow-card"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-sm font-semibold text-ink">El corte</h3>
+        <h3 className="text-sm font-semibold text-ink">El corte de caja</h3>
         {vigente && !corrigiendo && (
           <button
             onClick={() => { setCorrigiendo(true); setEfectivo(''); setTerminal(''); }}
@@ -192,7 +199,7 @@ function ResultadoCorte({
           primera vez no sabe cuál de los tres es "lo que contó" — y el guion
           (`onboarding/guion-corte.md`) habla de "la diferencia" con esa palabra. */}
       <p className="mt-3 text-right text-[10.5px] uppercase tracking-[.08em] text-faint">
-        contado · esperado · diferencia
+        contaste · debía haber · diferencia
       </p>
 
       <dl className="mt-1 space-y-2">
@@ -226,9 +233,9 @@ function ResultadoCorte({
       {corte.sinRiel > 0 && (
         <p className="mt-2 rounded-lg bg-canvas px-3 py-2 text-xs text-ink-2">
           <span className="font-semibold tabular-nums text-ink">{fmtMonto(corte.sinRiel)}</span>
-          {' '}sin riel declarado
+          {' '}sin saber cómo pagaron
           <span className="block text-faint">
-            Se cobró, pero nadie dijo cómo se pagó. No se compara con el cajón ni con la terminal.
+            Se cobró, pero nadie dijo si fue efectivo o tarjeta. No se compara con el cajón ni con la terminal.
           </span>
         </p>
       )}

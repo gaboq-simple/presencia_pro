@@ -1051,7 +1051,7 @@ export default function AssistantControlDesk({
               {/* Buscar cliente → pieza aparte (searchCustomers), fuera del núcleo PR-5. */}
               <button
                 disabled
-                title="Disponible en la próxima iteración"
+                title="Todavía no está listo"
                 className="cursor-not-allowed rounded-pill border border-line px-3 py-1.5 text-sm font-medium text-faint"
               >
                 Buscar cliente

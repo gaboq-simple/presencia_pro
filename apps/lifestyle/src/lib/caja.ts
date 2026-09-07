@@ -68,9 +68,13 @@ const CONCEPTO_LABEL: Record<string, string> = {
   producto:      'Producto',
   insumos:       'Insumos',
   renta:         'Renta',
-  servicios:     'Servicios',
+  // NO "Servicios": el negocio VENDE servicios (corte, barba, tinte) y decir
+  // "salió $800 en Servicios" es literalmente ambiguo. "Recibos" es como el
+  // mostrador ya los llama y no colisiona con nada.
+  servicios:     'Recibos',
   nomina:        'Nómina',
-  mantenimiento: 'Manten.',
+  // Sin abreviar: una etiqueta cortada obliga a adivinar qué decía.
+  mantenimiento: 'Arreglos',
   retiro:        'Retiro',
   otro:          'Otro',
 };
@@ -84,13 +88,13 @@ const NOTA_PLACEHOLDER: Record<string, string> = {
   producto:      'Ej. cera y shampoo',
   insumos:       'Ej. toallas y navajas',
   renta:         'Ej. mes de septiembre',
-  servicios:     'Ej. recibo de luz',
+  servicios:     'Ej. luz, agua o internet',
   nomina:        'Ej. adelanto de la semana',
-  mantenimiento: 'Ej. arreglo del sillón',
+  mantenimiento: 'Ej. se arregló el sillón',
   // Ya NO dice "Ej. pago de la renta": ese placeholder era la prueba de que el
   // catálogo colapsaba dos hechos distintos. Un retiro es el titular sacando
   // efectivo, y la renta ahora tiene su propio concepto.
-  retiro:        'Ej. corte de caja del titular',
+  retiro:        'Ej. el dueño sacó efectivo',
   otro:          'Ej. para qué fue',
 };
 
