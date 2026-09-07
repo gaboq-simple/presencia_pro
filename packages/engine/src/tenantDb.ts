@@ -61,6 +61,10 @@ export const TENANT_TABLES = [
   // del plan es "las tablas nuevas nacen blindadas", no "cuando alguien las use".
   'caja_movimientos',
   'caja_cortes',
+  // Los gastos fijos (M4 de S10-ASIS-01). Es una PLANTILLA, no plata —lo que pasó
+  // de verdad vive en `caja_movimientos`—, pero es igual de tenant: el monto de la
+  // renta de un negocio no tiene por qué ser legible desde otro.
+  'caja_fijos',
 ] as const;
 
 export type TenantTable = (typeof TENANT_TABLES)[number];

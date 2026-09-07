@@ -23,6 +23,14 @@ import { readFileSync } from 'node:fs';
 
 const MODULO = 'apps/lifestyle/src/app/staff/assistant-actions.ts';
 
+// ⚠️ COBERTURA PARCIAL, registrada como S10-SEC-01 (propuesta, 2026-09-06): este
+// check mira UN módulo de cinco. Las actions de `caja-actions.ts` (8 desde M4),
+// `cabos-actions.ts`, `staff/actions.ts` y `dashboard/actions.ts` NO tienen su
+// gate fijado acá, así que agregar una action de dinero sin decidir quién puede
+// llamarla no rompe la suite — justo el agujero que este archivo vino a tapar.
+// Los gates vigentes de esos módulos se leyeron y están bien puestos; lo que
+// falta es el candado.
+
 /**
  * El mapa vigente. `asistente` = cualquier miembro del negocio con sesión
  * (`requireAssistantSession`); `dueño` = `requireOwnerOrAdmin`.

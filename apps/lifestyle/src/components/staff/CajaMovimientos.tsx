@@ -44,6 +44,10 @@ type Props = {
   /** Día que mira la superficie ('YYYY-MM-DD'). */
   date:     string;
   timezone: string;
+  /** Cambia cuando ALGO de afuera escribió un movimiento —confirmar un gasto fijo
+   *  escribe uno— y esta lista tiene que enterarse. Sin esto la caja del día se
+   *  quedaba mostrando el estado anterior al gesto que acababa de ocurrir. */
+  reloadKey?: number;
 };
 
 function fmtHora(iso: string, timeZone: string): string {
@@ -54,7 +58,7 @@ function fmtHora(iso: string, timeZone: string): string {
   }).format(d);
 }
 
-export default function CajaMovimientos({ date, timezone }: Props) {
+export default function CajaMovimientos({ date, timezone, reloadKey }: Props) {
   const [movs, setMovs]       = useState<MovimientoDelDia[]>([]);
   const [abierta, setAbierta] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -88,7 +92,7 @@ export default function CajaMovimientos({ date, timezone }: Props) {
     }
   }, [date]);
 
-  useEffect(() => { void recargar(); }, [recargar]);
+  useEffect(() => { void recargar(); }, [recargar, reloadKey]);
 
   function abrir() {
     // Se lee al ABRIR y no al montar: la hoja se abre unas pocas veces al día y

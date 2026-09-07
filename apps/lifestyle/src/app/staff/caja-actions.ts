@@ -24,6 +24,10 @@ import { todayStrInTz } from '@/lib/dayWindow';
 import { sumarDias } from '@/lib/timeWindows';
 import { calcularAtajos, ordenDelCatalogo, type AtajosDeCaja, type MovimientoHistorico } from '@/lib/atajosCaja';
 import {
+  estadoDelFijo, ordenarEstados, ultimosPagosVigentes, CADENCIAS,
+  type Fijo, type EstadoFijo, type Cadencia, type PagoDeFijo,
+} from '@/lib/fijos';
+import {
   resolveMovimiento,
   esMovimientoError,
   type MovimientoInput,
@@ -492,4 +496,254 @@ export async function getCortesDeHoy(): Promise<CorteRow[]> {
   if (!auth.ok) throw new Error(auth.error);
   const timezone = await getBusinessTimezone(auth.businessId);
   return getCortesDelDia(auth.businessId, todayStrInTz(timezone));
+}
+
+// ─── Gastos fijos (M4 de S10-ASIS-01) ─────────────────────────────────────────
+// UN FIJO NUNCA SE REGISTRA SOLO. No hay cron, no hay job y no hay trigger que
+// inserte movimientos: un fijo VENCE, aparece en la cola del día y una persona lo
+// confirma con un tap. Ese gesto —y solo ese— escribe en `caja_movimientos`.
+//
+// La razón es la regla dura de `CLAUDE.md`: un movimiento AFIRMA un hecho del
+// mundo, y escribir "salió la renta" porque es día 3 es fabricar evidencia. Un
+// mes se paga el 5, otro no se paga, y el sistema no tiene forma de saberlo.
+//
+// Y es también la respuesta a la objeción que originó el diseño: un recurrente
+// que se configura una vez y desaparece es peor que anotarlo a mano. Este vuelve
+// a tocar la puerta cada período, así que no se puede olvidar — y el monto llega
+// editable en el mismo lugar donde uno se da cuenta de que subió.
+
+// NO se re-exporta `EstadoFijo` desde acá. En un módulo `'use server'` TODO export
+// tiene que ser una función async, y Turbopack convierte el `export type` en un
+// re-export de VALOR que revienta en runtime con `ReferenceError`. `tsc` no lo ve
+// —para él es un tipo y se borra—, así que lo caza la ruta real o nadie.
+// Pasó en M2 con `CobroSinRiel`, quedó escrito, y volvió a pasar acá: por eso M4
+// deja el repo-check `useServerExports.repo.test.ts`, que ahora sí lo impide.
+// Quien necesite el tipo lo importa de `@/lib/fijos` con `import type`.
+
+type FijoRow = {
+  id: string; concept: string; label: string;
+  amount_sugerido: number | string; method_sugerido: string;
+  cadencia: string; dia_del_mes: number | null; dia_de_semana: number | null;
+  active: boolean;
+};
+
+/**
+ * Los fijos del negocio con su estado: cuándo vencen, si están pendientes y
+ * cuánto se pagó la última vez.
+ *
+ * **El último pago se DERIVA de los movimientos** (`fijo_id`), no de una columna
+ * de `caja_fijos`. Una fecha guardada exige a alguien que la mueva, y el día que
+ * nadie la mueva la tabla miente en silencio; los movimientos, en cambio, son el
+ * hecho.
+ */
+export async function listarFijos(soloActivos = true): Promise<EstadoFijo[]> {
+  const auth = await requireBusinessSession();
+  if (!auth.ok) throw new Error(auth.error);
+
+  const timezone = await getBusinessTimezone(auth.businessId);
+  const hoy = todayStrInTz(timezone);
+  const db = tenantDb(getServiceClient(), auth.businessId);
+
+  let q = db.table('caja_fijos').select(
+    'id, concept, label, amount_sugerido, method_sugerido, cadencia, dia_del_mes, dia_de_semana, active',
+  );
+  if (soloActivos) q = q.eq('active', true);
+
+  const { data, error } = await q;
+  if (error) throw new Error(`listarFijos failed: ${error.message}`);
+
+  const fijos: Fijo[] = ((data ?? []) as unknown as FijoRow[]).map((r) => ({
+    id:             r.id,
+    label:          r.label,
+    concept:        r.concept,
+    amountSugerido: Number(r.amount_sugerido),
+    methodSugerido: r.method_sugerido,
+    cadencia:       r.cadencia as Cadencia,
+    diaDelMes:      r.dia_del_mes,
+    diaDeSemana:    r.dia_de_semana,
+    active:         r.active,
+  }));
+  if (fijos.length === 0) return [];
+
+  // Los pagos de todos los fijos, del más nuevo al más viejo.
+  const { data: pagos, error: errPagos } = await db
+    .table('caja_movimientos')
+    .select('id, fijo_id, amount, occurred_on')
+    .in('fijo_id', fijos.map((f) => f.id))
+    .is('reverses_id', null)   // una contraentrada no es un pago
+    .order('occurred_on', { ascending: false });
+
+  if (errPagos) throw new Error(`listarFijos pagos: ${errPagos.message}`);
+
+  type PagoRow = { id: string; fijo_id: string; amount: number | string; occurred_on: string };
+  const candidatos: PagoDeFijo[] = ((pagos ?? []) as unknown as PagoRow[]).map((p) => ({
+    id: p.id, fijoId: p.fijo_id, occurredOn: p.occurred_on, amount: Number(p.amount),
+  }));
+
+  // ¿Alguno de esos pagos fue ANULADO? La contraentrada NO lleva `fijo_id`
+  // (`reverseCajaMovimiento` no lo copia), así que hay que preguntarle por
+  // `reverses_id` — que además es UNIQUE, o sea indexado. Sin este paso un pago
+  // anulado seguiría contando como pagado y el fijo se quedaría CALLADO todo el
+  // período sin que nadie haya pagado nada: justo el modo de fallo que M4 evita.
+  const anulados = new Set<string>();
+  if (candidatos.length > 0) {
+    const { data: contras, error: errContras } = await db
+      .table('caja_movimientos')
+      .select('reverses_id')
+      .in('reverses_id', candidatos.map((c) => c.id));
+    if (errContras) throw new Error(`listarFijos anulaciones: ${errContras.message}`);
+    for (const c of (contras ?? []) as unknown as { reverses_id: string }[]) {
+      anulados.add(c.reverses_id);
+    }
+  }
+
+  const ultimo = ultimosPagosVigentes(candidatos, anulados);
+  return ordenarEstados(fijos.map((f) => estadoDelFijo(f, ultimo.get(f.id) ?? null, hoy)));
+}
+
+export type FijoInput = {
+  concept: string;
+  label: string;
+  amount: number | string;
+  method: string;
+  cadencia: string;
+  diaDelMes?: number | null;
+  diaDeSemana?: number | null;
+};
+
+/**
+ * Declara un fijo. **No es dinero**: es una intención —cuánto suele ser, cada
+ * cuánto, con qué riel—, así que crearlo no afirma nada sobre el mundo y no toca
+ * `caja_movimientos`.
+ */
+export async function crearFijo(input: FijoInput): Promise<{ error?: string; id?: string }> {
+  const auth = await requireBusinessSession();
+  if (!auth.ok) return { error: auth.error };
+  if (!auth.staffId) return { error: 'No se pudo identificar quién declara el fijo' };
+
+  const label = (input.label ?? '').trim();
+  if (label.length === 0 || label.length > 60) return { error: 'Ponle un nombre corto al fijo' };
+
+  // El monto se valida con el MISMO módulo puro que un movimiento: es el mismo
+  // techo, la misma coma decimal y el mismo mensaje en el mismo idioma.
+  const comoMovimiento = resolveMovimiento({
+    type: 'salida', concept: input.concept, amount: input.amount, method: input.method,
+  });
+  if (esMovimientoError(comoMovimiento)) return { error: comoMovimiento.error };
+
+  if (!(CADENCIAS as readonly string[]).includes(input.cadencia)) {
+    return { error: 'Cadencia no válida' };
+  }
+  const mensual = input.cadencia === 'mensual';
+  const diaDelMes = mensual ? Number(input.diaDelMes) : null;
+  const diaDeSemana = mensual ? null : Number(input.diaDeSemana);
+  if (mensual && !(diaDelMes! >= 1 && diaDelMes! <= 31)) return { error: 'Elige un día del mes (1 a 31)' };
+  if (!mensual && !(diaDeSemana! >= 0 && diaDeSemana! <= 6)) return { error: 'Elige un día de la semana' };
+
+  const { data, error } = await tenantDb(getServiceClient(), auth.businessId)
+    .table('caja_fijos')
+    .insert({
+      concept:         comoMovimiento.concept,
+      label,
+      amount_sugerido: comoMovimiento.amount,
+      method_sugerido: comoMovimiento.method,
+      cadencia:        input.cadencia,
+      dia_del_mes:     diaDelMes,
+      dia_de_semana:   diaDeSemana,
+      created_by:      auth.staffId,
+    })
+    .select('id')
+    .maybeSingle();
+
+  if (error) throw new Error(`crearFijo failed: ${error.message}`);
+  revalidatePath('/dashboard');
+  return { id: (data as { id: string } | null)?.id };
+}
+
+/** Se desactiva, no se borra: los movimientos que ya apuntan a él tienen que
+ *  poder seguir explicando de dónde salieron. */
+export async function desactivarFijo(id: string): Promise<{ error?: string }> {
+  const auth = await requireBusinessSession();
+  if (!auth.ok) return { error: auth.error };
+
+  const { error } = await tenantDb(getServiceClient(), auth.businessId)
+    .table('caja_fijos')
+    .update({ active: false, updated_at: new Date().toISOString() })
+    .eq('id', id);
+
+  if (error) throw new Error(`desactivarFijo failed: ${error.message}`);
+  revalidatePath('/dashboard');
+  return {};
+}
+
+/**
+ * Confirma que un fijo SE PAGÓ: escribe el movimiento real, firmado por quien lo
+ * confirma. Este es el ÚNICO camino por el que un fijo produce plata.
+ *
+ * Si el monto confirmado es distinto del sugerido, la plantilla se actualiza: el
+ * ajuste ocurre donde la persona se dio cuenta de que subió, no en un menú de
+ * configuración que habría que recordar que existe. El movimiento guarda lo que
+ * se pagó DE VERDAD; la plantilla, lo que probablemente se pague la próxima.
+ */
+export async function confirmarFijo(
+  id: string,
+  input: { amount?: number | string | null; method?: string | null; note?: string | null },
+): Promise<{ error?: string; movimientoId?: string }> {
+  const auth = await requireBusinessSession();
+  if (!auth.ok) return { error: auth.error };
+  if (!auth.staffId) return { error: 'No se pudo identificar quién confirma el fijo' };
+
+  const db = tenantDb(getServiceClient(), auth.businessId);
+
+  const { data: fijo, error: errFijo } = await db
+    .table('caja_fijos')
+    .select('id, concept, label, amount_sugerido, method_sugerido, active')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (errFijo) throw new Error(`confirmarFijo lectura: ${errFijo.message}`);
+  if (!fijo) return { error: 'Ese gasto fijo ya no existe' };
+  const f = fijo as unknown as { concept: string; amount_sugerido: number | string; method_sugerido: string; active: boolean };
+  if (!f.active) return { error: 'Ese gasto fijo está desactivado' };
+
+  // Sin monto tecleado se usa el sugerido, pero SOLO porque una persona tocó
+  // "Confirmar" mirándolo: el tap es el que afirma el hecho, no el default.
+  const mov = resolveMovimiento({
+    type:    'salida',
+    concept: f.concept,
+    amount:  input.amount == null || input.amount === '' ? f.amount_sugerido : input.amount,
+    method:  input.method ?? f.method_sugerido,
+    note:    input.note ?? null,
+  });
+  if (esMovimientoError(mov)) return { error: mov.error };
+
+  const timezone = await getBusinessTimezone(auth.businessId);
+  const { data, error } = await db
+    .table('caja_movimientos')
+    .insert({
+      type:        mov.type,
+      amount:      mov.amount,
+      method:      mov.method,
+      concept:     mov.concept,
+      note:        mov.note,
+      staff_id:    auth.staffId,
+      fijo_id:     id,
+      occurred_on: todayStrInTz(timezone),
+    })
+    .select('id')
+    .maybeSingle();
+
+  if (error) throw new Error(`confirmarFijo failed: ${error.message}`);
+
+  // El ajuste va donde uno se dio cuenta. Si falla, el movimiento —que es el
+  // hecho— ya quedó: la plantilla es una sugerencia y puede esperar.
+  if (mov.amount !== Number(f.amount_sugerido) || mov.method !== f.method_sugerido) {
+    await db.table('caja_fijos')
+      .update({ amount_sugerido: mov.amount, method_sugerido: mov.method, updated_at: new Date().toISOString() })
+      .eq('id', id);
+  }
+
+  revalidatePath('/staff');
+  revalidatePath('/dashboard');
+  return { movimientoId: (data as { id: string } | null)?.id };
 }

@@ -25,11 +25,15 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import CajaMovimientos from './CajaMovimientos';
 import CorteCard from './CorteCard';
 import CobrosSinRiel from './CobrosSinRiel';
+import FijosDelDia from './FijosDelDia';
+import FijosLista from './FijosLista';
 import { isTodayInTz } from '@/lib/dayWindow';
+import { listarFijos } from '@/app/staff/caja-actions';
+import type { EstadoFijo } from '@/lib/fijos';
 import type { CaboSuelto } from '@/app/staff/cabos-actions';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -41,8 +45,10 @@ type Props = {
   cabos: { total: number; lista: CaboSuelto[] } | null;
   onComplete: (id: string) => void;
   onNoShow: (id: string) => void | Promise<void>;
-  /** Cambia cuando se cierra una cita: dispara la relectura de ③. */
+  /** Cambia cuando se cierra una cita: dispara la relectura de ③ y de los fijos. */
   reloadKey: number;
+  /** Avisa que se escribió un movimiento (confirmar un fijo escribe uno). */
+  onMovimiento?: () => void;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -92,10 +98,26 @@ function PasoHeader({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CajaModule({
-  date, timezone, cabos, onComplete, onNoShow, reloadKey,
+  date, timezone, cabos, onComplete, onNoShow, reloadKey, onMovimiento,
 }: Props): React.ReactElement {
   const esHoy = isTodayInTz(date, timezone);
   const [sinRiel, setSinRiel] = useState<number | null>(null);
+
+  // Los fijos (M4). El estado —qué vence, qué está pendiente, cuánto se pagó la
+  // última vez— lo calcula el módulo puro en el server; acá solo se muestra.
+  const [fijos, setFijos] = useState<EstadoFijo[] | null>(null);
+  // Confirmar un fijo ESCRIBE un movimiento, así que la lista de caja tiene que
+  // enterarse. Sin este contador se quedaba mostrando el estado anterior al gesto
+  // que acababa de ocurrir — cazado en la ruta real, no por los gates.
+  const [escrituras, setEscrituras] = useState(0);
+  const recargarFijos = useCallback(() => {
+    void listarFijos().then(setFijos).catch(() => setFijos([]));
+  }, []);
+  // `reloadKey` también los mueve: confirmar un fijo escribe un movimiento, y
+  // registrar un movimiento puede satisfacer un fijo.
+  useEffect(() => { recargarFijos(); }, [recargarFijos, reloadKey]);
+
+  const fijosPendientes = fijos === null ? null : fijos.filter((f) => f.pendiente).length;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2">
@@ -153,10 +175,18 @@ export default function CajaModule({
         )}
       </section>
 
-      {/* ② Movimientos del día (D4) — el dinero que no pasó por la agenda. */}
+      {/* ② Movimientos del día (D4) — el dinero que no pasó por la agenda, más
+          los fijos que vencieron. Los fijos van ADENTRO de este paso y no en uno
+          propio porque confirmar un fijo ES registrar un movimiento: no es un
+          ritual aparte. El badge cuenta los que están tocando la puerta. */}
       <section className="flex flex-col gap-2" aria-label="Movimientos del día">
-        <PasoHeader n={2} titulo="Movimientos del día" />
-        <CajaMovimientos date={date} timezone={timezone} />
+        <PasoHeader n={2} titulo="Movimientos del día" pendientes={fijosPendientes} />
+        <FijosDelDia
+          estados={fijos ?? []}
+          onCambio={() => { recargarFijos(); setEscrituras((n) => n + 1); onMovimiento?.(); }}
+          esHoy={esHoy}
+        />
+        <CajaMovimientos date={date} timezone={timezone} reloadKey={escrituras} />
       </section>
 
       {/* ③ Cobros sin declarar — el cubo `sinRiel` del corte, como tarea y ANTES
@@ -170,6 +200,10 @@ export default function CajaModule({
           onCount={setSinRiel}
         />
       </section>
+
+      {/* Las plantillas, plegadas: se consultan poco pero tienen que poder
+          consultarse — un fijo que no se encuentra es peor que no tenerlo. */}
+      <FijosLista estados={fijos ?? []} onCambio={recargarFijos} />
 
       {/* ④ Contar (D5) — a ciegas, como siempre. Se auto-oculta si no es hoy. */}
       {esHoy && (

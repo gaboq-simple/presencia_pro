@@ -930,6 +930,7 @@ export default function AssistantControlDesk({
             onComplete={handleComplete}
             onNoShow={handleNoShow}
             reloadKey={completadasCount}
+            onMovimiento={() => router.refresh()}
           />
         )}
 
