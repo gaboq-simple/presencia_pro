@@ -2595,6 +2595,42 @@ digan la verdad.
 
 ---
 
+## El Asistente modular — Agenda · Caja · los escondidos (ola S10, aprobada 2026-09-06, plan en docs/planes/asistente-modular.md)
+
+> **Qué es esta ola.** La vista del Asistente deja de ser una pila vertical y pasa a
+> ser un shell de módulos. **Gabriel DESCONGELÓ el diseño del asistente el
+> 2026-09-06** para este alcance: la decisión "diseño congelado (`asistente-FINAL.html`)"
+> que rige desde S6-UI-02 queda superada acá, y el rediseño acompaña a la
+> funcionalidad. Dos módulos se construyen —**Agenda** y **Caja**—, dos que hoy
+> están escondidos detrás de un botón se promueven, y el shell deja declarado el
+> lugar de los que vengan.
+>
+> **Las cinco respuestas de Gabriel que fijan el alcance** (2026-09-06): es tarea de
+> sprint · se descongela el diseño · **hay frontera de privacidad, pero no puede
+> estorbarle el trabajo al empleado** · flujo de caja operativo ahora, con los
+> cimientos fiscales anotados y NO construidos · catálogo de categorías, pero
+> implementado de forma que nunca frene la captura. Y su objeción sobre los gastos
+> recurrentes —*"que no se oculten una vez establecidos"*— quedó resuelta en el plan
+> §6: **el fijo nunca se registra solo; toca la puerta y alguien lo confirma con un
+> tap**, que además es lo único compatible con la regla dura "presente no es ausente".
+>
+> **Fuera de esta ola, y no se propone:** la raya (P11, bloqueada por la decisión del
+> modelo de comisión), el corte por turno (P12), contabilidad fiscal, el rediseño del
+> dueño (S7-DV3-01, ola aparte en curso) y el bot.
+
+- **S10-ASIS-01 · El Asistente modular (pasos M1…M6)** ⚪ todo · **el corte en pasos y las cuatro decisiones abiertas del §10 del plan esperan el visto bueno de Gabriel. Ningún paso arranca antes de eso.**
+  Gates por paso, los estándar: `tsc` 0 · `eslint` 0 errores (baseline de warnings) · suite completa · red de seguridad visual con el seed denso corrido al inicio del paso y prohibido re-sembrar entre el "antes" y el "después".
+  - **M1 · El shell de módulos** ⚪ todo. Barra de módulos, Agenda por defecto. Se MUEVE lo que existe, cero features nuevos. El estado del día sube a un contenedor por ENCIMA de las pestañas: un solo `useState`, un solo polling (`POLL_MS = 20_000`), pestañas tontas — si cada módulo monta su propio estado, el mostrador ve dos verdades del mismo día. **Aceptación: dentro de Agenda, 0 píxeles de diferencia**; cambiar de módulo y volver no re-consulta ni pierde la ventana temporal.
+  - **M2 · Caja como módulo** ⚪ todo. Movimientos + corte + cabos se mudan; aparece "Cerrar el día" en su orden real (cabos → movimientos → sin-riel → contar) y la lista accionable de cobros sin riel. **Absorbe P8 de la auditoría** ("Terminó" fuera del acordeón). Aceptación: se re-corre la prueba mecánica de D5 — el esperado del corte no aparece en el DOM antes de firmar.
+  - **M3 · Categorías finas** ⚪ todo. El catálogo de `salida` crece (`renta`, `servicios`, `nomina`, `mantenimiento`) porque hoy **pagar la renta se registra como "retiro"** — el placeholder lo dice literal (`lib/caja.ts:69`). Migración del CHECK + espejo en `lib/caja.ts` + chips ordenados por uso real del negocio + montos frecuentes. **Sin backfill** (reclasificar hacia atrás sería inventar en qué se gastó). Aceptación: el camino de captura no gana un solo tap; si sube, el paso se revierte.
+  - **M4 · Los fijos que tocan la puerta** ⚪ todo. `caja_fijos` + `caja_movimientos.fijo_id` + la cola de vencimientos + la lista con **último monto derivado de los movimientos reales**, no de un campo mutable. **Sondeo negativo obligatorio:** con un fijo vencido y nadie confirmando, `caja_movimientos` no gana ninguna fila.
+  - **M5 · El período** ⚪ todo. Semana/mes **reusando `lib/cobrado.ts` y `getInsumosDelCorte`** — prohibida una segunda regla del dinero. Salidas siempre en línea aparte, jamás neteadas (regla de D6, no se reabre). Su valor mayor no es el total: es que un día sin registrar se ve como hueco. Contraprueba: el total calculado por fuera contra la BD coincide, y el titular del dueño para el mismo rango no puede contradecirlo.
+  - **M6 · Los escondidos** ⚪ todo. Conversaciones sale del bottom sheet y es módulo; Clientes revive `searchCustomers` (`assistant-actions.ts:1067`) y monta `ClientProfileCard.tsx`, matando el botón deshabilitado de `AssistantControlDesk.tsx:1048`. **Cero componentes nuevos: es enchufar dos que ya están escritos.**
+  **🔎 Hallazgo del censo del plan (2026-09-06), no registrado en ninguna parte:** `ClientProfileCard.tsx` (249 líneas) **no la monta ningún archivo** y `searchCustomers` **no tiene llamador** — están completas y muertas desde que el botón "Buscar cliente" quedó `disabled` en PR-5 de S6-UI-02, con el título *"Disponible en la próxima iteración"*. Mismo patrón que `S9-RES-02` y `S9-RES-03`. Por eso M6 es barato: no construye, enchufa.
+  **La frontera de privacidad, resuelta en una regla** (plan §3): el asistente ve todo lo que necesita para operar y para responder por lo que registró; no ve **el esperado antes de contar** (el corte a ciegas es su coartada, no su límite: con él, un descuadre es un hecho del mundo y no una sospecha sobre una persona), no ve **las propinas** (`appointment_tips`, RLS deny-all + lint que rompe el build) y no ve **margen ni la raya** (no son herramientas de mostrador).
+
+---
+
 ## Visión del motor de agendamiento (modelo objetivo)
 
 > **Qué es esto:** NO es un bug ni una tarea. Es el modelo objetivo del motor de agendamiento — la foto de cómo debe comportarse cuando esté completo. Guía los próximos sprints de scheduling y sirve de norte para decidir fixes y features. Las piezas concretas se irán cortando en tareas `S{n}-BOT-*` a medida que se aborden.
@@ -2805,6 +2841,8 @@ Cada sesión productiva con Claude Code se registra aquí brevemente. Una línea
 | 2026-09-04 | **S9-DATA-02** — decisión de Gabriel sobre la autoridad del esquema | 🟢 **decidido y registrado** (rama `docs/autoridad-del-esquema-es-el-dump`); solo documentos | **La autoridad del esquema es el DUMP.** Se descarta adoptar `supabase db push` (exigía renumerar el histórico para que `version` = prefijo del archivo) por costo contra beneficio con un solo entorno productivo. `supabase/migrations/` queda como documentación de la historia, no receta reproducible. **Consecuencia que destraba una tarea vieja:** `S4-OPS-02` (restore drill) se hace **contra el dump**, y eso es lo único que prueba — que el backup restaura, no que el repo construya. La decisión **no afloja** el archivo por migración: sigue siendo obligatorio, y `schemaChecks.repo.test.ts` sigue rompiendo el build si el código escribe un valor que el repo no permite. Escrito donde se va a leer: `RUNBOOK.md` §6 (con la medición que lo sustenta: 28 migraciones en el ledger contra 92 archivos en dos carpetas incompatibles, censo por nombre con 4 falsos positivos de 5) y `CLAUDE.md`, que decía que la fuente eran los directorios de migraciones. |
 
 | 2026-09-04 | **S9-DIN-02** (P10 del plan) — "quién cobró" como campo propio | done (rama `feat/quien-cobro`), migración aplicada a prod **con su archivo en el repo** | `modified_by_staff_id` dice **la última persona que tocó la cita**, no la que cobró: la pisa cualquier edición posterior. Con 5 barberos cobrando en su silla y 45% de comisión, eso no es atribución. **🔎 El censo volvió a cambiar el diseño:** de los tres "Terminó" que R2 había anotado, **sólo uno está vivo** —`StaffDayTimeline` no está montado y `PATCH /api/appointments` no tiene llamador—, así que repartir la escritura entre call-sites garantizaba que el cuarto naciera olvidándose. **El campo se sella en el TRIGGER**, molde de `seal_appointment_price`: transición a `completed`, freeze-once, NULL si no hay a quién atribuir. **★ Y de paso cerró un agujero ajeno:** `completed_at` —la atribución del dinero a un día— también lo escribía sólo uno de los tres, o sea que una cita cerrada desde la vista del barbero **se evaporaba del cuadre**; ahora se sella en el mismo lugar. Sin backfill: copiar `modified_by_staff_id` hacia atrás fabricaría la atribución que la columna vino a tener de verdad. **Verificado contra la BD real con la trampa primero** (afirmó lo contrario de la verdad y **disparó**): sella al actor, pone `completed_at`, y **una edición posterior con otro barbero no lo pisa**. Residuos: 0. **938/938** · tsc 0 · lint 0 err. Siembra el dato; su consumidor es la raya (P11), bloqueada por la decisión del modelo de comisión. |
+
+| 2026-09-06 | **S10-ASIS-01** — el Asistente modular (ola nueva, pedida por Gabriel) | ⚪ **registrada; el plan está escrito y espera visto bueno del corte** (rama `docs/asistente-modular`, entregable `docs/planes/asistente-modular.md`) · **SOLO DOCUMENTOS** — el diff no toca `apps/`, ni `packages/`, ni `supabase/` | Gabriel pidió partir el Asistente en módulos (Agenda · Contable) y **descongeló su diseño** para hacerlo. **El censo cambió dos cosas del enunciado.** (1) El "módulo contable" **ya existe a medias**: `caja_movimientos` append-only con contraentrada, `caja_cortes` con sus `*_diff` GENERATED, `lib/cobrado.ts` como regla única del dinero — lo que falta no es construir la caja, es hacerla legible por período y afinar sus categorías. (2) **El catálogo de conceptos ya es cerrado y ya es el problema**: `salida` solo ofrece `insumos/retiro/otro`, así que **pagar la renta se registra como "retiro"** y el placeholder lo dice literal (`lib/caja.ts:69`). **Hallazgo propio del censo, sin registrar hasta hoy:** `ClientProfileCard.tsx` (249 líneas) no la monta nadie y `searchCustomers` no tiene llamador — muertas desde que el botón "Buscar cliente" quedó `disabled` en PR-5 con el título *"Disponible en la próxima iteración"* (`AssistantControlDesk.tsx:1048`); tercer caso del patrón `S9-RES-02`/`S9-RES-03`. **La objeción de Gabriel sobre los recurrentes** (*"que no se oculten una vez establecidos"*) resolvió el diseño de M4 sin doctrina nueva: el fijo **nunca se registra solo** — toca la puerta, se confirma con un tap y el monto llega editable, porque escribir "salió la renta" porque es día 3 sería fabricar evidencia (regla dura de `CLAUDE.md`) y porque lo que hay que confirmar cada período **no se puede olvidar**. |
 
 ## Métricas del sprint
 
