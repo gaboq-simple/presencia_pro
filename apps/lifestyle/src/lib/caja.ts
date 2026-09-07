@@ -22,12 +22,25 @@ export type MovimientoType = (typeof MOV_TYPES)[number];
 
 /**
  * Conceptos por tipo — ESPEJO EXACTO de `caja_movimientos_concept_check`
- * (migración 20260812000000_capa_dinero.sql). Si un día se agrega un concepto,
- * se agrega en los dos lados o la fila la rebota la BD.
+ * (migraciones `20260812000000_capa_dinero.sql` y, para las salidas finas,
+ * `20260906000000_caja_conceptos_finos.sql`). Si un día se agrega un concepto, se
+ * agrega en los dos lados o la fila la rebota la BD.
+ *
+ * Del lado de las SALIDAS creció en M3 porque el catálogo viejo —`insumos` /
+ * `retiro` / `otro`— colapsaba hechos distintos: pagar la renta se registraba
+ * como `retiro`, que es el titular sacando efectivo. Con la misma palabra,
+ * "salió $12,000 en retiros" puede ser el local o puede ser el bolsillo.
+ *
+ * Las ENTRADAS no cambiaron: ya distinguen lo que hay que distinguir, y sumar
+ * opciones donde no hay confusión solo cuesta tiempo de lectura.
+ *
+ * El código es ESTABLE y distinto de su etiqueta (`CONCEPTO_LABEL`): se guarda
+ * `renta` y se muestra "Renta", así que renombrar la etiqueta no reescribe la
+ * historia.
  */
 export const CONCEPTOS_POR_TIPO = {
   entrada: ['walkin', 'producto', 'otro'],
-  salida:  ['insumos', 'retiro', 'otro'],
+  salida:  ['insumos', 'renta', 'servicios', 'nomina', 'mantenimiento', 'retiro', 'otro'],
 } as const satisfies Record<MovimientoType, readonly string[]>;
 
 export type Concepto = (typeof CONCEPTOS_POR_TIPO)[MovimientoType][number];
@@ -51,11 +64,15 @@ const TIPO_LABEL: Record<MovimientoType, string> = {
 // alguien que nunca tuvo fila en la agenda. Con la misma palabra, las dos cosas
 // se confunden justo donde importa no confundirlas.
 const CONCEPTO_LABEL: Record<string, string> = {
-  walkin:   'Sin cita',
-  producto: 'Producto',
-  insumos:  'Insumos',
-  retiro:   'Retiro',
-  otro:     'Otro',
+  walkin:        'Sin cita',
+  producto:      'Producto',
+  insumos:       'Insumos',
+  renta:         'Renta',
+  servicios:     'Servicios',
+  nomina:        'Nómina',
+  mantenimiento: 'Manten.',
+  retiro:        'Retiro',
+  otro:          'Otro',
 };
 
 // Ejemplos de COSAS, nunca de personas: la nota fluye a Actividad, que el dueño
@@ -63,11 +80,18 @@ const CONCEPTO_LABEL: Record<string, string> = {
 // anotado en la deuda de retención, SPRINT S6-SEC-01). El placeholder es la única
 // pista que la mayoría va a leer — que invite a lo operativo.
 const NOTA_PLACEHOLDER: Record<string, string> = {
-  walkin:   'Ej. corte sin cita',
-  producto: 'Ej. cera y shampoo',
-  insumos:  'Ej. toallas y navajas',
-  retiro:   'Ej. pago de la renta',
-  otro:     'Ej. para qué fue',
+  walkin:        'Ej. corte sin cita',
+  producto:      'Ej. cera y shampoo',
+  insumos:       'Ej. toallas y navajas',
+  renta:         'Ej. mes de septiembre',
+  servicios:     'Ej. recibo de luz',
+  nomina:        'Ej. adelanto de la semana',
+  mantenimiento: 'Ej. arreglo del sillón',
+  // Ya NO dice "Ej. pago de la renta": ese placeholder era la prueba de que el
+  // catálogo colapsaba dos hechos distintos. Un retiro es el titular sacando
+  // efectivo, y la renta ahora tiene su propio concepto.
+  retiro:        'Ej. corte de caja del titular',
+  otro:          'Ej. para qué fue',
 };
 
 export function etiquetaTipo(t: MovimientoType): string {

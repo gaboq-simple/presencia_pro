@@ -20,6 +20,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   createCajaMovimiento,
+  getAtajosDeCaja,
   reverseCajaMovimiento,
   listCajaDia,
   type MovimientoDelDia,
@@ -37,6 +38,7 @@ import {
 import { RAILS, DEFAULT_RAIL, type Rail } from '@/lib/cobro';
 import { railLabel } from './CobroFields';
 import { isTodayInTz } from '@/lib/dayWindow';
+import { ordenDelCatalogo, type AtajosDeCaja } from '@/lib/atajosCaja';
 
 type Props = {
   /** Día que mira la superficie ('YYYY-MM-DD'). */
@@ -65,6 +67,13 @@ export default function CajaMovimientos({ date, timezone }: Props) {
   const [riel, setRiel]         = useState<Rail>(DEFAULT_RAIL);
   const [nota, setNota]         = useState('');
 
+  // Atajos (M3): el orden de los conceptos y los montos frecuentes salen del
+  // histórico del PROPIO negocio. Arrancan en el orden del catálogo, así que la
+  // hoja se puede usar entera antes de que la lectura vuelva — y si nunca vuelve,
+  // tampoco pasa nada. Un atajo es una comodidad; que falte no puede impedir
+  // registrar un movimiento.
+  const [atajos, setAtajos] = useState<AtajosDeCaja>({ orden: ordenDelCatalogo(), montos: {} });
+
   // El movimiento se registra SIEMPRE en el día de hoy (la action calcula
   // `occurred_on` en la tz del negocio). Ofrecer "+ Movimiento" parado en otro día
   // sería una trampa: la fila caería en hoy igual, en una lista que no se está
@@ -82,6 +91,10 @@ export default function CajaMovimientos({ date, timezone }: Props) {
   useEffect(() => { void recargar(); }, [recargar]);
 
   function abrir() {
+    // Se lee al ABRIR y no al montar: la hoja se abre unas pocas veces al día y
+    // la mesa se monta en cada carga. Además así el orden refleja lo que se
+    // registró recién, sin ningún refresco extra.
+    void getAtajosDeCaja().then(setAtajos).catch(() => { /* queda el catálogo */ });
     setTipo('entrada');
     setConcepto(null);
     setMonto('');
@@ -257,7 +270,7 @@ export default function CajaMovimientos({ date, timezone }: Props) {
             <div className="mt-4">
               <span className="text-xs font-semibold uppercase tracking-[.10em] text-faint">De qué</span>
               <div className="mt-1 grid grid-cols-3 gap-2">
-                {CONCEPTOS_POR_TIPO[tipo].map((c) => (
+                {(atajos.orden[tipo] ?? CONCEPTOS_POR_TIPO[tipo]).map((c) => (
                   <button
                     key={c}
                     type="button"
@@ -274,6 +287,31 @@ export default function CajaMovimientos({ date, timezone }: Props) {
                 ))}
               </div>
             </div>
+
+            {/* Montos frecuentes — SOLO si el histórico del negocio los sostiene
+                (≥3 movimientos del concepto y ≥2 repeticiones del monto). Van
+                DEBAJO del bloque de conceptos y no arriba, para que aparecer no
+                mueva de lugar el botón que la persona acaba de tocar.
+
+                Es puramente aditivo: la hoja no cambió de orden y el camino de
+                siempre —teclear el monto, tocar el concepto, Registrar— sigue
+                costando los mismos taps. Quien prefiera el chip toca el concepto
+                primero; quien no, ni se entera. */}
+            {concepto && (atajos.montos[concepto]?.length ?? 0) > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-faint">Lo de siempre:</span>
+                {atajos.montos[concepto]?.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setMonto(String(v))}
+                    className="min-h-[32px] rounded-pill border border-line bg-card px-3 text-xs font-semibold tabular-nums text-ink-2 transition hover:border-teal-border hover:bg-tint-1 hover:text-teal-ink active:scale-95"
+                  >
+                    ${v.toLocaleString('es-MX')}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Riel */}
             <div className="mt-4">

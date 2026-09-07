@@ -70,9 +70,17 @@ test('"otro" vale para los dos lados — es la válvula, no un agujero', () => {
   assert.equal(ok(resolveMovimiento({ type: 'salida',  concept: 'otro', amount: 10, method: 'efectivo' })).concept, 'otro');
 });
 
-test('la lista de conceptos es la misma que la del CHECK de la migración', () => {
+test('el catálogo está fijado a mano acá: agrandarlo tiene que ser deliberado', () => {
+  // OJO: este test NO lee la migración, aunque su nombre viejo lo daba a entender
+  // ("la lista de conceptos es la misma que la del CHECK de la migración"): son
+  // dos literales escritos a mano, así que sostenía la promesa del espejo sin
+  // comprobarla nunca. La comprobación de verdad —leer el SQL del `ADD
+  // CONSTRAINT` y compararlo— vive en `cajaConceptos.repo.test.ts` desde M3. Este
+  // se queda porque hace falta que agrandar el catálogo cueste una edición
+  // consciente, no porque pruebe el espejo.
   assert.deepEqual([...CONCEPTOS_POR_TIPO.entrada], ['walkin', 'producto', 'otro']);
-  assert.deepEqual([...CONCEPTOS_POR_TIPO.salida],  ['insumos', 'retiro', 'otro']);
+  assert.deepEqual([...CONCEPTOS_POR_TIPO.salida],
+    ['insumos', 'renta', 'servicios', 'nomina', 'mantenimiento', 'retiro', 'otro']);
 });
 
 test('un concepto inventado no pasa aunque el tipo sea correcto', () => {

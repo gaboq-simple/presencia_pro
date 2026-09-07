@@ -21,6 +21,8 @@ import { createClient } from '@supabase/supabase-js';
 import { requireBusinessSession, getBusinessTimezone } from '@/lib/auth';
 import { tenantDb } from '@/lib/tenantDb';
 import { todayStrInTz } from '@/lib/dayWindow';
+import { sumarDias } from '@/lib/timeWindows';
+import { calcularAtajos, ordenDelCatalogo, type AtajosDeCaja, type MovimientoHistorico } from '@/lib/atajosCaja';
 import {
   resolveMovimiento,
   esMovimientoError,
@@ -114,6 +116,58 @@ export async function createCajaMovimiento(
   revalidatePath('/staff');
   revalidatePath('/dashboard');
   return { id: (data as { id: string } | null)?.id };
+}
+
+// ─── getAtajosDeCaja (M3) ─────────────────────────────────────────────────────
+
+/** Ventana del histórico que ordena los chips. Un mes es lo que tarda un negocio
+ *  en mostrar su patrón sin arrastrar el de la temporada pasada. */
+const DIAS_DE_HISTORIA = 30;
+
+/**
+ * El orden de los conceptos y los montos frecuentes, calculados con las PROPIAS
+ * filas del negocio.
+ *
+ * El catálogo de salidas creció a 7 conceptos (M3) para dejar de registrar la
+ * renta como un retiro. Más opciones no cuestan taps —sigue siendo una— pero sí
+ * cuestan lectura, y un catálogo que se lee lento no molesta: hace que la gente
+ * deje de registrar. Esto lo compensa sin quitarle opciones a nadie: solo
+ * reordena, y el catálogo sale siempre completo.
+ *
+ * Si la lectura falla, se devuelve el orden del catálogo. Un atajo es una
+ * comodidad: que se caiga NO puede impedir registrar un movimiento.
+ */
+export async function getAtajosDeCaja(): Promise<AtajosDeCaja> {
+  const vacio: AtajosDeCaja = { orden: ordenDelCatalogo(), montos: {} };
+
+  const auth = await requireBusinessSession();
+  if (!auth.ok) return vacio;
+
+  // `occurred_on` YA es día local del negocio, así que acá no hace falta una
+  // ventana UTC: hace falta aritmética de calendario sobre 'YYYY-MM-DD', y de eso
+  // se encarga `sumarDias`. Armarla con `Date`/`UTC` crudo es justo lo que el
+  // repo-check de `timeWindows` prohíbe — y lo cazó en la primera corrida de este
+  // paso, sobre este mismo bloque.
+  const timezone = await getBusinessTimezone(auth.businessId);
+  const desde = sumarDias(todayStrInTz(timezone), -DIAS_DE_HISTORIA);
+
+  const { data, error } = await tenantDb(getServiceClient(), auth.businessId)
+    .table('caja_movimientos')
+    .select('id, type, concept, amount, reverses_id')
+    .gte('occurred_on', desde);
+
+  if (error) return vacio;
+
+  type HistRow = { id: string; type: string; concept: string; amount: number | string; reverses_id: string | null };
+  const historico: MovimientoHistorico[] = ((data ?? []) as unknown as HistRow[]).map((r) => ({
+    id:         r.id,
+    type:       r.type,
+    concept:    r.concept,
+    amount:     Number(r.amount),
+    reversesId: r.reverses_id,
+  }));
+
+  return calcularAtajos(historico);
 }
 
 // ─── reverseCajaMovimiento ────────────────────────────────────────────────────
