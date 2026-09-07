@@ -90,6 +90,67 @@ export async function getInsumosDelCorte(
   return { citas, movimientos, fondo };
 }
 
+/**
+ * Los cobros del día que NADIE declaró cómo se pagaron: el DESGLOSE del cubo
+ * `sinRiel` que el corte ya cuenta como un número (D5 + S9-OPS-06).
+ *
+ * **Vive pegado a `getInsumosDelCorte` a propósito y comparte su predicado
+ * exacto**: `status='completed'` + `completed_at` dentro del día LOCAL. Si esta
+ * lista usara `starts_at` —que es por donde la mesa arma su día— mostraría un
+ * conjunto DISTINTO del que el corte cuenta: una cita de ayer cobrada hoy es del
+ * corte de hoy y no aparece en la agenda de hoy. Dos verdades del mismo día es
+ * justo lo que la capa de dinero existió para volver imposible, así que el
+ * predicado se escribe una vez y las dos funciones lo leen del mismo lugar.
+ *
+ * NO devuelve un subtotal, y eso es deliberado: el monto de CADA cobro hace
+ * falta para reconocerlo (y ya se ve en la ficha y en la lista de caja), pero la
+ * SUMA sería un pedazo del esperado del día antes de contarlo. El corte es a
+ * ciegas.
+ */
+export type CobroSinRiel = {
+  id:          string;
+  cliente:     string | null;
+  monto:       number;
+  /** ISO del cierre — la UI lo rinde en la tz del negocio. */
+  completadoAt: string | null;
+};
+
+export async function getCobrosSinRiel(
+  businessId: string,
+  date: string,
+  timezone: string,
+): Promise<CobroSinRiel[]> {
+  const { start, end } = localDayRangeUtc(date, timezone);
+
+  const { data, error } = await tenantDb(getServiceClient(), businessId)
+    .table('appointments')
+    .select('id, price_charged, completed_at, customer:customer_id(name), service:service_id(price)')
+    .eq('status', 'completed')
+    .is('payment_method', null)
+    .gte('completed_at', start)
+    .lt('completed_at', end)
+    .order('completed_at', { ascending: true });
+
+  if (error) throw new Error(`getCobrosSinRiel failed: ${error.message}`);
+
+  type Row = {
+    id: string;
+    price_charged: number | string | null;
+    completed_at: string | null;
+    customer: { name: string } | null;
+    service: { price: number | string } | null;
+  };
+
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    id:      r.id,
+    cliente: r.customer?.name ?? null,
+    // Mismo COALESCE que `getInsumosDelCorte`: el sellado, con la lista como red
+    // para completadas legadas sin sello.
+    monto:   Number(r.price_charged ?? r.service?.price ?? 0),
+    completadoAt: r.completed_at,
+  }));
+}
+
 // ─── Lectura de cortes ────────────────────────────────────────────────────────
 
 export type CorteRow = {

@@ -45,6 +45,13 @@ const GATES: Record<string, 'asistente' | 'dueño'> = {
   // atiende quien toma la llamada. Un barbero solo puede hacerlo sobre SUS citas
   // (`assertBarberOwnsAppointment`), igual que el resto de sus mutaciones.
   registrarRetraso:             'asistente',
+  // Declarar el riel de un cobro que nació sin él es cierre del día, no
+  // configuración: lo hace quien está cerrando la caja. Un barbero solo sobre SUS
+  // citas (`assertBarberOwnsAppointment`), y la BD solo deja RELLENAR — el
+  // predicado lleva `.is('payment_method', null)`, así que ni con el gate abierto
+  // se puede reescribir una atribución ya declarada (M2 de S10-ASIS-01).
+  listarCobrosSinRiel:          'asistente',
+  asignarRiel:                  'asistente',
   createAssistantAppointment:   'asistente',
   rescheduleAppointment:        'asistente',
   getStaffBlocksForDay:         'asistente',

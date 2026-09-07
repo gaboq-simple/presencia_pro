@@ -15,7 +15,8 @@ import { todayStrInTz } from '@/lib/dayWindow';
 import type { DashboardAppointment, StaffBlockForDay } from '@/lib/dashboard.types';
 import { sendWhatsAppMeta } from '@presenciapro/engine/notifications';
 import { notifyWaitlistOnCancel } from '@/lib/notifyWaitlistOnCancel';
-import { resolveCobro, esCobroError, type CobroInput } from '@/lib/cobro';
+import { resolveCobro, esCobroError, RAILS, type CobroInput, type Rail } from '@/lib/cobro';
+import { getCobrosSinRiel, type CobroSinRiel } from '@/lib/corteData';
 import { resolveRegistroEnvio, ERROR_SIN_DETALLE } from '@/lib/envio';
 import {
   sendCancellationNotice,
@@ -1744,4 +1745,86 @@ function formatApptTime(isoStr: string, tz: string): string {
     minute:   '2-digit',
     hour12:   true,
   });
+}
+
+// ─── Cobros sin riel declarado (M2 de S10-ASIS-01) ────────────────────────────
+// El cubo `sinRiel` del corte deja de ser un número al final del día y pasa a ser
+// una lista que se puede resolver ANTES de contar.
+//
+// POR QUÉ IMPORTA. `payment_method` en NULL significa "nadie declaró cómo
+// pagaron" (S9-OPS-06) — un dato distinto de "efectivo", y honesto. Pero cuando
+// llega el momento de contar, cada cobro sin riel es plata que el conteo no puede
+// atribuir ni a la caja ni a la terminal: aparece como descuadre en los DOS lados
+// sin que nada haya salido mal. Resolverlo antes de contar corrige el descuadre en
+// su ORIGEN, que es el único lugar donde corregirlo no es inventar.
+
+// NO se re-exporta el tipo `CobroSinRiel` desde acá: en un módulo `'use server'`
+// TODO export tiene que ser una función async, y Turbopack convierte el
+// `export type` en un re-export de VALOR que revienta en runtime con
+// `ReferenceError: CobroSinRiel is not defined`. `tsc` no lo ve —para él es un
+// tipo y se borra— y por eso lo cazó la ruta real y no los gates. Quien necesite
+// el tipo lo importa de `@/lib/corteData` con `import type`.
+
+/** El desglose del cubo, para el día LOCAL que se esté mirando. */
+export async function listarCobrosSinRiel(date?: string): Promise<CobroSinRiel[]> {
+  const session  = await requireAssistantSession();
+  const timezone = await getBusinessTimezone(session.business_id);
+  return getCobrosSinRiel(session.business_id, date ?? todayStrInTz(timezone), timezone);
+}
+
+/**
+ * Declara el riel de un cobro que nació SIN riel.
+ *
+ * **Solo rellena lo desconocido; jamás pisa lo declarado.** El predicado lleva
+ * `.is('payment_method', null)`, así que la garantía no depende de que la UI
+ * ofrezca el gesto únicamente sobre la lista correcta: es la BD la que rebota. El
+ * molde es el de `seal_appointment_price`, que también rellena solo cuando está
+ * NULL — y la razón es la misma: si esto pudiera sobrescribir, dejaría de ser
+ * "completar un dato que falta" y pasaría a ser "reescribir la atribución del
+ * dinero", que es una capacidad que nadie pidió y que el audit tendría que
+ * defender.
+ *
+ * No toca `price_charged` (sellado), ni `charged_by_staff_id` (congelado en el
+ * cobro): quien declara el riel después NO es necesariamente quien cobró, y
+ * confundirlos rompería justo la atribución que S9-DIN-02 vino a arreglar.
+ * `modified_by_staff_id` sí se escribe — esta persona tocó la fila y el audit
+ * necesita su actor real.
+ */
+export async function asignarRiel(
+  appointmentId: string,
+  method: string,
+): Promise<{ error?: string } | void> {
+  const session  = await requireAssistantSession();
+  const supabase = getServiceClient();
+  const db       = tenantDb(supabase, session.business_id);
+
+  // Mismo gate por barbero que el resto de las mutaciones de cita: uno solo puede
+  // tocar las suyas.
+  const gate = await assertBarberOwnsAppointment(supabase, session, appointmentId);
+  if (gate?.error) return gate;
+
+  if (!(RAILS as readonly string[]).includes(method)) {
+    return { error: `Método de pago no válido: ${String(method)}` };
+  }
+
+  const { data, error } = await db
+    .table('appointments')
+    .update({
+      payment_method:       method as Rail,
+      modified_by_staff_id: session.staff_id,
+      modified_at:          new Date().toISOString(),
+    })
+    .eq('id', appointmentId)
+    .eq('status', 'completed')
+    .is('payment_method', null)
+    .select('id');
+
+  if (error) throw new Error(`asignarRiel failed: ${error.message}`);
+
+  // Cero filas = el riel ya estaba declarado (o la cita no está completada). Se
+  // DICE, no se traga: una supresión silenciosa es indistinguible de un éxito, y
+  // quien tocó el chip merece saber que su tap no cambió nada.
+  if (!data || (data as unknown[]).length === 0) {
+    return { error: 'Ese cobro ya tiene riel declarado; no se reescribe' };
+  }
 }

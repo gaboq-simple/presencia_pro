@@ -49,6 +49,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { actionsFor, type BlockState, type ActionKey } from '@/lib/apptActions';
 import type { DashboardAppointment } from '@/lib/dashboard.types';
 import type {
   PanoramaStaff,
@@ -114,7 +115,6 @@ const AUTO_SCROLL_PX    = 12;  // px por frame del auto-scroll en el borde
 // + `pending` (ámbar) para cerrar el gap "pending ≠ confirmed" que el panorama no
 // distinguía. Diferenciación por color/tono (border-left + fondo + tinta), NUNCA por
 // opacity. `curso`/`late` son derivados del "ahora" TZ-aware (no del campo status).
-type BlockState = 'conf' | 'pending' | 'curso' | 'late' | 'done' | 'noshow' | 'walk';
 const STATE_STYLE: Record<BlockState, { bar: string; bg: string; ink: string }> = {
   conf:    { bar: 'var(--color-ink-2)',       bg: 'bg-card',      ink: 'text-ink' },
   pending: { bar: 'var(--color-amber-border)', bg: 'bg-amber-tint', ink: 'text-amber' },
@@ -216,10 +216,6 @@ const CARD_RING: Record<BlockState, string> = {
   done: 'ring-past-line',
 };
 
-type ActionKey =
-  | 'mensaje' | 'mover' | 'cancelar' | 'confirmar'
-  | 'llego' | 'noLlego' | 'termino' | 'reagendar' | 'llamar';
-
 type ActionAccent = 'pos' | 'warn' | 'danger' | 'neutral';
 const ACTION: Record<ActionKey, { label: string; accent: ActionAccent }> = {
   mensaje:   { label: 'Mensaje',   accent: 'neutral' },
@@ -249,37 +245,6 @@ function RowIcon({ k }: { k: 'clock' | 'phone' | 'note' }) {
   if (k === 'clock') return <svg {...p} aria-hidden><circle cx="10" cy="10" r="7" /><path d="M10 6v4l2.5 1.5" /></svg>;
   if (k === 'phone') return <svg {...p} aria-hidden><path d="M4.5 3.5c0 7.5 4.5 12 12 12l-.2-3-3-1-1.8 1.8c-1.8-1-3.8-3-4.8-4.8L8.5 7.7l-1-3H4.5z" /></svg>;
   return <svg {...p} aria-hidden><path d="M5 3.5h7l3 3v10H5zM12 3.5V6.5h3M7.5 10h5M7.5 13h5" /></svg>;
-}
-
-/**
- * Set de acciones según estado + momento (visual; el cableado a server actions es
- * Paso 3B). Ventana anticipada: Llegó/No-llegó desde inicio − 10min ≤ ahora.
- *
- * `arrived` = la cita ya tiene `arrived_at`. Solo cambia al walk-in, y solo en el
- * caso raro: el de HOY nace llegado (lo estampa `createAssistantAppointment`) y
- * conserva su set de siempre —**"Terminó" primero, que es para lo que se abre esta
- * ficha**—; el parado en otro día nace sin llegada, y ahí "Llegó" es la única
- * puerta que tiene, porque el walk-in no la ofrecía en ningún estado (S9-OPS-03).
- *
- * El set son cuatro acciones, así que en ese caso raro "Llegó" entra en lugar de
- * "Mover". Es el intercambio correcto: sin "Llegó" ese walk-in no tiene forma de
- * protegerse del auto-cancel, y sin "Mover" solo pierde un atajo que el gesto de
- * arrastre del calendario ya ofrece. En el walk-in de hoy —el 100% de los reales—
- * no se pierde nada.
- */
-function actionsFor(
-  state: BlockState, apptStart: number, nowM: number | null, arrived: boolean,
-): ActionKey[] {
-  if (state === 'done')    return ['reagendar', 'mensaje', 'llamar'];
-  if (state === 'noshow')  return ['reagendar', 'mensaje', 'llamar'];
-  if (state === 'walk')    return arrived
-    ? ['termino', 'mensaje', 'mover', 'cancelar']
-    : ['termino', 'llego', 'mensaje', 'cancelar'];
-  if (state === 'pending') return ['confirmar', 'mensaje', 'mover', 'cancelar'];
-  // conf / curso / late — ventana anticipada de 10 min activa Llegó/No-llegó.
-  const inWindow = nowM !== null && nowM >= apptStart - 10;
-  if (inWindow) return ['llego', 'noLlego', 'mensaje', 'cancelar'];
-  return ['mensaje', 'mover', 'cancelar'];
 }
 
 /** Íconos minimalistas por acción (SVG stroke, currentColor). */

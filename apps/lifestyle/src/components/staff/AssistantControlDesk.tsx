@@ -818,9 +818,6 @@ export default function AssistantControlDesk({
     }
   }
 
-  // Completar en la mesa NO es el swipe de 2 segundos del barbero: acá se cobra
-  // de frente, así que el gesto abre el par monto+riel y confirma. El riel viaja
-  // siempre (default efectivo); el monto solo si lo teclean.
   // Cabos sueltos (D3): citas pasadas sin resolver de los últimos 14 días. La
   // mesa es client component, así que el conteo viene por server action propia
   // (assistant-actions.ts no se toca: los cabos viven en su módulo).
@@ -837,6 +834,13 @@ export default function AssistantControlDesk({
   // condicional de render sobre datos que ya están en memoria. Por eso volver a
   // Agenda conserva el día y la ventana temporal del panorama.
   const [modulo, setModulo] = useState<ModuloId>('agenda');
+
+  // Disparador de relectura del paso ③ (cobros sin riel). Cerrar una cita CREA un
+  // cobro, y si nadie tocó el riel nace sin declarar: la lista tiene que enterarse.
+  // Se usa el conteo de completadas y no `appointments` entero porque este número
+  // solo cambia cuando ocurre eso — un cambio de notas o una reagenda no debe
+  // costar una consulta.
+  const completadasCount = appointments.filter((a) => a.status === 'completed').length;
   useEffect(() => {
     let vivo = true;
     void listarCabos().then((r) => { if (vivo) setCabos(r); });
@@ -849,6 +853,10 @@ export default function AssistantControlDesk({
   // `payment_method` y el corte lo cuenta en su cubo propio. El tap ES el dato.
   const [cobroMethod, setCobroMethod] = useState<Rail | null>(null);
 
+  // Completar en la mesa NO es el swipe de 2 segundos del barbero: acá se cobra
+  // de frente, así que el gesto abre el par monto+riel y confirma. El monto viaja
+  // solo si lo teclean, y el riel solo si lo tocan (S9-OPS-06: sin tap no se
+  // escribe la columna, y el paso ③ de Cerrar el día lo resuelve después).
   const handleComplete = (id: string) => {
     const appt = appointments.find((a) => a.id === id);
     if (!appt) return;
@@ -921,6 +929,7 @@ export default function AssistantControlDesk({
             cabos={cabos}
             onComplete={handleComplete}
             onNoShow={handleNoShow}
+            reloadKey={completadasCount}
           />
         )}
 
