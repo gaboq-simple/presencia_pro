@@ -2249,7 +2249,8 @@ digan la verdad.
 
 ## Rediseño visual del dueño (aprobado sobre maqueta, plan en docs/planes/dueno-v3.md)
 
-- **S7-DV3-01 · Rediseño VISUAL de la vista de dueño (pasos dv3-1…dv3-6)** 🔵 in-progress (arrancado 2026-08-12)
+- **S7-DV3-01 · Rediseño VISUAL de la vista de dueño (pasos dv3-1…dv3-6)** 🟢 done (2026-08-18) — **los seis pasos cerrados y en `main`** (dv3-1, dv3-2, dv3-3', dv3-4', dv3-5', dv3-5'', dv3-6).
+  **Encabezado corregido el 2026-09-07:** decía 🔵 in-progress desde el 2026-08-12 aunque su propio paso final (dv3-6) declara *"Cierra S7-DV3-01"* y todos los pasos estaban 🟢. La ola estaba cerrada; el estado de la tarea padre no se había movido.
   Registrado acá porque el plan se aprobó fuera de SPRINT.md (commit `26e84dd`, solo docs) y su ejecución se intercala con la capa de dinero: el orden combinado que manda es el de S7-DIN-01. **Sin features nuevos**: composición, tokens, gráficas y consistencia sobre los módulos de datos existentes, que se reusan tal cual. Gates por paso: tsc 0 · eslint 0 errores (baseline 13 warnings) · suite completa · red de seguridad visual con el seed denso corrido al inicio del paso y prohibido re-sembrar entre el "antes" y el "después".
   - **dv3-1 · Tokens del sistema en `globals.css`** 🟢 done (2026-08-12, rama `feat/dv3-tokens`). Paletas de datos (categórica de 5 + "otros", secuencial teal de 7, hueco ámbar de 4) y los tokens de movimiento (`--dur-1/2`, `--ease-out/inout`), con la escala tipográfica y la regla de elevación documentadas en comentario. Cero componentes tocados. **Hallazgo que el plan no previó:** los tokens de `@theme` que ninguna utilidad consume los **poda** Tailwind v4 del CSS servido, y este paso no monta consumidores → la aceptación del paso ("los tokens existen, visibles en el CSS servido") no se cumplía. Se resolvió con un bloque `@theme static` aparte (opción soportada por la versión instalada, verificada en el parser de `tailwindcss@4.2.2`: `reference | inline | default | static`): siguen en `@theme` —así generan sus utilidades cuando el kit del Paso 2 las use— y se emiten igual. Verificado: los 17 tokens de datos + los 4 de movimiento están en el CSS del dev server Y en el bundle de `next build`. **Red visual** (seed corrido al inicio, sin re-sembrar): Panorama y Clientela **0 píxeles** de diferencia; Administrar y Actividad difieren SOLO en el badge del dev-overlay de Next y en los tiempos relativos del log (`hace 3 min` → `hace 20 min`, por los 18 min entre capturas) — nada de layout ni color.
   - **dv3-2 · Kit de gráficas + esqueletos (sin montar)** 🟢 done (2026-08-12, ramas `feat/dv3-tokens` la matemática + `feat/dv3-kit` los componentes). `lib/viz.ts` puro (`pctWidth` con piso visual de 2%, `seqStep` 1..7, `huecoStep` 1..4, `foldOtros` que conserva la suma) con **19 casos**; el movimiento del kit en `globals.css` (4 `@keyframes viz-*` en CSS plano, `--stagger`, los `--animate-viz-*` dentro del `@theme static`, y el reduced-motion por tokens que apaga también el *delay* — que el bloque global preexistente NO tocaba); y 6 componentes en `components/admin/viz/` (`BarraFila`, `Apilada`, `Columnas`, `HeatmapGrid`, `StatFila`, `Esqueletos`), todos Server Components, ninguno montado. **Aceptación del paso enmendado:** (a) sin colisión de nombres; (b) los 4 keyframes y las 4 utilidades `animate-viz-*` presentes en el CSS del dev server **y** en el bundle de `next build`; (c) con `reducedMotion: reduce` → **0 animaciones corriendo**, duraciones colapsadas, delay 0s y pulso `none`, contra 38 animaciones y delay 0.09s (= 3 × 30 ms) sin él — medido por Playwright sobre una ruta temporal que se montó y se borró, no commiteada; (d) red visual **0 píxeles** de diferencia en las 4 pestañas. tsc 0 · eslint 0 err (13 warnings, baseline) · 678/678 · build ✓.
@@ -2693,6 +2694,124 @@ digan la verdad.
     **Gates:** `tsc` 0 · `eslint` 0 errores (9 warnings, baseline) · **995/995** · consola limpia en pestaña nueva.
   **🔎 Hallazgo del censo del plan (2026-09-06), no registrado en ninguna parte:** `ClientProfileCard.tsx` (249 líneas) **no la monta ningún archivo** y `searchCustomers` **no tiene llamador** — están completas y muertas desde que el botón "Buscar cliente" quedó `disabled` en PR-5 de S6-UI-02, con el título *"Disponible en la próxima iteración"*. Mismo patrón que `S9-RES-02` y `S9-RES-03`. Por eso M6 es barato: no construye, enchufa.
   **La frontera de privacidad, resuelta en una regla** (plan §3): el asistente ve todo lo que necesita para operar y para responder por lo que registró; no ve **el esperado antes de contar** (el corte a ciegas es su coartada, no su límite: con él, un descuadre es un hecho del mundo y no una sospecha sobre una persona), no ve **las propinas** (`appointment_tips`, RLS deny-all + lint que rompe el build) y no ve **margen ni la raya** (no son herramientas de mostrador).
+
+---
+
+## Panorama operativo + el motor de propuestas (ola S10, aprobada 2026-09-07)
+
+> **Qué es esta ola.** Panorama deja de ser un tablero de lectura y pasa a ser un
+> centro de control: se queda con la CONCLUSIÓN y manda el DETALLE a las pestañas
+> que ya existen para eso. Con el espacio liberado entra lo que hoy no tiene
+> superficie: los incidentes (que viven enterrados en Administrar) y **el motor de
+> propuestas** — el sistema detecta un hueco, propone qué hacer, el dueño aprueba,
+> y después se mide si sirvió.
+>
+> **El motor no es una tabla nueva.** Es el **primer consumidor de `agente_tareas`**
+> (S9-AG-02, 0 filas desde el 2026-08-20): su máquina de estados —`propuesta →
+> aprobada → ejecutada → medida`— es exactamente el ciclo de una campaña, y sus
+> candados ya están puestos (aprobar EXIGE actor humano, `medida` EXIGE `resultado`,
+> un UPDATE directo rebota). No hay que inventar el primitivo; hay que estrenarlo.
+>
+> **Las decisiones de Gabriel que fijan el alcance (2026-09-07):** el envío entra
+> **diseñado pero APAGADO** · los tipos de propuesta son **abiertos** (entra el que
+> pueda nombrar detector, acción y desenlace; lo que falte se construye y su costo se
+> escribe) · el descuento es **precio fijo**, nunca porcentaje · el bot **sí** agenda
+> la respuesta "SÍ" sin aprobación por cita · las campañas **no** tocan clientes
+> `is_flagged` por default.
+>
+> **🔴 La decisión de diseño que sostiene todo: la atribución NO va en el pago.**
+> Ni código presentado en la caja (falla sesgado hacia abajo: pierde exactamente los
+> éxitos, y mete fricción en el único momento en que el barbero tiene las manos
+> ocupadas) ni precio del día para todo el negocio (fabrica la atribución: el cliente
+> que siempre viene el lunes queda contado como éxito). La cita se marca **al
+> AGENDARSE**, con tres capas de evidencia en orden de fuerza: **(1) invitación
+> aceptada** — le escribimos a esta persona y agendó en la ventana, automática y sin
+> fricción; **(2) código reenviado** — para el que NO estaba en la lista, capturado al
+> agendar (bot o alta manual), nunca al cobrar; **(3) ni una ni otra → NO se
+> atribuye**, y ese tercer cubo es el medidor de canibalización. La campaña va a
+> sub-contar, y sub-contar es la dirección segura: es la regla dura del proyecto
+> ("preferir el vacío visible al valor plausible") aplicada al marketing.
+>
+> **Dos trampas de esquema, decididas antes de ejecutar:** el precio de campaña vive
+> **en la campaña**, jamás en `services.price` (tocar el catálogo haría que el bot
+> conteste el precio promocional a "¿cuánto sale?", que el sellado de precio agarre el
+> rebajado, y que nadie se acuerde de regresarlo al terminar); y **toda oferta lleva
+> caducidad** — sin fecha de corte no se puede cerrar ni medir, y es un recorte de
+> precio permanente disfrazado de campaña.
+>
+> **Fuera de esta ola, y no se propone:** paquetes/prepago (no es una campaña, es
+> ingreso diferido y toca el libro append-only), la raya (P11), y el rediseño del bot
+> (`S10-BOT-01`, tarea aparte).
+>
+> **Lo que esta ola NO puede entregar y hay que decirlo:** el envío real depende de
+> **dos bloqueos que no son código** — `S7-NOTIF-01` (el despachador nunca se
+> desplegó; es deploy de Gabriel) y `S9-AG-03` (topes de frecuencia por persona,
+> declarado requisito BLOQUEANTE de la primera pieza que mande, en `docs/planes/agente.md` §5).
+> Por eso el envío entra apagado: la ola no queda rehén de ellos.
+
+### El catálogo de propuestas (regla de admisión)
+
+> Una propuesta entra si se puede **nombrar** su detector, su acción y su desenlace.
+> Si alguna de las tres no existe, **se construye y el costo se escribe junto a la
+> propuesta**. Solo se rechaza lo que no puede tener una de las tres **nunca** — o lo
+> que necesitaría **fabricar evidencia** para fingir que la tiene.
+>
+> La primera versión de esta regla (2026-09-07) exigía que las tres existieran HOY, y
+> **Gabriel la corrigió con razón**: confundía "no se puede medir nunca" con "falta
+> construir una pieza". El primero es un veredicto; el segundo es un precio. Tres
+> propuestas rechazadas bajo la regla vieja volvieron al catálogo al aplicar la nueva.
+
+| # | Propuesta | Detector | Desenlace | Qué falta |
+|---|---|---|---|---|
+| 1 | **Llenar la cancelación de hoy** | hueco de hoy + `waitlist` con gente esperando | ¿se ocupó el slot? | nada (`notifyWaitlistOnCancel` existe) |
+| 2 | **Rescate del cliente atrasado** | `cadence.ts` con su `confidence` y su `explanation` | ¿volvió en N días? | audiencia por intersección (ver abajo) |
+| 3 | **Reactivar inactivos** | `inactive_threshold_days` | ¿volvió en N días? | nada nuevo |
+| 4 | **Bajar el precio del hueco estructural** | `occupancy` bajo `FLOJO_MAX=0.4` sostenido | margen incremental neto de la semana | atribución + precio de campaña |
+| 5 | **Subir el precio de lo saturado** | `occupancy` > `LLENO_MIN=0.85` + `management_audit` dice cuándo se movió el precio por última vez | ¿el volumen aguantó? | casi nada (consulta sobre lo existente) |
+| 6 | **Abrir horario en la franja saturada** | idem 5 | ¿se llenaron las horas nuevas? | nada (`staff_availability` + excepciones + audit) |
+| 7 | **Re-agendar en la silla** | cita que se completa sin siguiente agendada | **% de citas que salen con la próxima puesta** | un empujón al cobrar + la métrica |
+| 8 | **Recuperar al que no llegó** | `noshow_count` | ¿reagendó en N días? | nada nuevo (tono de disculpa, no de oferta) |
+| 9 | **Un año como cliente** | `customers.created_at` | ¿vino? | columna de cumpleaños si se quiere la fecha real |
+| 10 | **Pedir reseña** | `review_requests_enabled` + `review_url` | **clics a la página de reseñas** (redirect propio), no "reseñas dejadas" | ruta de redirect con contador |
+
+> **La #7 es la de mayor retorno y no la había propuesto nadie.** El momento de mayor
+> conversión de una barbería es cuando el cliente acaba de quedar contento y está
+> pagando, y hoy el sistema no hace NADA con ese momento. No necesita envíos, ni
+> descuentos, ni al bot.
+>
+> **Lo que queda fuera, y no por presupuesto:** afirmar la intención del cliente sin
+> que el cliente haya hecho algo · cualquier cosa que mida "ingreso total" incluyendo
+> **propinas** (`appointment_tips` es privada del barbero, con lint y repo-check que
+> rompen el build) · que **el agente escriba dinero** (constitución del agente §2:
+> cobro, caja, corte y propina son captura humana firmada).
+
+### La audiencia: intersección, no lista
+
+> El feed de rescate actual es una lista de nombres que hay que recorrer a mano —el
+> problema que Gabriel nombró—, pero la respuesta obvia ("mandarle a todo el
+> segmento") es peor: un blast a 40 personas para llenar 6 lugares molesta a 34
+> clientes que estaban bien. La audiencia correcta es la **intersección de tres piezas
+> que ya existen por separado**: el hueco que hay que llenar (`fuga`: lunes, tarde) ×
+> quién está atrasado respecto de **su propio** ritmo (`cadence`, con su explicación) ×
+> quién históricamente viene **en ese día y a esa hora** (historial de citas). Suelen
+> ser 8 personas en vez de 40, y son las que más chance tienen de aceptar.
+>
+> **Salvaguarda de diseño:** un cliente que ya recibió una campaña no vuelve a entrar
+> a otra audiencia por N días. Sin eso, el 20% más valioso de la clientela recibe
+> todas las campañas. Vive en el mismo cuello de botella que los topes de `S9-AG-03`.
+
+- **S10-DUE-01 · Panorama operativo + el motor de propuestas (pasos P1…P4)** 🔵 in-progress (arrancado 2026-09-07)
+  Gates por paso, los estándar: `tsc` 0 · `eslint` 0 errores (baseline 9 warnings) · suite completa · red de seguridad visual con el seed denso corrido al inicio del paso y **prohibido re-sembrar** entre el "antes" y el "después".
+  - **P1 · El funeral y la compresión** 🔵 in-progress (2026-09-07, rama `feat/panorama-conclusion`). **Sin features nuevos, sin esquema, sin envíos.** Panorama se queda con la conclusión; el detalle se va a las pestañas que ya existen para eso. Cuatro movimientos: (a) **enterrar el código muerto** de `NegocioView.tsx` —recibe `revenue`, `occupancy` y `barberos` y **no renderiza ninguno** desde dv3-6: quedaron `Comparison`, `MonthlyBars`, `Heatmap`, `OcupacionBlock`, `BarberoRow`, `avgRecompra` y `BarberosBlock`, ~290 de 349 líneas, junto con el voseo *"Definí los horarios"* (`:150`) que sobrevivió al barrido de dv3-5' **porque el código ya no se renderizaba**; (b) **comprimir el pulso de hoy** a una línea bajo el héroe; (c) el **diagnóstico de la fuga** (heatmap 7×2 + peso de referencia) se muda a Análisis, y en Panorama queda la conclusión accionable; (d) la **lista completa del feed de rescate** se muda a Clientela, y en Panorama queda el conteo con su acción. **Las tres consultas se quedan** (`getNegocioRevenue`/`getNegocioOccupancy`/`getNegocioStaffRecompra`): las sigue necesitando `AnalisisView`, solo dejan de pasarse a Panorama.
+    **Aceptación:** Panorama baja de sus 2,529 px lógicos actuales · **cero cambio de datos** (ningún número se mueve, ninguna consulta nueva) · Análisis y Clientela ganan exactamente lo que Panorama perdió · la prueba de muerte del código enterrado se mide como en dv3-6 (el diff de borrar debe ser indistinguible del piso de ruido).
+  - **P2 · Los incidentes suben a Panorama** ⚪ todo. `cabosCount` (citas pasadas sin resolver, ventana de 14 días) y el descuadre del corte viven hoy detrás de disclosures en `DashboardLayout`, o sea en la pestaña de CONFIGURACIÓN. Un cabo suelto es dinero sin atribuir y un descuadre es efectivo que no cuadra: las dos cosas más urgentes que hay, en el lugar menos urgente de la app. Suben a Panorama como bloque propio, **sin duplicar la resolución** (la acción sigue viviendo donde vive).
+  - **P3 · El esquema de la atribución + la medición, con el envío APAGADO** ⚪ todo. La campaña como fila de `agente_tareas` (estrenando el primitivo), la marca de atribución en la cita al agendarse, el precio de campaña **fuera de `services.price`**, la caducidad obligatoria, y los tres cubos del desenlace (invitados · reenvíos · **movimiento sin atribuir**, que es la canibalización). El criterio de éxito y su fecha de corte se fijan **antes** de ejecutar — `resultado` jsonb es el lugar, y la máquina ya obliga a llenarlo para pasar a `medida`. **Nada sale del local en este paso.**
+  - **P4 · Encender el envío** ⚪ todo · **BLOQUEADO por dos cosas que no son código:** `S7-NOTIF-01` (deploy del despachador, de Gabriel) y `S9-AG-03` (topes de frecuencia por persona). Incluye la plantilla de marketing aprobada por Meta (fuera de la ventana de 24 h solo salen plantillas aprobadas) y el guard de consentimiento: los clientes anteriores al 2026-05-20 tienen `consent_at` en NULL, sin backfill por decisión explícita. El riel de "a quién NO se le escribe" **ya existe y falla cerrado** (guard de baja por tipo de envío, S8-PER-01).
+
+- **S10-BOT-01 · El bot en entorno real: las dos deudas con nombre + el pase guiado por evidencia** ⚪ todo · **PROPUESTA, pedida por Gabriel el 2026-09-07** (*"es muy deficiente conversacionalmente para que funcione en un entorno real"*).
+  **Encuadre, porque "mejorar el bot" no es una tarea:** ya hubo un arco completo de calidad conversacional —**AUD-01…07f, 12 PRs** (los 5 críticos, la guía de estilo y las 6 de fase 2)— y dejó **dos deudas con nombre**, a propósito: el **refactor classifier-inyectable** (deuda #1 del backlog, adonde se difirieron `cache_control`, el system corto para micro-copy, la 2ª llamada redundante del multi y los "intents descartados") y **R4.5** (side-question unificada en todos los estados), que tiene su caso de prueba ya escrito: *"¿qué horarios tiene Carlos mañana?"* debe listar los huecos reales de Carlos, no el horario del negocio.
+  **Y lo incómodo, dicho en voz alta:** el diagnóstico "deficiente en entorno real" **no se puede verificar hoy porque no hay entorno real** — `META_APP_SECRET` sigue sin configurarse (`S1-G-01` 🟡) y el censo del 2026-08-31 dice que todo es seed. La instrumentación para medirlo **ya existe** (`bot_logs` con `failure_reason` distinguiendo timeout/api/parse de un "no te entendí" genuino, agregado en AUD-07b) y **nunca se ha leído contra tráfico de verdad**.
+  **Alcance propuesto, en dos mitades:** **(a)** las dos deudas nombradas, ejecutables cuando se quiera porque no dependen de tráfico; **(b)** un pase de calidad **guiado por evidencia**, con disparador explícito: las primeras ~200 conversaciones reales leídas de `bot_logs`. Si Gabriel recuerda smokes concretos, anclarlos acá como casos de prueba — valen más que una auditoría nueva.
 
 ---
 
