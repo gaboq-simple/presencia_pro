@@ -36,6 +36,7 @@ import {
   getActiveConversations,
 } from '@/app/staff/assistant-actions';
 import ConversationList from './ConversationList';
+import ClientesModule from './ClientesModule';
 import PanoramaTimeline, {
   type MoveState,
   type WalkinRequest,
@@ -47,7 +48,6 @@ import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
 import CobroFields from './CobroFields';
 import CajaModule from './CajaModule';
 import ModuleBar, { type ModuloId } from './ModuleBar';
-import ModuloPendiente from './ModuloPendiente';
 import { listarCabos, type CaboSuelto } from '@/app/staff/cabos-actions';
 import type { Rail } from '@/lib/cobro';
 import {
@@ -228,7 +228,6 @@ export default function AssistantControlDesk({
   // Reusa los componentes existentes (ConversationList → ChatPanel), que se
   // autoabastecen vía server actions. Aquí solo abrimos/cerramos el sheet y
   // contamos las conversaciones en modo 'human' para el badge del botón.
-  const [showConversations, setShowConversations] = useState(false);
   const [humanCount, setHumanCount] = useState(0);
 
   // Polling cada 20s — refresca las citas del día sin recargar (cita nueva del bot,
@@ -934,16 +933,15 @@ export default function AssistantControlDesk({
           />
         )}
 
-        {/* CLIENTES — slot declarado, módulo en M6. Las dos piezas que necesita ya
-            están escritas y muertas: `searchCustomers` no tiene llamador y
-            `ClientProfileCard.tsx` no la monta ningún archivo. */}
-        {modulo === 'clientes' && (
-          <ModuloPendiente
-            titulo="Clientes"
-            descripcion="Buscar a una persona por nombre o teléfono, ver sus visitas, sus faltas y sus notas, sin salir del mostrador."
-            mientrasTanto="Hoy el cliente se busca al dar de alta la cita, desde el botón + Walk-in."
-          />
-        )}
+        {/* CLIENTES (M6) — el slot que M1 declaró vacío ahora monta las dos piezas
+            que llevaban meses escritas y muertas: `searchCustomers` y
+            `ClientProfileCard`. */}
+        {modulo === 'clientes' && <ClientesModule />}
+
+        {/* MENSAJES (M6) — deja de ser una hoja detrás de un botón del header y
+            pasa a ser un módulo. El botón del header ahora TRAE acá en vez de
+            abrir una hoja encima: una función, un lugar. */}
+        {modulo === 'mensajes' && <ConversationList />}
 
         {/* AGENDA — la mesa de control, idéntica en composición a la de antes:
             mismo header, mismos stats, mismo deck, mismo orden. Se queda inline y
@@ -1021,9 +1019,9 @@ export default function AssistantControlDesk({
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              {/* Conversaciones (handoff bot→humano) — abre ConversationList */}
+              {/* Conversaciones (handoff bot→humano) — lleva al módulo Mensajes */}
               <button
-                onClick={() => setShowConversations(true)}
+                onClick={() => setModulo('mensajes')}
                 aria-label="Conversaciones de WhatsApp"
                 className="relative flex items-center gap-1.5 rounded-pill border border-line px-3 py-1.5 text-sm font-medium text-ink-2 transition hover:bg-canvas active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-ink"
               >
@@ -1048,14 +1046,12 @@ export default function AssistantControlDesk({
                   </span>
                 )}
               </button>
-              {/* Buscar cliente → pieza aparte (searchCustomers), fuera del núcleo PR-5. */}
-              <button
-                disabled
-                title="Todavía no está listo"
-                className="cursor-not-allowed rounded-pill border border-line px-3 py-1.5 text-sm font-medium text-faint"
-              >
-                Buscar cliente
-              </button>
+              {/* El botón "Buscar cliente" vivió acá `disabled` desde PR-5 de
+                  S6-UI-02, con el título "Disponible en la próxima iteración",
+                  mientras `searchCustomers` y `ClientProfileCard` esperaban
+                  completas y sin llamador. M6 lo BORRA: la búsqueda es el módulo
+                  Clientes de la barra de abajo. Un control apagado no enseña nada
+                  y no se puede planear contra él. [fantasma intencional] */}
               <button
                 onClick={() => { setPendingAim(null); setSheetOpen(true); }}
                 disabled={walkin !== null}
@@ -1139,7 +1135,6 @@ export default function AssistantControlDesk({
       <ModuleBar
         active={modulo}
         onSelect={setModulo}
-        onAction={(id) => { if (id === 'mensajes') setShowConversations(true); }}
         mensajesBadge={humanCount}
       />
 
@@ -1274,15 +1269,6 @@ export default function AssistantControlDesk({
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Chat de conversaciones (handoff). ConversationList/ChatPanel usan z-20/z-30
-          internos; el wrapper crea un stacking context a z-[60] para quedar por
-          encima de la hoja de walk-in (z-40) y el toast (z-50) del desk. */}
-      {showConversations && (
-        <div className="relative z-[60]">
-          <ConversationList onClose={() => setShowConversations(false)} />
         </div>
       )}
 

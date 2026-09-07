@@ -51,7 +51,11 @@ const SLOTS: readonly Slot[] = [
   {
     id: 'mensajes',
     label: 'Mensajes',
-    kind: 'accion',
+    // M6: dejó de ser 'accion'. Nació así en M1 para no shippear un slot vacío
+    // —abría la hoja de conversaciones que ya funcionaba— y ahora que la lista
+    // es un módulo de verdad, la barra NO cambió de forma. Era el punto de haber
+    // declarado los cuatro slots desde el primer día.
+    kind: 'modulo',
     icon: (
       <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 0 1 .778-.332 48.294 48.294 0 0 0 5.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
     ),
@@ -70,8 +74,8 @@ type Props = {
   active: ModuloId;
   /** Slots 'modulo': cambia el módulo activo. */
   onSelect: (id: ModuloId) => void;
-  /** Slots 'accion': dispara sin cambiar de módulo. */
-  onAction: (id: ModuloId) => void;
+  /** Slots 'accion': dispara sin cambiar de módulo. Hoy ningún slot lo usa. */
+  onAction?: (id: ModuloId) => void;
   /** Conversaciones en manos humanas — el mismo número que el header ya mostraba. */
   mensajesBadge?: number;
 };
@@ -97,7 +101,7 @@ export default function ModuleBar({
             <li key={s.id} className="flex-1">
               <button
                 type="button"
-                onClick={() => (s.kind === 'modulo' ? onSelect(s.id) : onAction(s.id))}
+                onClick={() => (s.kind === 'modulo' ? onSelect(s.id) : onAction?.(s.id))}
                 aria-current={isActive ? 'page' : undefined}
                 className={`relative flex w-full flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-ink ${
                   isActive ? 'text-teal-ink' : 'text-faint'

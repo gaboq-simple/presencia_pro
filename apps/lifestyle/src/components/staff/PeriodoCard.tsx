@@ -22,7 +22,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getPeriodo } from '@/app/staff/caja-actions';
 import type { ResumenPeriodo, RangoId } from '@/lib/periodo';
 
@@ -46,16 +46,22 @@ export default function PeriodoCard({ timezone, reloadKey }: Props): React.React
   const [datos, setDatos]   = useState<Resumen | null>(null);
   const [error, setError]   = useState<string | null>(null);
 
-  const recargar = useCallback(async () => {
-    try {
-      setDatos(await getPeriodo(rango));
-      setError(null);
-    } catch {
-      setError('No se pudo leer el período');
-    }
-  }, [rango]);
-
-  useEffect(() => { void recargar(); }, [recargar, reloadKey]);
+  // El guard `vivo` no es ceremonia: cambiar de semana a mes dispara una lectura
+  // nueva antes de que vuelva la anterior, y sin él la respuesta vieja pisaría a
+  // la nueva. De paso satisface a `react-hooks/set-state-in-effect`, que marcaba
+  // el `setError(null)` de la versión anterior por no colgar de un `await`.
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      try {
+        const r = await getPeriodo(rango);
+        if (vivo) { setDatos(r); setError(null); }
+      } catch {
+        if (vivo) setError('No se pudo leer el período');
+      }
+    })();
+    return () => { vivo = false; };
+  }, [rango, reloadKey]);
 
   // La barra más alta define la escala. Si todo es cero, no se dibuja nada — una
   // escala sobre cero pintaría barras iguales que sugieren actividad que no hubo.

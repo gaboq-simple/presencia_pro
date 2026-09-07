@@ -1,12 +1,18 @@
 // ─── ConversationList ──────────────────────────────────────────────────────────
-// Sheet de conversaciones activas del negocio.
+// Lista de conversaciones activas del negocio. **Es el módulo Mensajes** (M6):
+// hasta acá vivía como bottom sheet detrás de un botón del header, o sea un
+// módulo funcional completo escondido. Perdió su chrome de hoja —backdrop,
+// posición fija, botón de cerrar— y ahora llena su contenedor.
+//
+// Se BORRÓ el chrome en vez de esconderlo detrás de un `inline`: dos formas de
+// mostrar lo mismo son dos cosas que aprender, y el header ahora lleva al módulo
+// en vez de abrir una hoja encima. Una función, un lugar.
 //
 // Responsabilidades:
 //   - Carga y lista bot_conversations via getActiveConversations() (server action).
 //   - Polling cada 10s para detectar cambios de sesión nuevos.
 //   - Orden: human primero (en amarillo), paused (gris), bot (verde).
-//   - Click en fila → abre ChatPanel como overlay encima de este sheet.
-//   - Patrón de modal: mismo que NewAppointmentForm (fixed bottom sheet).
+//   - Click en fila → abre ChatPanel como overlay encima de la lista.
 
 'use client';
 
@@ -17,9 +23,7 @@ import ChatPanel from './ChatPanel';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-type Props = {
-  onClose: () => void;
-};
+type Props = Record<string, never>;
 
 // ─── Config visual ────────────────────────────────────────────────────────────
 
@@ -70,7 +74,7 @@ function timeAgo(isoStr: string): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function ConversationList({ onClose }: Props) {
+export default function ConversationList(_: Props) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading]             = useState(true);
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
@@ -93,7 +97,7 @@ export default function ConversationList({ onClose }: Props) {
     return () => clearInterval(interval);
   }, [load]);
 
-  // ── ChatPanel abierto — overlay encima de este sheet ──────────────────────
+  // ── ChatPanel abierto — overlay encima de la lista ────────────────────────
   if (selectedPhone !== null) {
     const conv = conversations.find((c) => c.customerPhone === selectedPhone);
     return (
@@ -101,7 +105,9 @@ export default function ConversationList({ onClose }: Props) {
         customerPhone={selectedPhone}
         initialSessionMode={conv?.sessionMode ?? 'bot'}
         onBack={() => setSelectedPhone(null)}
-        onClose={onClose}
+        // Ya no hay hoja que cerrar: el módulo se deja con la barra de abajo, así
+        // que "cerrar" y "volver a la lista" son el mismo gesto.
+        onClose={() => setSelectedPhone(null)}
         onModeChange={() => void load()}
       />
     );
@@ -111,49 +117,22 @@ export default function ConversationList({ onClose }: Props) {
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-20 bg-ink/30"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Sheet */}
-      <div
-        className="fixed bottom-0 left-0 right-0 z-30 mx-auto max-w-xl rounded-t-card border border-line bg-card shadow-hero"
-        style={{ maxHeight: '80vh' }}
-      >
-        {/* Handle */}
-        <div className="mx-auto mt-3 h-1 w-10 rounded-pill bg-line-2" />
-
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div>
-            <h2 className="text-base font-semibold text-ink">Conversaciones</h2>
-            {!loading && (
-              <p className="text-xs text-faint">
-                {humanCount > 0
-                  ? `${humanCount} bajo control humano · ${conversations.length} total`
-                  : `${conversations.length} conversacion${conversations.length !== 1 ? 'es' : ''}`}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-faint hover:text-ink-2"
-            aria-label="Cerrar"
-          >
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-            </svg>
-          </button>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-card shadow-card">
+        <div className="border-b border-line px-4 py-3">
+          <h2 className="text-base font-semibold text-ink">Mensajes</h2>
+          {!loading && (
+            <p className="text-xs text-faint">
+              {humanCount > 0
+                ? `${humanCount} en manos de una persona · ${conversations.length} en total`
+                : `${conversations.length} conversacion${conversations.length !== 1 ? 'es' : ''}`}
+            </p>
+          )}
         </div>
 
         {/* Lista */}
-        <div
-          className="overflow-y-auto pb-8"
-          style={{ maxHeight: 'calc(80vh - 80px)' }}
-        >
+        {/* La altura la pone el contenedor del módulo, no un `80vh` fijo: el
+            shell ya reserva el espacio entre el header y la barra. */}
+        <div className="min-h-0 flex-1 overflow-y-auto pb-4">
           {loading ? (
             <p className="px-4 py-8 text-center text-sm text-faint">Cargando…</p>
           ) : conversations.length === 0 ? (
