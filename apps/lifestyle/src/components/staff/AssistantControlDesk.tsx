@@ -45,8 +45,9 @@ import PanoramaTimeline, {
 import AssistantVerticalCalendar from './AssistantVerticalCalendar';
 import ActionQueue, { type LateItem, type NextUpItem } from './ActionQueue';
 import CobroFields from './CobroFields';
-import CajaMovimientos from './CajaMovimientos';
-import CorteCard from './CorteCard';
+import CajaModule from './CajaModule';
+import ModuleBar, { type ModuloId } from './ModuleBar';
+import ModuloPendiente from './ModuloPendiente';
 import { listarCabos, type CaboSuelto } from '@/app/staff/cabos-actions';
 import type { Rail } from '@/lib/cobro';
 import {
@@ -168,12 +169,6 @@ function fmtHora(min: number): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 /** Fecha corta del cabo en la tz del negocio ("mar 5 · 13:00"). */
-function fmtFechaCabo(ms: number, tz: string): string {
-  return new Intl.DateTimeFormat('es-MX', {
-    timeZone: tz, weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(new Date(ms));
-}
-
 export default function AssistantControlDesk({
   businessId,
   date,
@@ -830,6 +825,18 @@ export default function AssistantControlDesk({
   // mesa es client component, así que el conteo viene por server action propia
   // (assistant-actions.ts no se toca: los cabos viven en su módulo).
   const [cabos, setCabos] = useState<{ total: number; lista: CaboSuelto[] } | null>(null);
+
+  // ── Módulo activo (M1 de S10-ASIS-01) ──────────────────────────────────────
+  // Vive ACÁ y no dentro de cada módulo, igual que el estado del día: este
+  // componente sigue siendo el dueño único de `appointments`, del polling y de
+  // `date`, y los módulos son tontos. Si cada uno montara su propio estado, el
+  // mostrador vería dos verdades del mismo día — que es justo lo que la capa de
+  // dinero existió para volver imposible.
+  //
+  // Cambiar de módulo NO desmonta el estado ni dispara una consulta: es un
+  // condicional de render sobre datos que ya están en memoria. Por eso volver a
+  // Agenda conserva el día y la ventana temporal del panorama.
+  const [modulo, setModulo] = useState<ModuloId>('agenda');
   useEffect(() => {
     let vivo = true;
     void listarCabos().then((r) => { if (vivo) setCabos(r); });
@@ -897,55 +904,44 @@ export default function AssistantControlDesk({
       (a) => `Cita de ${a.customer?.name ?? 'cliente'} cancelada`);
 
   return (
-    <div className="min-h-dvh bg-canvas bg-grid text-ink">
-      <div className="mx-auto flex min-h-dvh max-w-[1400px] flex-col gap-3 p-3 sm:p-4">
-        {/* Cabos sueltos (D3) — lo pasado sin resolver se VE. Una cita sin cerrar
-            no suma al cobrado ni cuenta como falta: se evapora del cuadre. Acá se
-            resuelve inline con las mismas actions de siempre. */}
-        {cabos && cabos.total > 0 && (
-          <details className="rounded-card border border-amber-border bg-amber-tint px-4 py-3 text-sm">
-            <summary className="cursor-pointer font-semibold text-amber">
-              {cabos.total === 1 ? '1 cita sin cerrar' : `${cabos.total} citas sin cerrar`}
-              <span className="ml-2 font-normal text-ink-2">· de los últimos 14 días</span>
-            </summary>
-            <ul className="mt-3 space-y-2">
-              {cabos.lista.slice(0, 8).map((c) => (
-                <li key={c.id} className="flex items-center justify-between gap-3 border-t border-line pt-2">
-                  <span className="min-w-0 flex-1 truncate text-ink">
-                    {c.cliente ?? 'Sin cliente'}
-                    <span className="ml-2 text-xs tabular-nums text-ink-2">{fmtFechaCabo(c.startsAtMs, timezone)}</span>
-                    {c.llego && <span className="ml-2 text-xs text-teal-ink">llegó</span>}
-                  </span>
-                  <span className="flex shrink-0 gap-2">
-                    <button
-                      onClick={() => handleComplete(c.id)}
-                      className="min-h-[36px] rounded-lg bg-teal-ink px-3 text-xs font-semibold text-card"
-                    >
-                      Terminó
-                    </button>
-                    <button
-                      onClick={() => void handleNoShow(c.id)}
-                      className="min-h-[36px] rounded-lg border border-line bg-card px-3 text-xs font-semibold text-ink-2"
-                    >
-                      No vino
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </details>
+    <div className="flex h-dvh flex-col bg-canvas bg-grid text-ink">
+      {/* Zona de módulos. `min-h-0` + `flex-1`: el módulo activo recibe la altura
+          que sobra y resuelve su propio scroll — Agenda no scrollea (su deck ya
+          tiene scroll interno), Caja sí. La barra de abajo NUNCA se superpone al
+          contenido: es un hermano en el flujo, no un `fixed`. */}
+      <div className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 flex-col gap-3 p-3 sm:p-4">
+        {/* CAJA — cabos + movimientos + corte, mudados tal cual desde acá arriba
+            (M1). La mudanza es el paso: el orden vertical de la vista vieja
+            ponía el dinero encima de la agenda, o sea lo que se toca diez veces
+            al día encima de lo que se toca doscientas. */}
+        {modulo === 'caja' && (
+          <CajaModule
+            date={date}
+            timezone={timezone}
+            cabos={cabos}
+            onComplete={handleComplete}
+            onNoShow={handleNoShow}
+          />
         )}
 
-        {/* Caja del día (D4) — arriba de la mesa, junto a los cabos: los dos son
-            bloques de dinero que NO son la agenda del día. */}
-        <CajaMovimientos date={date} timezone={timezone} />
+        {/* CLIENTES — slot declarado, módulo en M6. Las dos piezas que necesita ya
+            están escritas y muertas: `searchCustomers` no tiene llamador y
+            `ClientProfileCard.tsx` no la monta ningún archivo. */}
+        {modulo === 'clientes' && (
+          <ModuloPendiente
+            titulo="Clientes"
+            descripcion="Buscar a una persona por nombre o teléfono, ver sus visitas, sus faltas y sus notas, sin salir del mostrador."
+            mientrasTanto="Hoy el cliente se busca al dar de alta la cita, desde el botón + Walk-in."
+          />
+        )}
 
-        {/* El corte (D5) — el cierre del día, debajo de los movimientos porque
-            eso es lo que pasa: primero se registra lo del día, al final se
-            cuenta. Se auto-oculta si el día que se mira no es hoy. */}
-        <CorteCard date={date} timezone={timezone} />
-
-        {/* ── Tarjeta de la mesa de control ── */}
+        {/* AGENDA — la mesa de control, idéntica en composición a la de antes:
+            mismo header, mismos stats, mismo deck, mismo orden. Se queda inline y
+            no se extrae a un archivo propio a propósito: de las ~1,300 líneas de
+            este componente solo ~170 son el markup de la mesa, así que sacarlo
+            costaría ~30 props y no movería la aguja de la modularidad, que está
+            en el shell y en el módulo de Caja. */}
+        {modulo === 'agenda' && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-card shadow-card">
           {/* ── Header ── */}
           <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3">
@@ -1120,7 +1116,22 @@ export default function AssistantControlDesk({
             />
           </div>
         </div>
+        )}
       </div>
+
+      {/* ── Barra de módulos (M1) ──────────────────────────────────────────────
+          Los CUATRO slots desde el primer día (decisión de Gabriel, 2026-09-06):
+          una barra que crece de 2 a 4 mueve el piso bajo el pulgar de alguien que
+          ya aprendió dónde tocar. Mensajes es un slot de ACCIÓN, no un módulo
+          vacío: abre la misma hoja de conversaciones que el header, así que nace
+          alcanzable y en M6 se convierte en módulo sin cambiar la forma de la
+          barra. */}
+      <ModuleBar
+        active={modulo}
+        onSelect={setModulo}
+        onAction={(id) => { if (id === 'mensajes') setShowConversations(true); }}
+        mensajesBadge={humanCount}
+      />
 
       {/* Hoja de captura del walk-in (mínima: nombre + tel + servicio) */}
       {sheetOpen && (

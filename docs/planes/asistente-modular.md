@@ -1,8 +1,10 @@
 # El Asistente modular — Agenda · Caja · los bloques escondidos
 
-> **Estado:** propuesta. Aprobada la ola por Gabriel el 2026-09-06 (tarea de sprint,
-> diseño DESCONGELADO); **el corte en pasos y las cuatro decisiones abiertas del §9
-> siguen pendientes de su visto bueno.** Ningún paso arranca antes de eso.
+> **Estado:** **aprobada y en ejecución.** Gabriel aprobó la ola el 2026-09-06
+> (tarea de sprint, diseño DESCONGELADO) y **cerró las cuatro decisiones del §10 el
+> mismo día**, las cuatro como estaban recomendadas: los **4 slots** declarados
+> desde M1 · el corte **sigue ciego** · el asistente **sí ve el período** · el
+> barbero **no** hereda la barra. En ejecución: **M1**.
 >
 > **Qué es.** La vista del Asistente deja de ser una pila vertical y pasa a ser un
 > shell de módulos. Dos se construyen ahora —**Agenda** y **Caja**—, dos que hoy
@@ -253,7 +255,16 @@ al inicio del paso y prohibido re-sembrar entre el "antes" y el "después".
 
 | Paso | Qué hace | Aceptación dura |
 |---|---|---|
-| **M1 · El shell de módulos** | Barra de módulos, **Agenda por defecto**. Se MUEVE lo que existe, cero features. El estado del día queda en un contenedor por ENCIMA de las pestañas: un solo `useState`, un solo polling, pestañas tontas. | **Dentro de Agenda: 0 píxeles de diferencia.** Si un chip se movió, el paso hizo algo que no le tocaba. Cambiar de módulo y volver **no re-consulta** ni pierde la ventana temporal. |
+| **M1 · El shell de módulos** | Barra de módulos, **Agenda por defecto**. Se MUEVE lo que existe, cero features. El estado del día queda en un contenedor por ENCIMA de las pestañas: un solo `useState`, un solo polling, pestañas tontas. | **La mesa de control es idéntica en composición** (mismo header, mismos stats, mismo deck, mismo orden). Cambiar de módulo y volver **no re-consulta**, no pierde el día ni la ventana temporal. |
+
+> **Corrección al criterio de M1 (2026-09-06, antes de ejecutarlo).** El plan pedía
+> *"0 píxeles dentro de Agenda"* y **ese criterio era imposible de cumplir por
+> construcción**: M1 saca las tres tarjetas de dinero de la vista de Agenda y agrega una
+> barra de módulos, así que la altura disponible del deck cambia sí o sí. Sostenerlo tal
+> cual habría obligado a declararlo cumplido con una excusa, que es peor que corregirlo.
+> El criterio verificable es el de arriba: la **composición** de la mesa no cambia — mismo
+> header, mismos stats, mismo deck, mismo orden— y lo único que se mueve es lo que M1
+> existe para mover.
 | **M2 · Caja como módulo** | Movimientos + corte + cabos se mudan al módulo. Aparece "Cerrar el día" en su orden real (§8.1) y la lista de sin-riel accionable (§8.2). Absorbe **P8** de la auditoría. | El corte sigue siendo **imposible de espiar**: se re-corre la prueba mecánica de D5 (el esperado no aparece en el DOM antes de firmar). |
 | **M3 · Categorías finas** | Migración del CHECK + espejo en `lib/caja.ts` + chips ordenados por uso + montos frecuentes. | El camino de captura **no gana un solo paso**: se mide en taps, antes y después. Si sube de N a N+1, el paso se revierte. Sin backfill. |
 | **M4 · Los fijos** | `caja_fijos` + `fijo_id` + la cola de vencimientos + la lista con último monto derivado. | **Sondeo negativo:** con un fijo vencido y nadie confirmando, `caja_movimientos` **no gana ninguna fila**. Confirmar con monto distinto actualiza la plantilla y deja el movimiento con el monto real. |
@@ -268,21 +279,26 @@ adelantarse si se quiere una victoria rápida.
 
 ---
 
-## 10. Decisiones abiertas — no arranca M1 sin estas cuatro
+## 10. Las cuatro decisiones — CERRADAS por Gabriel (2026-09-06)
 
-1. **¿Cuántos módulos en la barra del primer corte: 2 (Agenda · Caja) o 4 (+ Mensajes ·
-   Clientes)?** Recomiendo declarar los 4 slots en M1 y encender Mensajes/Clientes en M6:
-   una barra que crece de 2 a 4 mueve el piso bajo el pulgar de alguien que ya aprendió
-   dónde tocar.
-2. **¿Se confirma que el corte sigue ciego?** Es la única regla del §3 que puede chocar con
-   *"que el módulo contable sea visible y útil"*. Mi recomendación es sostenerla sin
-   excepción, y decir en pantalla por qué protege a quien cuenta.
-3. **¿El asistente ve el período (§8.3)?** Recomiendo sí, acotado a caja + cobros. Es la
-   diferencia entre encargarle la caja y encargarle anotar en la caja.
-4. **La barra de módulos, ¿es solo del asistente, o el barbero también la hereda?** El
-   barbero ya tiene su propio shell de pestañas (Hoy · Semana · Cierre, rediseño RB
-   Paso 1). **Recomiendo NO unificarlos en esta ola** y anotarlo como pregunta abierta:
-   son dos oficios distintos y el barbero no maneja la caja del negocio.
+1. **Los 4 slots se declaran desde M1** (Agenda · Caja · Mensajes · Clientes), y
+   Mensajes/Clientes se encienden en M6. Razón: una barra que crece de 2 a 4 mueve el piso
+   bajo el pulgar de alguien que ya aprendió dónde tocar.
+2. **El corte sigue ciego, sin excepción.** El esperado no puede aparecer antes de contar en
+   ningún paso de la ola, y la pantalla dice por qué protege a quien cuenta.
+3. **El asistente sí ve el período**, acotado a caja + cobros. Es la diferencia entre
+   encargarle la caja y encargarle anotar en la caja.
+4. **El barbero NO hereda la barra.** Conserva su shell propio (Hoy · Semana · Cierre, del
+   rediseño RB Paso 1): son dos oficios distintos y el barbero no maneja la caja del negocio.
+
+**Consecuencia de (1) que hay que mirar de frente:** M1 va a mostrar **una pestaña sin
+módulo detrás** (Clientes), que es exactamente la enfermedad que este mismo plan le
+diagnostica al botón muerto de `AssistantControlDesk.tsx:1048`. Se acepta con dos
+mitigaciones y no con una promesa: **Mensajes NO nace muerta** —su slot abre la hoja de
+conversaciones que ya funciona, así que es la misma función alcanzable desde la barra, no
+una función nueva ni una vacía—, y **Clientes muestra un estado vacío que nombra su paso**
+(M6, registrado y barato) en vez de un `disabled` con tooltip vago. Un estado vacío que
+explica es información; un botón apagado no enseña nada.
 
 ---
 
